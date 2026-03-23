@@ -29,6 +29,9 @@ import open3d as o3d
 import sv_ttk
 
 try:
+    import matplotlib
+
+    matplotlib.use("TkAgg")
     import matplotlib.pyplot as plt
     from matplotlib.widgets import Button as MplButton
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
@@ -825,14 +828,22 @@ class AnalysisApp:
     def show_centerline_2d(self):
         if not self.centerline_result: return
         fname = os.path.basename(self.file_path) if self.file_path else ""
-        threading.Thread(target=plot_centerline_2d,
-                         args=(self.centerline_result, fname), daemon=True).start()
+        res = self.centerline_result
+
+        def _plot():
+            plot_centerline_2d(res, fname)
+
+        self.master.after(0, _plot)
 
     def show_centerline_3d(self):
         if not self.centerline_result: return
         fname = os.path.basename(self.file_path) if self.file_path else ""
-        threading.Thread(target=plot_centerline_3d,
-                         args=(self.centerline_result, fname), daemon=True).start()
+        res = self.centerline_result
+
+        def _plot():
+            plot_centerline_3d(res, fname)
+
+        self.master.after(0, _plot)
 
     def export_centerline(self):
         if not self.centerline_result: return
