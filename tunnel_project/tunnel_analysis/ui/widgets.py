@@ -31,6 +31,13 @@ class CollapsibleSection(QtWidgets.QWidget):
         self._step_word = step_word
         self._btn.setText(f"  {step_word} {self._step}: {title}  [{self._tag}]")
 
+    def retranslate_buttons(self, translate: Callable[[str], str]) -> None:
+        """Re-apply translated labels to sub-buttons (English source preserved)."""
+        for b in self._body.findChildren(QtWidgets.QPushButton):
+            src = b.property("source_label")
+            if src:
+                b.setText(f"  - {translate(src)}")
+
     @property
     def title_source(self) -> str:
         return self._title

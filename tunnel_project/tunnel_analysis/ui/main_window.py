@@ -60,6 +60,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._ai_tab_idx:   int = 5
         self._section_tab_idx: int = 3
         self._sections: List[CollapsibleSection] = []
+        self._hdr_title_src = "Tunnel Analysis v4.0"
+        self._hdr_desc_src  = "Select a structural analysis workflow from the sidebar."
 
         self.settings = QtCore.QSettings("SSL", "TunnelMonitoring")
         saved = self.settings.value("ui/language", "en")
@@ -435,8 +437,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.vp_layout.addWidget(lbl, 1)
 
     def _start_worker(self, key: str, cb: Callable[[], object]) -> None:
-        if self.worker_thread is not None: self._log("A workflow task is already running."); return
-        self._btns_enabled(False); self.sb_prog.setValue(10); self.sb_msg.setText(f"Running task: {key} ...")
+        if self.worker_thread is not None: self._log(_tr("A workflow task is already running.", self.current_language)); return
+        self._btns_enabled(False); self.sb_prog.setValue(10); self.sb_msg.setText(_tr("Running task: {key} ...", self.current_language).format(key=key))
         self.worker_thread = QtCore.QThread(self)
         self.worker = PipelineWorker(key, cb); self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)
@@ -454,13 +456,13 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     @QtCore.Slot(str, object)
     def _on_finished(self, key: str, result: object) -> None:
-        self.sb_prog.setValue(100); self.sb_msg.setText(f"Task completed: {key}"); self._dispatch(key, result); self._check_auto_pipeline(key)
+        self.sb_prog.setValue(100); self.sb_msg.setText(_tr("Task completed: {key}", self.current_language).format(key=key)); self._dispatch(key, result); self._check_auto_pipeline(key)
 
     @QtCore.Slot(str, str)
     def _on_failed(self, key: str, msg: str) -> None:
-        self.sb_prog.setValue(0); self.sb_msg.setText(f"Task failed: {key}")
+        self.sb_prog.setValue(0); self.sb_msg.setText(_tr("Task failed: {key}", self.current_language).format(key=key))
         self._log(f"[SYSTEM ERROR] {key}: {msg}")
-        QtWidgets.QMessageBox.critical(self, f"Task error: {key}", msg)
+        QtWidgets.QMessageBox.critical(self, _tr("Task error: {key}", self.current_language).format(key=key), msg)
 
     def _dispatch(self, key: str, result: object) -> None:
         if key == "1.1_import":
@@ -495,23 +497,25 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                     self.right_tabs.setCurrentIndex(i); break
             # Show result dialog
             if len(new_targets) == 0:
-                QtWidgets.QMessageBox.warning(self, "Target Detection",
-                    "No targets found." + chr(10) + chr(10) +
-                    "Try adjusting parameters:" + chr(10) +
-                    "- Lower intensity percentile (e.g. 90%)" + chr(10) +
-                    "- Lower min cluster points (e.g. 10)" + chr(10) +
-                    "- Lower min contrast ratio (e.g. 1.2)" + chr(10) +
-                    "- Check if file has intensity/color data")
-                self._log("Target detection: 0 targets found.")
+                _lang = self.current_language
+                QtWidgets.QMessageBox.warning(self, _tr("Target Detection", _lang),
+                    _tr("No targets found.", _lang) + chr(10) + chr(10) +
+                    _tr("Try adjusting parameters:", _lang) + chr(10) +
+                    _tr("- Lower intensity percentile (e.g. 90%)", _lang) + chr(10) +
+                    _tr("- Lower min cluster points (e.g. 10)", _lang) + chr(10) +
+                    _tr("- Lower min contrast ratio (e.g. 1.2)", _lang) + chr(10) +
+                    _tr("- Check if file has intensity/color data", _lang))
+                self._log(_tr("Target detection: 0 targets found.", self.current_language))
             else:
-                lines = [f"Found {len(new_targets)} target(s):"]
-                if n_sph: lines.append(f"  Sphere:       {n_sph}")
-                if n_chk: lines.append(f"  Checkerboard: {n_chk}")
-                if n_int: lines.append(f"  Intensity:    {n_int}")
-                if n_man: lines.append(f"  Manual:       {n_man}")
+                _lang = self.current_language
+                lines = [_tr("Found {n} target(s):", _lang).format(n=len(new_targets))]
+                if n_sph: lines.append(_tr("  Sphere:       {n}", _lang).format(n=n_sph))
+                if n_chk: lines.append(_tr("  Checkerboard: {n}", _lang).format(n=n_chk))
+                if n_int: lines.append(_tr("  Intensity:    {n}", _lang).format(n=n_int))
+                if n_man: lines.append(_tr("  Manual:       {n}", _lang).format(n=n_man))
                 lines.append("")
-                lines.append("Targets are shown in the table and marked on 3D viewport.")
-                QtWidgets.QMessageBox.information(self, "Target Detection Complete",
+                lines.append(_tr("Targets are shown in the table and marked on 3D viewport.", _lang))
+                QtWidgets.QMessageBox.information(self, _tr("Target Detection Complete", _lang),
                     chr(10).join(lines))
                 self._log(f"Target detection: {len(new_targets)} found "
                           f"(sphere={n_sph}, checkerboard={n_chk}, intensity={n_int})")
@@ -581,8 +585,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self.pt_label.setText(f"Points: {len(pts):,}"); self.sb_pts.setText(f"Points: {len(pts):,}")
             n_raw = stats.get('n_raw', len(pts)); n_rem = stats.get('n_removed', 0)
             self._log(f"SOR proposal: {n_raw:,} raw -> {len(pts):,} kept, {n_rem:,} noise detected (red).")
-            self._log("Review noise in 3D viewport, then use the noise panel to confirm or adjust.")
-            self.sb_msg.setText(f"SOR: {n_rem:,} noise points detected (red) | {len(pts):,} kept (blue)")
+            self._log(_tr("Review noise in 3D viewport, then use the noise panel to confirm or adjust.", self.current_language))
+            self.sb_msg.setText(_tr("SOR: {n_rem} noise points detected (red) | {n_kept} kept (blue)", self.current_language).format(n_rem=f"{n_rem:,}", n_kept=f"{len(pts):,}"))
             self._show_noise_panel()
 
         elif key == "2.4_semantic":
@@ -601,7 +605,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
         elif key == "3.1_anchor":
             pts = np.asarray(result, dtype=np.float64); self.context.registered_points = pts
-            self._render_pts(pts, "3.1 Target Anchor Matrix Applied", "#10B981"); self._log("Target anchor translation matrix applied.")
+            self._render_pts(pts, "3.1 Target Anchor Matrix Applied", "#10B981"); self._log(_tr("Target anchor translation matrix applied.", self.current_language))
 
         elif key == "3.2_icp":
             pts, rmse = result; self.context.registered_points = np.asarray(pts, dtype=np.float64)
@@ -707,9 +711,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self._log(f"Clearance 3D map: {n_viol} violation points detected")
             if n_viol > 0:
                 from PySide6.QtWidgets import QMessageBox
-                QMessageBox.warning(self, "Clearance Violation",
-                    f"{n_viol} points violate vehicle clearance envelope!" + chr(10) +
-                    "Red points shown on 3D viewport.")
+                _lang = self.current_language
+                QMessageBox.warning(self, _tr("Clearance Violation", _lang),
+                    _tr("{n} points violate vehicle clearance envelope!", _lang).format(n=n_viol) + chr(10) +
+                    _tr("Red points shown on 3D viewport.", _lang))
         elif key == "5.7_sections":
             sections: List[SectionGeometry] = result; self.context.sections = sections
             self.section_widget.set_sections(sections, profile=self.context.tunnel_profile, vl_box_w=self._sp_vl_w.value(), vl_box_h=self._sp_vl_h.value(), vl_cir_r=self._sp_vl_r.value())
@@ -731,12 +736,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                         vl_box_h=self._sp_vl_h.value(),
                         vl_cir_r=self._sp_vl_r.value())
                     self.section_widget.set_ref_sections(ref_secs)
-                    self._log("T0 reference sections loaded for overlay.")
+                    self._log(_tr("T0 reference sections loaded for overlay.", self.current_language))
                 except Exception as e:
                     self._log(f"T0 overlay: {e}")
             self.right_tabs.setCurrentIndex(self._section_tab_idx)
             valid = [s for s in sections if s.pts_2d is not None]
-            self._log("--- 2D technical cross-section analysis ---")
+            self._log(_tr("--- 2D technical cross-section analysis ---", self.current_language))
             self._log(f"  Total section slices analyzed along the alignment: {len(sections)}")
             if valid:
                 w1s = [s.W1 for s in valid if np.isfinite(s.W1)]
@@ -747,7 +752,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
         elif key == "6.1_epochs":
             t0, tn = result; self.context.scans = [t0, tn]; self.context.active_index = 1
-            self._log("Time-series point-cloud epochs loaded successfully.")
+            self._log(_tr("Time-series point-cloud epochs loaded successfully.", self.current_language))
 
         elif key == "6.2_plot":
             series = np.asarray(result, dtype=np.float64); self.context.time_series_plot = series
@@ -791,23 +796,24 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             return MAX_POINTS_DEFAULT
         import pathlib
         fname = pathlib.Path(fp).name
+        lang = self.current_language
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("Large File - Loading Options")
+        dlg.setWindowTitle(_tr("Large File - Loading Options", lang))
         dlg.setMinimumWidth(440)
         lay = QtWidgets.QVBoxLayout(dlg)
         lbl = QtWidgets.QLabel(
-            "Large file: " + fname + chr(10) +
-            "Total points: " + str(total) + chr(10) + chr(10) +
-            "Loading all points may cause memory issues." + chr(10) +
-            "Choose loading option:")
+            _tr("Large file: ", lang) + fname + chr(10) +
+            _tr("Total points: ", lang) + str(total) + chr(10) + chr(10) +
+            _tr("Loading all points may cause memory issues.", lang) + chr(10) +
+            _tr("Choose loading option:", lang))
         lbl.setStyleSheet("font-size:10pt;color:#0F172A;")
         lay.addWidget(lbl)
         grp = QtWidgets.QButtonGroup(dlg)
         opts = [
-            (f"5M points (recommended, fast)", 5_000_000),
-            (f"10M points (more detail)", 10_000_000),
-            (f"20M points (needs 2GB+ RAM)", 20_000_000),
-            (f"ALL {total:,} points (may crash)", total),
+            (_tr("5M points (recommended, fast)", lang), 5_000_000),
+            (_tr("10M points (more detail)", lang), 10_000_000),
+            (_tr("20M points (needs 2GB+ RAM)", lang), 20_000_000),
+            (_tr("ALL {n} points (may crash)", lang).format(n=f"{total:,}"), total),
         ]
         radios = []
         for label, val in opts:
@@ -816,7 +822,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             radios.append((rb, val))
         radios[0][0].setChecked(True)
         custom_lay = QtWidgets.QHBoxLayout()
-        rb_custom = QtWidgets.QRadioButton("Custom:")
+        rb_custom = QtWidgets.QRadioButton(_tr("Custom:", lang))
         grp.addButton(rb_custom)
         spin = QtWidgets.QSpinBox()
         spin.setRange(100_000, total); spin.setValue(5_000_000)
@@ -838,7 +844,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         """Open rough alignment dialog for manual pre-alignment."""
         self._hdr("Rough Alignment", "Manually adjust position/rotation before ICP.")
         if len(self.context.scans) < 2:
-            self._log("Load at least 2 scan stations first."); return
+            self._log(_tr("Load at least 2 scan stations first.", self.current_language)); return
         dlg = _RoughAlignDialog(self.context, self.reg_mod, self, self.plotter)
         dlg.exec()
         if dlg.result() == QtWidgets.QDialog.Accepted:
@@ -850,7 +856,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._hdr("Chain Register & Merge",
                   "Sequential chain registration S1->S2->S3 (reduces drift).")
         if len(self.context.scans) < 2:
-            self._log("Load at least 2 scan stations first."); return
+            self._log(_tr("Load at least 2 scan stations first.", self.current_language)); return
         self._log(f"Chain registering {len(self.context.scans)} stations...")
         self._start_worker("1.6_chain",
             lambda: self.reg_mod.register_and_merge_chain(self.context))
@@ -859,7 +865,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._hdr("Registration Error Heatmap",
                   "Visualize registration error between merged cloud and reference.")
         if self.context.registered_points is None or len(self.context.scans) < 2:
-            self._log("Run registration first."); return
+            self._log(_tr("Run registration first.", self.current_language)); return
         def _task():
             import numpy as _np
             from scipy.spatial import cKDTree as _kd
@@ -893,7 +899,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._hdr("Register & Merge Stations",
                   "Register all scan stations to reference and merge into one point cloud.")
         if len(self.context.scans) < 2:
-            self._log("Load at least 2 scan stations first (1.1 + 1.3)."); return
+            self._log(_tr("Load at least 2 scan stations first (1.1 + 1.3).", self.current_language)); return
         self._log(f"Registering {len(self.context.scans)} stations...")
         self._start_worker("1.4_merge", lambda: self.reg_mod.register_and_merge(self.context))
 
@@ -902,7 +908,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if self.plotter:
             self.plotter.clear(); self.plotter.set_background("#F8FAFC"); self.plotter.add_axes(color="#111827")
             self.plotter.show_bounds(color="#94A3B8", grid="front", location="outer", font_size=8); self.plotter.render()
-        self._log("3D viewport initialized and refreshed.")
+        self._log(_tr("3D viewport initialized and refreshed.", self.current_language))
 
     def _slot_2_1_voxel(self) -> None:
         self._hdr("Voxel Downsampling", "Homogenize point density using a voxel grid while preserving tunnel geometry.")
@@ -945,16 +951,16 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _slot_auto_pipeline(self) -> None:
         """Run full analysis pipeline in sequence: voxel -> SOR -> lining -> centerline -> params -> sections."""
         if self.context.active_scan is None:
-            QtWidgets.QMessageBox.warning(self, "Auto Pipeline",
-                "Please load a point cloud first (Step 1.1).")
+            QtWidgets.QMessageBox.warning(self, _tr("Auto Pipeline", self.current_language),
+                _tr("Please load a point cloud first (Step 1.1).", self.current_language))
             return
         self._hdr("Auto Pipeline", "Running full analysis pipeline automatically...")
         self._log("=" * 50)
-        self._log("AUTO PIPELINE STARTED")
+        self._log(_tr("AUTO PIPELINE STARTED", self.current_language))
         self._log("=" * 50)
         if hasattr(self, "_auto_btn"):
             self._auto_btn.setEnabled(False)
-            self._auto_btn.setText("Running pipeline...")
+            self._auto_btn.setText(_tr("Running pipeline...", self.current_language))
         self._auto_step = 0
         self._auto_steps = [
             ("2.1_voxel",      lambda: self.pre_mod.voxel_downsample(self.context),
@@ -995,22 +1001,22 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         total = len(self._auto_steps)
         pct = int(self._auto_step / total * 100)
         self.sb_prog.setValue(pct)
-        step_label = f"[{self._auto_step+1}/{total}] {msg}"
+        step_label = f"[{self._auto_step+1}/{total}] " + _tr(msg, self.current_language)
         self._log(step_label)
         self.sb_msg.setText(step_label)
         if hasattr(self, "_auto_btn"):
-            self._auto_btn.setText(f"Running... {pct}%  ({self._auto_step+1}/{total})")
+            self._auto_btn.setText(_tr("Running... {pct}%  ({cur}/{total})", self.current_language).format(pct=pct, cur=self._auto_step+1, total=total))
         self._start_worker(key, task)
 
     def _on_auto_pipeline_done(self) -> None:
         if hasattr(self, "_auto_btn"):
             self._auto_btn.setEnabled(True)
-            self._auto_btn.setText("AUTO PIPELINE  (1-click full analysis)")
+            self._auto_btn.setText(_tr("AUTO PIPELINE  (1-click full analysis)", self.current_language))
         self._log("=" * 50)
-        self._log("AUTO PIPELINE COMPLETE")
+        self._log(_tr("AUTO PIPELINE COMPLETE", self.current_language))
         p = self.context.parameters
         if p:
-            self._log("--- Results Summary ---")
+            self._log(_tr("--- Results Summary ---", self.current_language))
             for k, v in p.items():
                 if isinstance(v, (int, float)) and np.isfinite(float(v)):
                     self._log(f"  {k}: {v:.3f}")
@@ -1019,16 +1025,17 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self._log(f"  WARNING: {n_viol} clearance violation(s) detected!")
         self._log("=" * 50)
         self.right_tabs.setCurrentIndex(self._section_tab_idx)
-        QtWidgets.QMessageBox.information(self, "Auto Pipeline Complete",
-            f"Pipeline finished successfully!\n\n"
-            f"Sections analyzed: {len(self.context.sections)}\n"
-            f"Clearance violations: {n_viol}\n\n"
-            f"Check the 2D Cross-Section tab for results.")
+        _lang = self.current_language
+        QtWidgets.QMessageBox.information(self, _tr("Auto Pipeline Complete", _lang),
+            _tr("Pipeline finished successfully!", _lang) + "\n\n" +
+            _tr("Sections analyzed: {n}", _lang).format(n=len(self.context.sections)) + "\n" +
+            _tr("Clearance violations: {n}", _lang).format(n=n_viol) + "\n\n" +
+            _tr("Check the 2D Cross-Section tab for results.", _lang))
 
     def _slot_target_detect(self) -> None:
         """Auto-detect targets with configurable parameters."""
         if self.context.active_scan is None:
-            self._log("Load a scan first."); return
+            self._log(_tr("Load a scan first.", self.current_language)); return
         dlg = _TargetDetectDialog(self.context.active_scan, self)
         if dlg.exec() != QtWidgets.QDialog.Accepted: return
         params = dlg.get_params()
@@ -1064,7 +1071,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _slot_target_manual(self) -> None:
         """Toggle manual target picking mode."""
         if self.plotter is None:
-            self._log("Load a point cloud first."); return
+            self._log(_tr("Load a point cloud first.", self.current_language)); return
         if self._manual_pick_mode:
             self._stop_manual_pick()
         else:
@@ -1095,8 +1102,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         except Exception as e:
             self._log(f"Pick mode error: {e}")
         self.sb_msg.setText(
-            "PICK MODE active — Click on target in 3D viewport | Click [+ Manual] again to exit")
-        self._log("Manual pick mode started. Click on target locations in 3D viewport.")
+            _tr("PICK MODE active — Click on target in 3D viewport | Click [+ Manual] again to exit", self.current_language))
+        self._log(_tr("Manual pick mode started. Click on target locations in 3D viewport.", self.current_language))
 
     def _stop_manual_pick(self) -> None:
         """Stop manual target picking mode."""
@@ -1108,7 +1115,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
             self.plotter.render()
-        self.sb_msg.setText("Pick mode stopped.")
+        self.sb_msg.setText(_tr("Pick mode stopped.", self.current_language))
         self._log(f"Manual pick mode stopped. Total targets: {len(self._targets)}")
 
     def _on_manual_target_pick(self, point) -> None:
@@ -1182,11 +1189,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _slot_target_match(self) -> None:
         """Auto-match targets between scan stations."""
         if len(self.context.scans) < 2:
-            self._log("Need at least 2 scan stations."); return
+            self._log(_tr("Need at least 2 scan stations.", self.current_language)); return
         src_t = [t for t in self._targets if t.scan_idx == 0]
         tgt_t = [t for t in self._targets if t.scan_idx == 1]
         if not src_t or not tgt_t:
-            self._log("Detect targets in both stations first."); return
+            self._log(_tr("Detect targets in both stations first.", self.current_language)); return
         matches = self.tgt_mod.match_targets(src_t, tgt_t, max_dist=5.0)
         self._refresh_target_table()
         self._log(f"Auto-matched {len(matches)} target pairs:")
@@ -1198,7 +1205,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         src_t = [t for t in self._targets if t.scan_idx == 0 and t.matched_id]
         tgt_t = [t for t in self._targets if t.scan_idx == 1 and t.matched_id]
         if len(src_t) < 3:
-            self._log("Need >= 3 matched target pairs. Run Auto Match first."); return
+            self._log(_tr("Need >= 3 matched target pairs. Run Auto Match first.", self.current_language)); return
         def _task():
             T, rmse, residuals = self.tgt_mod.register_by_targets(src_t, tgt_t)
             pts = self.context.working_points
@@ -1348,18 +1355,19 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 ec = f"{s.eccentricity:.1f}" if np.isfinite(s.eccentricity) else "-"
                 lines.append(f"{s.chainage:.2f}       | {h1}   | {w1}   | {ov}       | {ec}")
         if not lines:
-            self._log("No results to copy. Run analysis first."); return
+            self._log(_tr("No results to copy. Run analysis first.", self.current_language)); return
         text = chr(10).join(lines)
         QtWidgets.QApplication.clipboard().setText(text)
         self._log(f"Results copied to clipboard ({len(lines)} lines).")
-        QtWidgets.QMessageBox.information(self, "Copied",
-            f"Results copied to clipboard ({len(lines)} lines).")
+        QtWidgets.QMessageBox.information(self, _tr("Copied", self.current_language),
+            _tr("Results copied to clipboard ({n} lines).", self.current_language).format(n=len(lines)))
 
     def _slot_reset_pipeline(self) -> None:
         """Reset pipeline — clear all results, keep raw scans."""
-        reply = QtWidgets.QMessageBox.question(self, "Reset Pipeline",
-            "Clear all analysis results?" + chr(10) +
-            "(Raw scan data will be kept)",
+        _lang = self.current_language
+        reply = QtWidgets.QMessageBox.question(self, _tr("Reset Pipeline", _lang),
+            _tr("Clear all analysis results?", _lang) + chr(10) +
+            _tr("(Raw scan data will be kept)", _lang),
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
         if reply != QtWidgets.QMessageBox.Yes: return
         self.context.normalized_points  = None
@@ -1388,10 +1396,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.results_text.clear()
         self.pt_label.setText("Points: --")
         self.sb_pts.setText("Points: --")
-        self.sb_msg.setText("Pipeline reset. Raw scans preserved.")
+        self.sb_msg.setText(_tr("Pipeline reset. Raw scans preserved.", self.current_language))
         self.sb_prog.setValue(0)
         self._refresh_target_table()
-        self._log("Pipeline reset complete. Raw scans preserved.")
+        self._log(_tr("Pipeline reset complete. Raw scans preserved.", self.current_language))
 
     def _slot_4_3b_bspline(self) -> None:
         self._hdr("B-Spline C2 Centerline (PDF 3.4)", "Sliding-window curvature detection + B-spline C2 fit.")
@@ -1400,13 +1408,13 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _slot_4_5b_intensity_seams(self) -> None:
         self._hdr("Intensity Ring Seam Detection (PDF 3.3)", "Detect ring seams from LiDAR intensity derivative.")
         if self.context.active_scan is None or self.context.active_scan.intensity is None:
-            self._log("Intensity data required. Load a scan with intensity channel first."); return
+            self._log(_tr("Intensity data required. Load a scan with intensity channel first.", self.current_language)); return
         self._start_worker("4.5b_intensity_seams", lambda: self.seg_mod.detect_ring_seams_by_intensity(self.context))
 
     def _slot_5_3b_hausdorff(self) -> None:
         self._hdr("Hausdorff Heatmap T0→Tn (PDF 3.5)", "Surface distance heatmap between reference and current scan.")
         if len(self.context.scans) < 2:
-            self._log("Load at least 2 scans (T0 and Tn) first."); return
+            self._log(_tr("Load at least 2 scans (T0 and Tn) first.", self.current_language)); return
         ref = self.context.scans[0].points
         self._start_worker("5.3b_hausdorff", lambda: self.par_mod.generate_hausdorff_heatmap(self.context, ref))
 
@@ -1416,23 +1424,23 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _slot_4_2_iterative(self) -> None:
         self._hdr("Iterative Centerline Refinement", "Refine the tunnel axis using orthogonal section fitting.")
-        if self.context.centerline is None: self._log("Run Step 4.1 first."); return
+        if self.context.centerline is None: self._log(_tr("Run Step 4.1 first.", self.current_language)); return
         cl = self.context.centerline
         self._start_worker("4.2_iterative", lambda: self.geo_mod.extract_centerline_iterative(self.context, design_axis=cl, section_count=80, mu=0.03, max_iter=20))
 
     def _slot_4_3_bspline(self) -> None:
         self._hdr("B-Spline Centerline Smoothing", "Generate a smooth differentiable tunnel axis for sectioning.")
-        if self.context.centerline is None: self._log("Run Step 4.1 first."); return
+        if self.context.centerline is None: self._log(_tr("Run Step 4.1 first.", self.current_language)); return
         cl = self.context.centerline; self._start_worker("4.3_bspline", lambda: self.geo_mod.smooth_bspline(cl))
 
     def _slot_4_4_frenet(self) -> None:
         self._hdr("Gravity-Aligned Section Frames", "Generate Frenet N-B section frames for orthogonal cross-sections.")
-        if not self.context.frenet_frames: self._log("Run Step 4.1 first."); return
+        if not self.context.frenet_frames: self._log(_tr("Run Step 4.1 first.", self.current_language)); return
         fr = self.context.frenet_frames; self._start_worker("4.4_frenet", lambda: self.geo_mod.generate_frenet_planes(fr))
 
     def _slot_4_5_seams(self) -> None:
         self._hdr("Ring Seam Detection", "Segment tunnel rings and identify seam transition locations.")
-        if not self.context.frenet_frames: self._log("Run Step 4.1 first."); return
+        if not self.context.frenet_frames: self._log(_tr("Run Step 4.1 first.", self.current_language)); return
         def _task():
             rings = self.seg_mod.segment_rings(self.context); cl = self.context.centerline; frs = self.context.frenet_frames
             n = min(len(rings), len(cl) if cl is not None else 0, len(frs))
@@ -1454,7 +1462,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _slot_5_4_polar(self) -> None:
         self._hdr("Polar Radial Deformation", "Map radial deformation by angle around each section.")
-        if not self.context.frenet_frames or self.context.working_points is None: self._log("Complete Steps 2 and 4 before running this analysis."); return
+        if not self.context.frenet_frames or self.context.working_points is None: self._log(_tr("Complete Steps 2 and 4 before running this analysis.", self.current_language)); return
         self._start_worker("5.4_polar", lambda: self.par_mod.generate_polar_deformation_map(self.context, design_radius_m=3.0, num_bins=72))
 
     def _slot_5_5_ovality(self) -> None:
@@ -1469,7 +1477,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._hdr("Clearance 3D Violation Map (PDF 3.6)",
                   "Highlight points violating vehicle clearance envelope on 3D viewport.")
         if not self.context.sections:
-            self._log("Run Step 5.7 first."); return
+            self._log(_tr("Run Step 5.7 first.", self.current_language)); return
         def _task():
             import numpy as _np
             pts = self.context.working_points
@@ -1491,7 +1499,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _slot_5_7_sections(self) -> None:
         self._hdr("Plot 2D Technical Section", "Display flat 2D engineering cross-sections with vehicle clearance limits.")
-        if not self.context.frenet_frames or self.context.working_points is None: self._log("Complete Steps 2 and 4 before running this analysis."); return
+        if not self.context.frenet_frames or self.context.working_points is None: self._log(_tr("Complete Steps 2 and 4 before running this analysis.", self.current_language)); return
         self.context.tunnel_profile = self._profile_combo.currentText()
         self._start_worker("5.7_sections", lambda: self.par_mod.compute_all_sections(self.context, vl_box_w=self._sp_vl_w.value(), vl_box_h=self._sp_vl_h.value(), vl_cir_r=self._sp_vl_r.value()))
 
@@ -1510,7 +1518,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _slot_8_1_csv(self) -> None:
         self._hdr("Export CSV", "Export section parameters to CSV file.")
         if not self.context.sections and not self.context.parameters:
-            self._log("Run parameter extraction first (Step 5)."); return
+            self._log(_tr("Run parameter extraction first (Step 5).", self.current_language)); return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save CSV", "tunnel_report.csv", "CSV Files (*.csv)")
         if not path: return
@@ -1519,7 +1527,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _slot_8_2_excel(self) -> None:
         self._hdr("Export Excel Report", "Export full analysis report with charts and warnings.")
         if not self.context.sections and not self.context.parameters:
-            self._log("Run parameter extraction first (Step 5)."); return
+            self._log(_tr("Run parameter extraction first (Step 5).", self.current_language)); return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save Excel Report", "tunnel_report.xlsx", "Excel Files (*.xlsx)")
         if not path: return
@@ -1544,14 +1552,14 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 raise RuntimeError(f"Dashboard error: {e}")
         t = threading.Thread(target=_launch, daemon=True)
         t.start()
-        self._log("Web dashboard starting at http://127.0.0.1:8050 ...")
+        self._log(_tr("Web dashboard starting at http://127.0.0.1:8050 ...", self.current_language))
         import time; time.sleep(1.5)
         import webbrowser; webbrowser.open("http://127.0.0.1:8050")
 
     def _slot_8_3_pdf(self) -> None:
         self._hdr("Export PDF Report", "Generate professional PDF inspection report.")
         if not self.context.sections and not self.context.parameters:
-            self._log("Run parameter extraction first (Step 5)."); return
+            self._log(_tr("Run parameter extraction first (Step 5).", self.current_language)); return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save PDF Report", "tunnel_report.pdf", "PDF Files (*.pdf)")
         if not path: return
@@ -1733,7 +1741,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             if sc.path:
                 import pathlib
                 name += f" — {pathlib.Path(sc.path).name}"
-            self.sb_msg.setText(f"Selected: {name}  |  {len(pts):,} pts  |  Color: {color}")
+            self.sb_msg.setText(_tr("Selected: {name}  |  {n} pts  |  Color: {color}", self.current_language).format(name=name, n=f"{len(pts):,}", color=color))
         except Exception as e:
             self._log(f"Station highlight error: {e}")
 
@@ -1811,7 +1819,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _set_station_reference(self, idx: int) -> None:
         """Move selected station to position 0 (reference)."""
-        if idx == 0: self._log("Already reference station."); return
+        if idx == 0: self._log(_tr("Already reference station.", self.current_language)); return
         sc = self.context.scans.pop(idx)
         self.context.scans.insert(0, sc)
         self.context.active_index = 0
@@ -1836,25 +1844,27 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         """Show station properties dialog."""
         sc = self.context.scans[idx]
         import pathlib
+        _lang = self.current_language
         lines = [
-            f"Station: {idx+1}" + (" (Reference)" if idx == 0 else ""),
-            f"File: {sc.path or 'N/A'}",
-            f"Points: {len(sc.points):,}",
-            f"Has intensity: {sc.intensity is not None}",
-            f"Has colors: {sc.colors_raw is not None}",
+            _tr("Station: {n}", _lang).format(n=idx+1) + (_tr(" (Reference)", _lang) if idx == 0 else ""),
+            _tr("File: {path}", _lang).format(path=sc.path or 'N/A'),
+            _tr("Points: {n}", _lang).format(n=f"{len(sc.points):,}"),
+            _tr("Has intensity: {v}", _lang).format(v=sc.intensity is not None),
+            _tr("Has colors: {v}", _lang).format(v=sc.colors_raw is not None),
         ]
         if sc.metadata:
             for k, v in sc.metadata.items():
                 lines.append(f"{k}: {v}")
         QtWidgets.QMessageBox.information(
-            self, f"Station {idx+1} Properties",
+            self, _tr("Station {n} Properties", _lang).format(n=idx+1),
             chr(10).join(lines))
 
     def _delete_station(self, idx: int) -> None:
         """Delete a scan station."""
+        _lang = self.current_language
         reply = QtWidgets.QMessageBox.question(
-            self, "Delete Station",
-            f"Delete Station {idx+1}?",
+            self, _tr("Delete Station", _lang),
+            _tr("Delete Station {n}?", _lang).format(n=idx+1),
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
         if reply != QtWidgets.QMessageBox.Yes: return
         self.context.scans.pop(idx)
@@ -1866,9 +1876,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _clear_all_stations(self) -> None:
         """Clear all loaded scan stations."""
+        _lang = self.current_language
         reply = QtWidgets.QMessageBox.question(
-            self, "Clear All Stations",
-            "Remove all loaded scan stations?",
+            self, _tr("Clear All Stations", _lang),
+            _tr("Remove all loaded scan stations?", _lang),
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
         if reply != QtWidgets.QMessageBox.Yes: return
         self.context.scans.clear()
@@ -1883,7 +1894,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             try: self.plotter.remove_actor(f"station_label_{i}")
             except Exception: pass
         if self.plotter: self.plotter.render()
-        self._log("All scan stations cleared.")
+        self._log(_tr("All scan stations cleared.", self.current_language))
 
     def _highlight_section(self, idx: int) -> None:
         """Highlight current section plane on 3D viewport."""
@@ -2003,14 +2014,14 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self._render_pts(all_pts, "2.2 Cancelled — All Points Kept", "#64748B")
             self.pt_label.setText(f"Points: {len(all_pts):,}")
             self.sb_pts.setText(f"Points: {len(all_pts):,}")
-        self._log("Noise removal cancelled — all points kept.")
+        self._log(_tr("Noise removal cancelled — all points kept.", self.current_language))
         self._noise_pts = None; self._kept_pts = None
         self._hide_noise_panel()
 
     def _start_add_noise_selection(self) -> None:
         """Enable picking mode — click points to mark as noise."""
         if self.plotter is None: return
-        self._log("Click on points in 3D viewport to mark as noise. Click again to deselect.")
+        self._log(_tr("Click on points in 3D viewport to mark as noise. Click again to deselect.", self.current_language))
         try:
             self.plotter.enable_point_picking(
                 callback=self._on_pick_noise,
@@ -2019,14 +2030,14 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 point_size=10,
                 use_picker=True,
                 pickable_window=False)
-            self.sb_msg.setText("Pick mode: click points to mark as noise. Press Q to exit.")
+            self.sb_msg.setText(_tr("Pick mode: click points to mark as noise. Press Q to exit.", self.current_language))
         except Exception as e:
             self._log(f"Pick mode: {e}")
 
     def _start_restore_selection(self) -> None:
         """Enable picking mode — click red points to restore them."""
         if self.plotter is None: return
-        self._log("Click on red noise points to restore them.")
+        self._log(_tr("Click on red noise points to restore them.", self.current_language))
         try:
             self.plotter.enable_point_picking(
                 callback=self._on_pick_restore,
@@ -2035,7 +2046,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 point_size=10,
                 use_picker=True,
                 pickable_window=False)
-            self.sb_msg.setText("Pick mode: click red points to restore. Press Q to exit.")
+            self.sb_msg.setText(_tr("Pick mode: click red points to restore. Press Q to exit.", self.current_language))
         except Exception as e:
             self._log(f"Pick mode: {e}")
 
@@ -2138,7 +2149,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.plotter.add_axes(color="#111827"); self.plotter.reset_camera(); self.plotter.render()
 
     def _hdr(self, title: str, desc: str) -> None:
-        self.task_title.setText(title); self.task_desc.setText(desc)
+        self._hdr_title_src = title; self._hdr_desc_src = desc
+        lang = self.current_language
+        self.task_title.setText(_tr(title, lang)); self.task_desc.setText(_tr(desc, lang))
 
     def _show_params(self, params: Dict[str, float]) -> None:
         self.results_text.appendPlainText("--- Parameters Extracted ---")
@@ -2181,16 +2194,14 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._auto_btn.setText(_tr("AUTO PIPELINE  (1-click full analysis)", lang))
         self._reset_btn.setText(_tr("Reset Pipeline", lang))
 
-        # Collapsible section titles
+        # Collapsible section titles + sub-button labels
         for sec in self._sections:
             sec.set_translation(_tr(sec.title_source, lang), step_word)
+            sec.retranslate_buttons(lambda t: _tr(t, lang))
 
-        # Header task title/description (only when still showing defaults)
-        if self.task_title.text() in ("Tunnel Analysis v4.0", _tr("Tunnel Analysis v4.0", "vi"), _tr("Tunnel Analysis v4.0", "ko")):
-            self.task_title.setText(_tr("Tunnel Analysis v4.0", lang))
-        default_desc = "Select a structural analysis workflow from the sidebar."
-        if self.task_desc.text() in (default_desc, _tr(default_desc, "vi"), _tr(default_desc, "ko")):
-            self.task_desc.setText(_tr(default_desc, lang))
+        # Header task title/description (retranslate from stored English source)
+        self.task_title.setText(_tr(self._hdr_title_src, lang))
+        self.task_desc.setText(_tr(self._hdr_desc_src, lang))
 
         # Right-panel tab titles
         tab_titles = ["Results Log", "Scan Database", "Stations", "Targets",
@@ -2240,33 +2251,34 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 class _RoughAlignDialog(QtWidgets.QDialog):
     def __init__(self, context, reg_mod, parent=None, plotter=None):
         super().__init__(parent)
-        self.setWindowTitle("Rough Alignment")
+        self._lang = getattr(parent, "current_language", "en")
+        self.setWindowTitle(_tr("Rough Alignment", self._lang))
         self.setMinimumWidth(480)
         self.context = context; self.reg_mod = reg_mod
         self.plotter = plotter; self.offset = [0.0,0.0,0.0]
         self.rotation = [0.0,0.0,0.0]; self.aligned_pts = None
         lay = QtWidgets.QVBoxLayout(self)
         lay.setSpacing(10); lay.setContentsMargins(16,16,16,16)
-        hdr = QtWidgets.QLabel("Adjust scan station position before ICP")
+        hdr = QtWidgets.QLabel(_tr("Adjust scan station position before ICP", self._lang))
         hdr.setStyleSheet("color:#0F172A;font-weight:bold;font-size:10pt;")
         lay.addWidget(hdr)
         st_lay = QtWidgets.QHBoxLayout()
-        st_lay.addWidget(QtWidgets.QLabel("Active station:"))
+        st_lay.addWidget(QtWidgets.QLabel(_tr("Active station:", self._lang)))
         self._station_combo = QtWidgets.QComboBox()
         for i, sc in enumerate(self.context.scans):
-            name = "Station " + str(i+1)
+            name = _tr("Station", self._lang) + " " + str(i+1)
             if sc.path:
                 import pathlib
                 name += " - " + pathlib.Path(sc.path).name
             self._station_combo.addItem(name)
         self._station_combo.setCurrentIndex(len(self.context.scans)-1)
         st_lay.addWidget(self._station_combo, 1); lay.addLayout(st_lay)
-        grp = QtWidgets.QGroupBox("Translation (m) & Rotation (deg)")
+        grp = QtWidgets.QGroupBox(_tr("Translation (m) & Rotation (deg)", self._lang))
         grp.setStyleSheet("QGroupBox{font-weight:600;color:#0F4C81;border:1px solid #CBD5E1;border-radius:6px;margin-top:8px;padding:8px;}")
         form = QtWidgets.QFormLayout(grp)
         self._sliders = {}
-        params = [("dx","dX (m)",-20,20,0),("dy","dY (m)",-20,20,0),("dz","dZ (m)",-20,20,0),
-                  ("rx","Rot X",-180,180,0),("ry","Rot Y",-180,180,0),("rz","Rot Z",-180,180,0)]
+        params = [("dx",_tr("dX (m)",self._lang),-20,20,0),("dy",_tr("dY (m)",self._lang),-20,20,0),("dz",_tr("dZ (m)",self._lang),-20,20,0),
+                  ("rx",_tr("Rot X",self._lang),-180,180,0),("ry",_tr("Rot Y",self._lang),-180,180,0),("rz",_tr("Rot Z",self._lang),-180,180,0)]
         for key,label,mn,mx,val in params:
             row = QtWidgets.QHBoxLayout()
             slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
@@ -2284,10 +2296,10 @@ class _RoughAlignDialog(QtWidgets.QDialog):
         self._rmse_lbl.setStyleSheet("color:#0F4C81;font-weight:bold;font-size:10pt;padding:6px;background:#EFF6FF;border-radius:4px;")
         lay.addWidget(self._rmse_lbl)
         btn_lay = QtWidgets.QHBoxLayout()
-        btn_reset = QtWidgets.QPushButton("Reset")
-        btn_icp   = QtWidgets.QPushButton("Run ICP")
-        btn_ok    = QtWidgets.QPushButton("Apply & Close")
-        btn_cancel= QtWidgets.QPushButton("Cancel")
+        btn_reset = QtWidgets.QPushButton(_tr("Reset", self._lang))
+        btn_icp   = QtWidgets.QPushButton(_tr("Run ICP", self._lang))
+        btn_ok    = QtWidgets.QPushButton(_tr("Apply & Close", self._lang))
+        btn_cancel= QtWidgets.QPushButton(_tr("Cancel", self._lang))
         for btn,color in [(btn_reset,"#64748B"),(btn_icp,"#7C3AED"),(btn_ok,"#047857"),(btn_cancel,"#DC2626")]:
             btn.setStyleSheet(f"QPushButton{{background:{color};color:white;border-radius:5px;padding:7px 16px;font-weight:700;border:none;}}")
         btn_reset.clicked.connect(self._reset); btn_icp.clicked.connect(self._run_icp)
@@ -2313,8 +2325,8 @@ class _RoughAlignDialog(QtWidgets.QDialog):
             ref = validate_xyz(self.context.scans[ref_idx].points)
             rmse = self.reg_mod._rmse(self.aligned_pts, ref)
             color = "#047857" if rmse < 2.0 else "#D97706" if rmse < 5.0 else "#DC2626"
-            status = "GOOD" if rmse < 2.0 else "CAUTION" if rmse < 5.0 else "POOR"
-            self._rmse_lbl.setText(f"RMSE vs Station {ref_idx+1}: {rmse:.3f} mm  [{status}]")
+            status = _tr("GOOD", self._lang) if rmse < 2.0 else _tr("CAUTION", self._lang) if rmse < 5.0 else _tr("POOR", self._lang)
+            self._rmse_lbl.setText(_tr("RMSE vs Station {n}: {rmse} mm  [{status}]", self._lang).format(n=ref_idx+1, rmse=f"{rmse:.3f}", status=status))
             self._rmse_lbl.setStyleSheet(f"color:{color};font-weight:bold;font-size:10pt;padding:6px;background:#F8FAFC;border-radius:4px;border:1px solid {color};")
 
     def _run_icp(self):
@@ -2327,8 +2339,8 @@ class _RoughAlignDialog(QtWidgets.QDialog):
             reg, rmse = self.reg_mod._icp(self.aligned_pts, ref)
             self.aligned_pts = reg
             color = "#047857" if rmse < 2.0 else "#D97706" if rmse < 5.0 else "#DC2626"
-            status = "GOOD" if rmse < 2.0 else "CAUTION" if rmse < 5.0 else "POOR"
-            self._rmse_lbl.setText(f"After ICP: {rmse:.3f} mm  [{status}]")
+            status = _tr("GOOD", self._lang) if rmse < 2.0 else _tr("CAUTION", self._lang) if rmse < 5.0 else _tr("POOR", self._lang)
+            self._rmse_lbl.setText(_tr("After ICP: {rmse} mm  [{status}]", self._lang).format(rmse=f"{rmse:.3f}", status=status))
             self._rmse_lbl.setStyleSheet(f"color:{color};font-weight:bold;font-size:10pt;padding:6px;background:#F8FAFC;border-radius:4px;border:1px solid {color};")
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()
@@ -2341,25 +2353,26 @@ class _RoughAlignDialog(QtWidgets.QDialog):
 class _TargetDetectDialog(QtWidgets.QDialog):
     def __init__(self, bundle, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Target Detection Settings")
+        self._lang = getattr(parent, "current_language", "en")
+        self.setWindowTitle(_tr("Target Detection Settings", self._lang))
         self.setMinimumWidth(420)
         lay = QtWidgets.QVBoxLayout(self)
         lay.setSpacing(10); lay.setContentsMargins(16,16,16,16)
         has_int = bundle.intensity is not None and float(bundle.intensity.max()) > 0
         n_pts = len(bundle.points)
-        info = QtWidgets.QLabel("Points: " + str(n_pts) + chr(10) + "Has intensity/color: " + str(has_int))
+        info = QtWidgets.QLabel(_tr("Points: ", self._lang) + str(n_pts) + chr(10) + _tr("Has intensity/color: ", self._lang) + str(has_int))
         info.setStyleSheet("background:#F0FDF4;border:1px solid #86EFAC;border-radius:4px;padding:6px;color:#166534;font-size:9pt;")
         lay.addWidget(info)
         if not has_int:
-            warn = QtWidgets.QLabel("No intensity/color data - sphere and flat detection only.")
+            warn = QtWidgets.QLabel(_tr("No intensity/color data - sphere and flat detection only.", self._lang))
             warn.setStyleSheet("background:#FEF3C7;border:1px solid #FCD34D;border-radius:4px;padding:6px;color:#92400E;font-size:9pt;")
             lay.addWidget(warn)
-        grp = QtWidgets.QGroupBox("Detection Types")
+        grp = QtWidgets.QGroupBox(_tr("Detection Types", self._lang))
         grp.setStyleSheet("QGroupBox{font-weight:600;color:#065F46;border:1px solid #A7F3D0;border-radius:6px;margin-top:8px;padding:8px;}")
         g_lay = QtWidgets.QVBoxLayout(grp)
-        self._chk_sphere = QtWidgets.QCheckBox("Sphere targets (RANSAC sphere fitting)")
-        self._chk_flat   = QtWidgets.QCheckBox("Flat / Checkerboard targets (plane + FFT)")
-        self._chk_int    = QtWidgets.QCheckBox("Intensity / Color targets (high-reflectance)")
+        self._chk_sphere = QtWidgets.QCheckBox(_tr("Sphere targets (RANSAC sphere fitting)", self._lang))
+        self._chk_flat   = QtWidgets.QCheckBox(_tr("Flat / Checkerboard targets (plane + FFT)", self._lang))
+        self._chk_int    = QtWidgets.QCheckBox(_tr("Intensity / Color targets (high-reflectance)", self._lang))
         self._chk_sphere.setChecked(True)
         self._chk_flat.setChecked(True)
         self._chk_int.setChecked(has_int)
@@ -2367,7 +2380,7 @@ class _TargetDetectDialog(QtWidgets.QDialog):
         for chk in [self._chk_sphere, self._chk_flat, self._chk_int]:
             g_lay.addWidget(chk)
         lay.addWidget(grp)
-        prm = QtWidgets.QGroupBox("Parameters")
+        prm = QtWidgets.QGroupBox(_tr("Parameters", self._lang))
         prm.setStyleSheet("QGroupBox{font-weight:600;color:#065F46;border:1px solid #A7F3D0;border-radius:6px;margin-top:8px;padding:8px;}")
         p_lay = QtWidgets.QFormLayout(prm)
         self._sp_r_min = QtWidgets.QDoubleSpinBox()
@@ -2384,13 +2397,13 @@ class _TargetDetectDialog(QtWidgets.QDialog):
         self._sp_int_pct.setRange(80.0,99.9); self._sp_int_pct.setValue(97.0); self._sp_int_pct.setSuffix(" %")
         self._sp_min_pts = QtWidgets.QSpinBox()
         self._sp_min_pts.setRange(5,500); self._sp_min_pts.setValue(20); self._sp_min_pts.setSuffix(" pts")
-        p_lay.addRow("Sphere radius min:", self._sp_r_min)
-        p_lay.addRow("Sphere radius max:", self._sp_r_max)
-        p_lay.addRow("Checker cell min:", self._sp_cell_min)
-        p_lay.addRow("Checker cell max:", self._sp_cell_max)
-        p_lay.addRow("Min contrast ratio:", self._sp_contrast)
-        p_lay.addRow("Intensity percentile:", self._sp_int_pct)
-        p_lay.addRow("Min cluster points:", self._sp_min_pts)
+        p_lay.addRow(_tr("Sphere radius min:", self._lang), self._sp_r_min)
+        p_lay.addRow(_tr("Sphere radius max:", self._lang), self._sp_r_max)
+        p_lay.addRow(_tr("Checker cell min:", self._lang), self._sp_cell_min)
+        p_lay.addRow(_tr("Checker cell max:", self._lang), self._sp_cell_max)
+        p_lay.addRow(_tr("Min contrast ratio:", self._lang), self._sp_contrast)
+        p_lay.addRow(_tr("Intensity percentile:", self._lang), self._sp_int_pct)
+        p_lay.addRow(_tr("Min cluster points:", self._lang), self._sp_min_pts)
         lay.addWidget(prm)
         btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
         btns.accepted.connect(self.accept); btns.rejected.connect(self.reject)
