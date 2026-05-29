@@ -260,34 +260,20 @@ class ParameterExtractionLayer:
             if len(sl) < 10: continue
             d = sl - C
             xf = d @ N; yf = d @ B
-            # LSQ ellipse fit: Ax^2 + Bxy + Cy^2 + Dx + Ey = 1
-            try:
-                A_mat = np.column_stack([xf**2, xf*yf, yf**2, xf, yf])
-                b_vec = np.ones(len(xf))
-                coeffs, _, _, _ = np.linalg.lstsq(A_mat, b_vec, rcond=None)
-                A, B_c, C_c, D, E = coeffs
-                # Convert to semi-axes
-                M_mat = np.array([[A, B_c/2], [B_c/2, C_c]])
-                ev = np.linalg.eigvalsh(M_mat)
-                if ev.min() <= 0: raise ValueError("invalid ellipse")
-                # Semi-axes from eigenvalues
-                denom = A*C_c - (B_c/2)**2
-                if abs(denom) < 1e-12: raise ValueError("degenerate")
-                # Use bounding box of projected points as fallback check
-                a_semi = float(np.max(np.abs(xf)))
-                b_semi = float(np.max(np.abs(yf)))
-                a_axis = max(a_semi, b_semi)
-                b_axis = min(a_semi, b_semi)
-                if a_axis > 1e-6:
-                    ov.append((a_axis - b_axis) / a_axis * 100.0)
-            except Exception:
-                # Fallback: bounding box method
-                a_semi = float(np.max(np.abs(xf)))
-                b_semi = float(np.max(np.abs(yf)))
-                a_axis = max(a_semi, b_semi)
-                b_axis = min(a_semi, b_semi)
-                if a_axis > 1e-6:
-                    ov.append((a_axis - b_axis) / a_axis * 100.0)
+            # Fitzgibbon Direct Least-Squares ellipse fit (PDF 3.2):
+            # statistically consistent under heterogeneous point density,
+            # unlike covariance/bounding-box estimators.
+            fit = fit_ellipse_fitzgibbon(xf, yf)
+            if fit is not None:
+                a_axis, b_axis = fit[2], fit[3]
+            else:
+                # Fallback only when the conic fit fails to converge.
+                a_axis = float(np.max(np.abs(xf)))
+                b_axis = float(np.max(np.abs(yf)))
+                if b_axis > a_axis:
+                    a_axis, b_axis = b_axis, a_axis
+            if a_axis > 1e-6:
+                ov.append((a_axis - b_axis) / a_axis * 100.0)
         if not ov: return {"ovality_mean_pct": float("nan"), "ovality_max_pct": float("nan")}
         return {"ovality_mean_pct": float(np.mean(ov)), "ovality_max_pct": float(np.max(ov))}
 
@@ -488,11 +474,18 @@ class ParameterExtractionLayer:
                 r_fit = float("nan")
 
         cx = float(np.mean(x)); cz = float(np.mean(z))
-        M = np.array([[float(np.mean((x - cx)**2)), float(np.mean((x - cx) * (z - cz)))],
-                      [float(np.mean((x - cx) * (z - cz))), float(np.mean((z - cz)**2))]])
-        ev = np.linalg.eigvalsh(M)
-        a = float(np.sqrt(max(ev.max(), 1e-9))); b = float(np.sqrt(max(ev.min(), 1e-9)))
-        ovality = (a - b) / a * 100.0 if a > 1e-6 else float("nan")
+        # Ovality from Fitzgibbon DLS ellipse fit (PDF 3.2), not covariance
+        # eigenvalues which conflate density anisotropy with distortion.
+        fit2d = fit_ellipse_fitzgibbon(x, z)
+        if fit2d is not None and fit2d[2] > 1e-6:
+            a = fit2d[2]; b = fit2d[3]
+            ovality = (a - b) / a * 100.0
+        else:
+            M = np.array([[float(np.mean((x - cx)**2)), float(np.mean((x - cx) * (z - cz)))],
+                          [float(np.mean((x - cx) * (z - cz))), float(np.mean((z - cz)**2))]])
+            ev = np.linalg.eigvalsh(M)
+            a = float(np.sqrt(max(ev.max(), 1e-9))); b = float(np.sqrt(max(ev.min(), 1e-9)))
+            ovality = (a - b) / a * 100.0 if a > 1e-6 else float("nan")
         ecc = float(np.sqrt((cx - (x_min + x_max)/2.0)**2 + (cz - (z_min + z_max)/2.0)**2)) * 1e3
         return dict(H1=H1, H2=H2, H3=H3, W1=W1, W2=W2, C1=C1, C2=C2, C3=C3,
                     wall_angle_L=wal, wall_angle_R=war, radius_fit=r_fit, ovality=ovality,

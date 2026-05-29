@@ -98,6 +98,77 @@ def _unit(v: np.ndarray, fallback: Optional[np.ndarray] = None) -> np.ndarray:
         raise ValueError(f"Cannot normalise near-zero vector: {v}")
     return v / n
 
+def fit_ellipse_fitzgibbon(x: np.ndarray, y: np.ndarray) -> Optional[Tuple[float, float, float, float, float]]:
+    """Fit an ellipse by Fitzgibbon Direct Least-Squares (PDF section 3.2).
+
+    Solves the constrained conic fit Ax^2 + Bxy + Cy^2 + Dx + Ey + F = 0 under
+    the ellipticity constraint 4AC - B^2 = 1 using the numerically stable
+    Halir & Flusser (1998) decomposition of Fitzgibbon's generalized eigenvalue
+    problem. Returns geometric parameters (cx, cy, a_semi, b_semi, theta) with
+    a_semi >= b_semi, or None if the points do not admit a valid ellipse.
+    """
+    x = np.asarray(x, dtype=np.float64).ravel()
+    y = np.asarray(y, dtype=np.float64).ravel()
+    if len(x) < 5 or len(x) != len(y):
+        return None
+
+    # Center and scale for numerical conditioning; undo it after fitting.
+    mx = float(np.mean(x)); my = float(np.mean(y))
+    xs = x - mx; ys = y - my
+    scale = float(np.sqrt(np.mean(xs * xs + ys * ys)))
+    if scale < 1e-12:
+        return None
+    xs = xs / scale; ys = ys / scale
+
+    D1 = np.column_stack((xs * xs, xs * ys, ys * ys))   # quadratic monomials
+    D2 = np.column_stack((xs, ys, np.ones_like(xs)))    # linear monomials
+    S1 = D1.T @ D1
+    S2 = D1.T @ D2
+    S3 = D2.T @ D2
+    try:
+        S3_inv = np.linalg.inv(S3)
+    except np.linalg.LinAlgError:
+        return None
+    Tm = -S3_inv @ S2.T
+    M0 = S1 + S2 @ Tm
+    # Apply inverse of the constraint matrix C (rows reordered/scaled).
+    M = np.vstack((M0[2] / 2.0, -M0[1], M0[0] / 2.0))
+    try:
+        _, evec = np.linalg.eig(M)
+    except np.linalg.LinAlgError:
+        return None
+    cond = 4.0 * evec[0] * evec[2] - evec[1] ** 2
+    valid = np.where(cond > 0)[0]
+    if len(valid) == 0:
+        return None
+    a1 = np.real(evec[:, valid[0]])
+    a2 = Tm @ a1
+    A, B, C = a1
+    D, E, F = a2
+
+    # Convert algebraic coefficients to geometric parameters by translating the
+    # conic to its center, then taking eigenvalues of the quadratic form.
+    Q = np.array([[A, B / 2.0], [B / 2.0, C]], dtype=np.float64)
+    try:
+        center = np.linalg.solve(np.array([[2 * A, B], [B, 2 * C]]), np.array([-D, -E]))
+    except np.linalg.LinAlgError:
+        return None
+    cxs, cys = float(center[0]), float(center[1])
+    f_prime = A * cxs * cxs + B * cxs * cys + C * cys * cys + D * cxs + E * cys + F
+    eigvals = np.linalg.eigvalsh(Q)
+    if np.any(eigvals == 0) or f_prime == 0:
+        return None
+    axes_sq = -f_prime / eigvals
+    if np.any(axes_sq <= 0):
+        return None
+    axes = np.sqrt(axes_sq)
+    a_semi = float(np.max(axes)) * scale
+    b_semi = float(np.min(axes)) * scale
+    theta = 0.5 * float(np.arctan2(B, A - C))
+    cx = cxs * scale + mx
+    cy = cys * scale + my
+    return (cx, cy, a_semi, b_semi, theta)
+
 def validate_xyz(pts: np.ndarray, name: str = "points") -> np.ndarray:
     arr = np.asarray(pts, dtype=np.float64)
     if arr.ndim != 2 or arr.shape[1] != 3:
@@ -146,7 +217,7 @@ __all__ = [
     "matplotlib", "plt", "mpatches", "FigureCanvas", "Figure", "_MPL_OK",
     "TUNNEL_PROFILES", "VL_BOX_W", "VL_BOX_H", "VL_CIR_R",
     "_BG", "_FG", "_GRID", "_ACC1", "_ACC2", "_ACC3", "_RED", "_YEL", "_GRN", "_DIM",
-    "_unit", "validate_xyz", "_normalize_rgb", "make_vertex_cloud",
+    "_unit", "validate_xyz", "_normalize_rgb", "make_vertex_cloud", "fit_ellipse_fitzgibbon",
 ]
 
 
