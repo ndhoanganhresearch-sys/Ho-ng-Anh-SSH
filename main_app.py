@@ -230,7 +230,11 @@ class MainWindow(QtWidgets.QMainWindow):
         }
         self._labels_have_data = False
 
-        self.current_language = "en"
+        self.settings = QtCore.QSettings("SSL", "TunnelMonitoring")
+        saved_language = self.settings.value("ui/language", "en")
+        if saved_language not in get_available_languages():
+            saved_language = "en"
+        self.current_language = saved_language
 
         self._build_ui()
         self._apply_style()
@@ -1068,11 +1072,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @QtCore.Slot(str)
     def change_language(self, language_code: str) -> None:
-        """Switch the active UI language and retranslate every widget."""
+        """Switch the active UI language, sync the button and persist the choice."""
         if language_code not in get_available_languages():
             return
         self.current_language = language_code
+        # Keep the switcher button label in sync when changed programmatically.
+        # set_language is a no-op when the code already matches, so no recursion.
+        if self.language_switcher.get_current_language() != language_code:
+            self.language_switcher.set_language(language_code)
         self._retranslate_ui()
+        self.settings.setValue("ui/language", language_code)
 
     def _retranslate_ui(self) -> None:
         """Apply current-language text to all static UI elements."""
@@ -1119,6 +1128,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.set_status(self.t("ready_status"))
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override name
+        self.settings.setValue("ui/language", self.current_language)
         if hasattr(self, "plotter") and self.plotter is not None:
             self.plotter.close()
         event.accept()
