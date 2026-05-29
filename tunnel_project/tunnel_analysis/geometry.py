@@ -15,9 +15,17 @@ class GeometricLayer:
         ev, vecs = np.linalg.eigh(np.cov((pts - c).T))
         ax = vecs[:, np.argmax(ev)]
         proj = (pts - c) @ ax
-        order = np.argsort(proj)
-        chunks = np.array_split(pts[order], section_count)
-        centers = [ch.mean(axis=0) for ch in chunks if len(ch) >= 30]
+        # Bin by equal axial position (not equal point count): count-based
+        # splitting clusters all sections in the dense tunnel middle and leaves
+        # the sparse ends uncovered, shortening the centerline.
+        pmin, pmax = float(proj.min()), float(proj.max())
+        edges = np.linspace(pmin, pmax, section_count + 1)
+        slot = np.clip(np.searchsorted(edges, proj, side="right") - 1, 0, section_count - 1)
+        centers = []
+        for s in range(section_count):
+            ch = pts[slot == s]
+            if len(ch) >= 30:
+                centers.append(ch.mean(axis=0))
         if len(centers) < 4: raise RuntimeError(f"Only {len(centers)} centers (need >= 4).")
         cl = np.asarray(centers, dtype=np.float64)
         return cl, self._frenet(cl)
