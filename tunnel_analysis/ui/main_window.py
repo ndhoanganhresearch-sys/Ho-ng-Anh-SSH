@@ -15,6 +15,9 @@ from ..ifc_exporter import TunnelIFCExporter
 from ..target_detector import TargetDetector, Target
 from ..rag_ai import TunnelRAGAssistant
 from .widgets import CollapsibleSection, MatplotlibSectionWidget, PolarDeformationPlotWidget, LinePlotWidget
+from .i18n_v4 import tr as _tr
+from translations import get_available_languages
+from language_switcher import LanguageSwitcher
 
 class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
@@ -56,10 +59,16 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._noise_panel:  Optional[QtWidgets.QWidget] = None
         self._ai_tab_idx:   int = 5
         self._section_tab_idx: int = 3
+        self._sections: List[CollapsibleSection] = []
+
+        self.settings = QtCore.QSettings("SSL", "TunnelMonitoring")
+        saved = self.settings.value("ui/language", "en")
+        self.current_language = saved if saved in get_available_languages() else "en"
 
         self._build_ui()
         self._apply_theme()
         self._init_pyvista()
+        self._retranslate_v4()
 
     def _build_ui(self) -> None:
         central = QtWidgets.QWidget()
@@ -271,13 +280,18 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         sb = QtWidgets.QFrame(); sb.setObjectName("Sidebar"); sb.setFixedWidth(375)
         out = QtWidgets.QVBoxLayout(sb); out.setContentsMargins(10, 14, 10, 14); out.setSpacing(6)
 
-        t1 = QtWidgets.QLabel("TUNNEL ANALYSIS"); t1.setObjectName("ProductTitle")
-        t2 = QtWidgets.QLabel("v4.0 r1 - CBNU Smart Structure Lab"); t2.setObjectName("LabSubtitle")
-        out.addWidget(t1); out.addWidget(t2)
+        self._title_lbl = QtWidgets.QLabel("TUNNEL ANALYSIS"); self._title_lbl.setObjectName("ProductTitle")
+        self._subtitle_lbl = QtWidgets.QLabel("v4.0 r1 - CBNU Smart Structure Lab"); self._subtitle_lbl.setObjectName("LabSubtitle")
+        out.addWidget(self._title_lbl); out.addWidget(self._subtitle_lbl)
+
+        self.language_switcher = LanguageSwitcher(initial_language=self.current_language)
+        self.language_switcher.language_changed.connect(self.change_language)
+        out.addWidget(self.language_switcher)
+
         sep = QtWidgets.QFrame(); sep.setFrameShape(QtWidgets.QFrame.HLine)
         sep.setObjectName("Separator"); out.addWidget(sep)
 
-        pf_frame = QtWidgets.QGroupBox("Tunnel Profile Type")
+        pf_frame = QtWidgets.QGroupBox("Tunnel Profile Type"); self._pf_frame = pf_frame
         pf_frame.setStyleSheet("QGroupBox{color:#334155;border:1px solid #CBD5E1;border-radius:5px;margin-top:6px;padding:4px;}")
         pf_lay = QtWidgets.QHBoxLayout(pf_frame)
         self._profile_combo = QtWidgets.QComboBox()
@@ -285,15 +299,18 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._profile_combo.currentTextChanged.connect(self._on_profile_changed)
         pf_lay.addWidget(self._profile_combo); out.addWidget(pf_frame)
 
-        vl_frame = QtWidgets.QGroupBox("Vehicle Clearance Limit (m)")
+        vl_frame = QtWidgets.QGroupBox("Vehicle Clearance Limit (m)"); self._vl_frame = vl_frame
         vl_frame.setStyleSheet("QGroupBox{color:#334155;border:1px solid #CBD5E1;border-radius:5px;margin-top:6px;padding:4px;}")
         vl_lay = QtWidgets.QFormLayout(vl_frame)
         self._sp_vl_w = QtWidgets.QDoubleSpinBox(); self._sp_vl_w.setValue(VL_BOX_W)
         self._sp_vl_h = QtWidgets.QDoubleSpinBox(); self._sp_vl_h.setValue(VL_BOX_H)
         self._sp_vl_r = QtWidgets.QDoubleSpinBox(); self._sp_vl_r.setValue(VL_CIR_R)
-        vl_lay.addRow("Half clear width W:", self._sp_vl_w)
-        vl_lay.addRow("Clear height H:", self._sp_vl_h)
-        vl_lay.addRow("Circular clearance radius R:", self._sp_vl_r)
+        self._lbl_vl_w = QtWidgets.QLabel("Half clear width W:")
+        self._lbl_vl_h = QtWidgets.QLabel("Clear height H:")
+        self._lbl_vl_r = QtWidgets.QLabel("Circular clearance radius R:")
+        vl_lay.addRow(self._lbl_vl_w, self._sp_vl_w)
+        vl_lay.addRow(self._lbl_vl_h, self._sp_vl_h)
+        vl_lay.addRow(self._lbl_vl_r, self._sp_vl_r)
         out.addWidget(vl_frame)
 
         # ── Auto Pipeline button ──────────────────────────────────────
@@ -319,7 +336,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         auto_btn.clicked.connect(self._slot_auto_pipeline)
         out.addWidget(auto_btn)
         self._auto_btn = auto_btn
-        reset_btn = QtWidgets.QPushButton("Reset Pipeline")
+        reset_btn = QtWidgets.QPushButton("Reset Pipeline"); self._reset_btn = reset_btn
         reset_btn.setMinimumHeight(30)
         reset_btn.setStyleSheet(
             "QPushButton{background:#FEE2E2;color:#DC2626;border:1px solid #FCA5A5;"
@@ -389,6 +406,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             for label, slot in buttons:
                 btn = sec.add_sub_button(label, slot); self._all_sub_btns.append(btn)
             sl.addWidget(sec)
+            self._sections.append(sec)
 
         sl.addStretch()
         self.pt_label   = QtWidgets.QLabel("Points: --")
@@ -2136,6 +2154,55 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _log(self, msg: str) -> None:
         self.results_text.appendPlainText(str(msg))
 
+    @QtCore.Slot(str)
+    def change_language(self, language_code: str) -> None:
+        """Switch UI language, sync the button and persist the choice."""
+        if language_code not in get_available_languages():
+            return
+        self.current_language = language_code
+        if self.language_switcher.get_current_language() != language_code:
+            self.language_switcher.set_language(language_code)
+        self._retranslate_v4()
+        self.settings.setValue("ui/language", language_code)
+
+    def _retranslate_v4(self) -> None:
+        """Apply the active language to the main static UI (English fallback)."""
+        lang = self.current_language
+        step_word = _tr("Step", lang)
+
+        # Sidebar header
+        self._title_lbl.setText(_tr("TUNNEL ANALYSIS", lang))
+        self._subtitle_lbl.setText(_tr("v4.0 r1 - CBNU Smart Structure Lab", lang))
+        self._pf_frame.setTitle(_tr("Tunnel Profile Type", lang))
+        self._vl_frame.setTitle(_tr("Vehicle Clearance Limit (m)", lang))
+        self._lbl_vl_w.setText(_tr("Half clear width W:", lang))
+        self._lbl_vl_h.setText(_tr("Clear height H:", lang))
+        self._lbl_vl_r.setText(_tr("Circular clearance radius R:", lang))
+        self._auto_btn.setText(_tr("AUTO PIPELINE  (1-click full analysis)", lang))
+        self._reset_btn.setText(_tr("Reset Pipeline", lang))
+
+        # Collapsible section titles
+        for sec in self._sections:
+            sec.set_translation(_tr(sec.title_source, lang), step_word)
+
+        # Header task title/description (only when still showing defaults)
+        if self.task_title.text() in ("Tunnel Analysis v4.0", _tr("Tunnel Analysis v4.0", "vi"), _tr("Tunnel Analysis v4.0", "ko")):
+            self.task_title.setText(_tr("Tunnel Analysis v4.0", lang))
+        default_desc = "Select a structural analysis workflow from the sidebar."
+        if self.task_desc.text() in (default_desc, _tr(default_desc, "vi"), _tr(default_desc, "ko")):
+            self.task_desc.setText(_tr(default_desc, lang))
+
+        # Right-panel tab titles
+        tab_titles = ["Results Log", "Scan Database", "Stations", "Targets",
+                      "Time-Series Plot", "2D Cross-Section", "Polar Deformation",
+                      "AI Engineering Assistant"]
+        for i in range(self.right_tabs.count()):
+            cur = self.right_tabs.tabText(i)
+            for src_title in tab_titles:
+                if cur == src_title or cur in (_tr(src_title, "vi"), _tr(src_title, "ko")):
+                    self.right_tabs.setTabText(i, _tr(src_title, lang))
+                    break
+
     def _apply_theme(self) -> None:
         self.setStyleSheet("""
             QMainWindow, QWidget { background: #F1F5F9; color: #111827; font-family: 'Segoe UI', Arial, sans-serif; font-size: 10pt; }
@@ -2157,7 +2224,13 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             #TaskTitle       { color: #0F172A; font-size: 14pt; font-weight: 700; }
             #TaskDescription { color: #475569; }
             QTabWidget::pane, QPlainTextEdit, QTableWidget { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 4px; }
-            QHeaderView::section { background: #EEF4FA; border: 1px solid #E2E8F0; padding: 5px; }
+            QTabBar::tab { background: #E2E8F0; color: #1E293B; padding: 7px 14px; margin-right: 2px;
+                           border: 1px solid #CBD5E1; border-top-left-radius: 6px; border-top-right-radius: 6px;
+                           font-weight: 600; }
+            QTabBar::tab:selected { background: #FFFFFF; color: #0F4C81; border-bottom-color: #FFFFFF; }
+            QTabBar::tab:hover:!selected { background: #DBEAFE; color: #1D4ED8; }
+            QTabBar::scroller { width: 18px; }
+            QHeaderView::section { background: #EEF4FA; color: #1E293B; border: 1px solid #E2E8F0; padding: 5px; }
             QProgressBar { background: #EEF4FA; border: 1px solid #CBD5E1; border-radius: 4px; text-align: center; min-width: 140px; }
             QProgressBar::chunk { background: #2563EB; border-radius: 4px; }
             QDoubleSpinBox, QComboBox { background: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 4px; padding: 4px; color: #111827; }
@@ -2338,6 +2411,9 @@ class _TargetDetectDialog(QtWidgets.QDialog):
 
     def closeEvent(self, event) -> None:
         """Clean up timers and threads before closing."""
+        try:
+            self.settings.setValue("ui/language", self.current_language)
+        except Exception: pass
         try:
             if hasattr(self, "_anim_timer") and self.section_widget:
                 self.section_widget._anim_timer.stop()

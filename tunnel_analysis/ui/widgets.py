@@ -10,7 +10,9 @@ class CollapsibleSection(QtWidgets.QWidget):
         self._btn.setArrowType(QtCore.Qt.RightArrow)
         self._btn.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         self._btn.setMinimumHeight(44); self._btn.setObjectName("SectionToggle")
-        self._btn.setText(f"  Step {step}: {title}  [{tag}]")
+        self._title = title; self._step = step; self._tag = tag
+        self._step_word = "Step"
+        self._btn.setText(f"  {self._step_word} {step}: {title}  [{tag}]")
         self._btn.toggled.connect(self._toggle)
         self._body = QtWidgets.QWidget(); self._body.setObjectName("SectionContent")
         self._blay = QtWidgets.QVBoxLayout(self._body)
@@ -24,10 +26,20 @@ class CollapsibleSection(QtWidgets.QWidget):
         self._btn.setArrowType(QtCore.Qt.DownArrow if checked else QtCore.Qt.RightArrow)
         self._body.setVisible(checked)
 
+    def set_translation(self, title: str, step_word: str = "Step") -> None:
+        """Update the visible section title (keeps the immutable English source)."""
+        self._step_word = step_word
+        self._btn.setText(f"  {step_word} {self._step}: {title}  [{self._tag}]")
+
+    @property
+    def title_source(self) -> str:
+        return self._title
+
     def add_sub_button(self, label: str, slot: Callable) -> QtWidgets.QPushButton:
         b = QtWidgets.QPushButton(f"  - {label}")
         b.setObjectName("SubButton"); b.setMinimumHeight(32)
         b.setCursor(QtCore.Qt.PointingHandCursor); b.clicked.connect(slot)
+        b.setProperty("source_label", label)
         self._blay.addWidget(b); return b
 
     def all_sub_buttons(self) -> List[QtWidgets.QPushButton]:
