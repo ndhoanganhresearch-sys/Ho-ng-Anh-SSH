@@ -152,36 +152,65 @@ class GeometricLayer:
         return fr
 
     def _frenet(self, cl: np.ndarray) -> List[Dict]:
+        """Bishop Parallel Transport (Double Reflection) section frames (PDF 3.1).
+
+        Propagates a twist-free orthonormal frame along the centerline using the
+        double-reflection transport operator, eliminating the curvature
+        singularity of the classical Frenet-Serret normal at straight (zero
+        curvature) segments. The initial normal is anchored to the gravity
+        component orthogonal to the first tangent for a geotechnically
+        meaningful vertical orientation. The method name is kept for backward
+        compatibility with existing callers.
+        """
         pts = np.asarray(cl, dtype=np.float64)
         n = len(pts)
-        if n < 2: raise RuntimeError("Frenet: need >= 2 pts.")
-        
+        if n < 2: raise RuntimeError("Frame: need >= 2 pts.")
+
         T = self._tangents(pts)
         fT = np.empty((n, 3))
         fN = np.empty((n, 3))
         fB = np.empty((n, 3))
-        
+
         Z_global = np.array([0.0, 0.0, 1.0])
-        
-        for i in range(n):
-            Tc = T[i]
-            
-            # Avoid degeneracy if the tunnel axis is nearly vertical.
-            if abs(Tc[2]) > 0.9999:
-                Nx = np.array([1.0, 0.0, 0.0])
+
+        # Frame initialization: N0 anchored to gravity orthogonal to T0.
+        T0 = T[0]
+        if abs(T0[2]) > 0.9999:
+            N0 = np.array([1.0, 0.0, 0.0])
+        else:
+            N0 = _unit(np.cross(T0, Z_global))
+        B0 = _unit(np.cross(N0, T0))
+        fT[0] = T0; fN[0] = N0; fB[0] = B0
+
+        # Double Reflection transport (Wang et al. 2008) of the normal N.
+        # v1 uses the position difference x_{i+1} - x_i, not the tangents.
+        for i in range(n - 1):
+            Ti = fT[i]; Ti1 = T[i + 1]
+            Ni = fN[i]
+            Tp = Ti1
+
+            v1 = pts[i + 1] - pts[i]
+            c1 = float(v1 @ v1)
+            if c1 < 1e-18:
+                Np = Ni
             else:
-                # Horizontal N axis, aligned with the ground plane and pointing to section right.
-                Nx = np.cross(Tc, Z_global)
-                Nx = _unit(Nx)
-            
-            # Vertical B axis, pointing upward toward the tunnel crown.
-            Bx = np.cross(Nx, Tc)
-            Bx = _unit(Bx)
-            
-            fT[i] = Tc
-            fN[i] = Nx
-            fB[i] = Bx
-            
+                # First reflection across the plane normal to v1.
+                rL = Ni - (2.0 / c1) * float(v1 @ Ni) * v1
+                tL = Ti - (2.0 / c1) * float(v1 @ Ti) * v1
+                # Second reflection maps tL onto the next tangent Ti1.
+                v2 = Ti1 - tL
+                c2 = float(v2 @ v2)
+                if c2 < 1e-18:
+                    Np = rL
+                else:
+                    Np = rL - (2.0 / c2) * float(v2 @ rL) * v2
+            # Re-orthogonalize the transported normal against the tangent.
+            Np = Np - float(Np @ Tp) * Tp
+            Np = _unit(Np)
+            fT[i + 1] = Tp
+            fN[i + 1] = Np
+            fB[i + 1] = _unit(np.cross(Np, Tp))
+
         return [{"center": pts[i], "T": fT[i], "N": fN[i], "B": fB[i]} for i in range(n)]
     @staticmethod
     def _tangents(pts: np.ndarray) -> np.ndarray:
