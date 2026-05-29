@@ -136,7 +136,13 @@ class PreprocessingLayer:
         """
         scan = context.active_scan
         if scan is None: raise RuntimeError("SOR: no active scan.")
-        pts = validate_xyz(scan.points); colors = scan.colors_raw; N = len(pts)
+        src = context.working_points
+        if src is None: src = scan.points
+        pts = validate_xyz(src); N = len(pts)
+        # Colors only valid if they line up 1:1 with the working points
+        colors = scan.colors_raw
+        if colors is not None and np.asarray(colors).shape[0] != N:
+            colors = None
 
         # Dominant axis
         centroid = pts.mean(0); centred = pts - centroid

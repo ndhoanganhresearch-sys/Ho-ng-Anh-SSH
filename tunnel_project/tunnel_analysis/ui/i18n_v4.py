@@ -311,6 +311,7 @@ PHRASES = {
     "Click points in 3D viewport to mark as noise": {"vi": "Bấm vào điểm trong khung nhìn 3D để đánh dấu nhiễu", "ko": "3D 뷰포트에서 점을 클릭하여 노이즈로 표시"},
     "Click red points to restore them": {"vi": "Bấm vào điểm đỏ để khôi phục", "ko": "빨간 점을 클릭하여 복원"},
     "Cancel — keep all points including noise": {"vi": "Hủy — giữ mọi điểm kể cả nhiễu", "ko": "취소 — 노이즈를 포함한 모든 점 유지"},
+    "AUTO PIPELINE aborted: step {key} failed.": {"vi": "Đã hủy AUTO PIPELINE: bước {key} lỗi.", "ko": "AUTO PIPELINE 중단됨: {key} 단계 실패."},
 }
 
 def tr(text: str, lang: str = "en") -> str:

@@ -57,6 +57,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._noise_pts:    Optional[np.ndarray] = None  # current noise candidates
         self._kept_pts:     Optional[np.ndarray] = None  # current kept candidates
         self._noise_panel:  Optional[QtWidgets.QWidget] = None
+        self._auto_running: bool = False  # True while AUTO PIPELINE is driving steps
         self._ai_tab_idx:   int = 5
         self._section_tab_idx: int = 3
         self._sections: List[CollapsibleSection] = []
@@ -464,6 +465,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _on_failed(self, key: str, msg: str) -> None:
         self.sb_prog.setValue(0); self.sb_msg.setText(_tr("Task failed: {key}", self.current_language).format(key=key))
         self._log(f"[SYSTEM ERROR] {key}: {msg}")
+        if self._auto_running:
+            self._auto_running = False
+            if hasattr(self, "_auto_btn"):
+                self._auto_btn.setEnabled(True)
+                self._auto_btn.setText(_tr("AUTO PIPELINE  (1-click full analysis)", self.current_language))
+            self._log(_tr("AUTO PIPELINE aborted: step {key} failed.", self.current_language).format(key=key))
         QtWidgets.QMessageBox.critical(self, _tr("Task error: {key}", self.current_language).format(key=key), msg)
 
     def _dispatch(self, key: str, result: object) -> None:
@@ -583,9 +590,17 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self._kept_pts  = np.asarray(pts, dtype=np.float64)
             self._noise_pts = np.asarray(stats.get("outlier_pts", np.empty((0, 3))), dtype=np.float64)
             if self.context.active_scan and col is not None: self.context.active_scan.colors_raw = col
+            n_raw = stats.get('n_raw', len(pts)); n_rem = stats.get('n_removed', 0)
+            if self._auto_running:
+                # AUTO mode: apply the cleaned cloud immediately, no manual review.
+                self.context.normalized_points = self._kept_pts
+                self._render_pts(self._kept_pts, "2.2 SOR — Noise removed (auto)", "#0EA5E9")
+                self.pt_label.setText(f"Points: {len(pts):,}"); self.sb_pts.setText(f"Points: {len(pts):,}")
+                self._log(f"SOR (auto): {n_raw:,} raw -> {len(pts):,} kept, {n_rem:,} noise removed.")
+                self._noise_pts = None; self._kept_pts = None
+                return
             self._render_filter_result(self._kept_pts, self._noise_pts, "2.2 SOR — Review noise (red) before confirming")
             self.pt_label.setText(f"Points: {len(pts):,}"); self.sb_pts.setText(f"Points: {len(pts):,}")
-            n_raw = stats.get('n_raw', len(pts)); n_rem = stats.get('n_removed', 0)
             self._log(f"SOR proposal: {n_raw:,} raw -> {len(pts):,} kept, {n_rem:,} noise detected (red).")
             self._log(_tr("Review noise in 3D viewport, then use the noise panel to confirm or adjust.", self.current_language))
             self.sb_msg.setText(_tr("SOR: {n_rem} noise points detected (red) | {n_kept} kept (blue)", self.current_language).format(n_rem=f"{n_rem:,}", n_kept=f"{len(pts):,}"))
@@ -963,6 +978,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if hasattr(self, "_auto_btn"):
             self._auto_btn.setEnabled(False)
             self._auto_btn.setText(_tr("Running pipeline...", self.current_language))
+        self._auto_running = True
         self._auto_step = 0
         self._auto_steps = [
             ("2.1_voxel",      lambda: self.pre_mod.voxel_downsample(self.context),
@@ -1011,6 +1027,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._start_worker(key, task)
 
     def _on_auto_pipeline_done(self) -> None:
+        self._auto_running = False
         if hasattr(self, "_auto_btn"):
             self._auto_btn.setEnabled(True)
             self._auto_btn.setText(_tr("AUTO PIPELINE  (1-click full analysis)", self.current_language))
@@ -1588,6 +1605,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _check_auto_pipeline(self, key: str) -> None:
         """After each worker finishes, check if we are in auto pipeline mode."""
+        if not self._auto_running:
+            return
         if not hasattr(self, "_auto_steps") or not hasattr(self, "_auto_step"):
             return
         if self._auto_step >= len(self._auto_steps):
