@@ -40,6 +40,9 @@ from pyvistaqt import QtInteractor
 from registration_engine import StationData, StationManager
 from view_manager import ViewConfig, ViewManager
 
+from translations import get_text, get_available_languages
+from language_switcher import LanguageSwitcher
+
 try:
     pyvista.set_jupyter_backend("static")
 except Exception:
@@ -60,6 +63,21 @@ TAB_NAMES = [
     "AI Chat",
 ]
 
+# Translation keys aligned 1:1 with TAB_NAMES (English is the base language).
+TAB_KEYS = [
+    "tab_overview",
+    "tab_registration",
+    "tab_ransac",
+    "tab_centerline",
+    "tab_section",
+    "tab_rings",
+    "tab_timeseries",
+    "tab_frenet",
+    "tab_heatmap",
+    "tab_results",
+    "tab_ai_chat",
+]
+
 
 class ImportWorker(QtCore.QObject):
     """Load raw point-cloud station data in a Qt worker thread."""
@@ -74,12 +92,18 @@ class ImportWorker(QtCore.QObject):
         manager: StationManager,
         timestamp: str,
         auto_detect_targets: bool = True,
+        language: str = "en",
     ) -> None:
         super().__init__()
         self.file_paths = list(file_paths)
         self.manager = manager
         self.timestamp = timestamp
         self.auto_detect_targets = bool(auto_detect_targets)
+        self.language = language
+
+    def tr(self, key: str, **kwargs) -> str:
+        text = get_text(key, self.language)
+        return text.format(**kwargs) if kwargs else text
 
     def emit_status(self, message: str, progress: float) -> None:
         self.status.emit(str(message), float(progress))
@@ -98,11 +122,14 @@ class ImportWorker(QtCore.QObject):
             loaded: List[StationData] = []
             count = len(self.file_paths)
             if count == 0:
-                raise ValueError("No point-cloud files selected.")
+                raise ValueError(self.tr("no_files_selected"))
 
             for index, file_path in enumerate(self.file_paths, start=1):
                 base_progress = 5.0 + (index - 1) / count * 80.0
-                self.status.emit(f"Loading station {index}/{count}: {Path(file_path).name}", base_progress)
+                self.status.emit(
+                    self.tr("loading_station", index=index, count=count, name=Path(file_path).name),
+                    base_progress,
+                )
                 station = self.manager.add_station(
                     filepath=file_path,
                     timestamp=self.timestamp,
@@ -113,21 +140,33 @@ class ImportWorker(QtCore.QObject):
 
                 if self.auto_detect_targets and station.intensity is not None:
                     try:
-                        self.status.emit(f"Detecting intensity targets for {station.station_id}...", base_progress + 8.0)
+                        self.status.emit(
+                            self.tr("detecting_targets", station=station.station_id),
+                            base_progress + 8.0,
+                        )
                         self.manager.detect_targets_for_station(
                             station,
                             status_cb=self.status_callback_for(base_progress + 12.0),
                         )
                     except Exception as exc:
-                        self.status.emit(f"{station.station_id}: target detection skipped ({exc})", base_progress + 12.0)
+                        self.status.emit(
+                            self.tr("target_detection_skipped", station=station.station_id, error=exc),
+                            base_progress + 12.0,
+                        )
                 elif self.auto_detect_targets:
-                    self.status.emit(f"{station.station_id}: no intensity channel for target detection.", base_progress + 12.0)
+                    self.status.emit(
+                        self.tr("no_intensity_channel", station=station.station_id),
+                        base_progress + 12.0,
+                    )
 
-                self.status.emit(f"{station.station_id} imported.", 5.0 + index / count * 90.0)
+                self.status.emit(
+                    self.tr("station_imported", station=station.station_id),
+                    5.0 + index / count * 90.0,
+                )
 
             self.finished.emit(self.manager, loaded)
         except Exception as exc:
-            self.failed.emit("Import LAS failed", exc)
+            self.failed.emit(get_text("import_failed_title", self.language), exc)
 
 
 class RegistrationWorker(QtCore.QObject):
@@ -137,22 +176,24 @@ class RegistrationWorker(QtCore.QObject):
     finished = QtCore.Signal(object, object)
     failed = QtCore.Signal(str, object)
 
-    def __init__(self, manager: StationManager) -> None:
+    def __init__(self, manager: StationManager, language: str = "en") -> None:
         super().__init__()
         self.manager = manager
+        self.language = language
 
     @QtCore.Slot()
     def run(self) -> None:
         try:
+            registration_msg = get_text("registration_status", self.language)
             links = self.manager.register_sequential(
                 use_icp=True,
                 status_cb=lambda message: self.status.emit(str(message), -1.0),
-                progress_cb=lambda value: self.status.emit("Running sequential SVD/ICP stitching...", float(value)),
+                progress_cb=lambda value: self.status.emit(registration_msg, float(value)),
             )
             merged, _ = self.manager.merged_global_cloud(voxel_size=0.05, max_points=900_000)
             self.finished.emit(links, merged)
         except Exception as exc:
-            self.failed.emit("Registration failed", exc)
+            self.failed.emit(get_text("registration_failed_title", self.language), exc)
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -187,9 +228,13 @@ class MainWindow(QtWidgets.QMainWindow):
             "heatmap": False,
             "ai_detections": False,
         }
+        self._labels_have_data = False
+
+        self.current_language = "en"
 
         self._build_ui()
         self._apply_style()
+        self._retranslate_ui()
 
     def _build_ui(self) -> None:
         central = QtWidgets.QWidget()
@@ -248,21 +293,26 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(10)
 
-        title = QtWidgets.QLabel("SSL 4D-LiDAR")
-        title.setObjectName("SidebarTitle")
-        subtitle = QtWidgets.QLabel("Osong Tunnel Monitoring")
-        subtitle.setObjectName("SidebarSubtitle")
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
+        self.sidebar_title = QtWidgets.QLabel("SSL 4D-LiDAR")
+        self.sidebar_title.setObjectName("SidebarTitle")
+        self.sidebar_subtitle = QtWidgets.QLabel("Osong Tunnel Monitoring")
+        self.sidebar_subtitle.setObjectName("SidebarSubtitle")
+        layout.addWidget(self.sidebar_title)
+        layout.addWidget(self.sidebar_subtitle)
+
+        self.language_switcher = LanguageSwitcher(initial_language=self.current_language)
+        self.language_switcher.language_changed.connect(self.change_language)
+        layout.addWidget(self.language_switcher)
 
         self.import_btn = QtWidgets.QPushButton("Import LAS / PLY")
         self.import_btn.clicked.connect(self.import_las)
         layout.addWidget(self.import_btn)
 
-        import_box = QtWidgets.QGroupBox("Import Settings")
-        import_layout = QtWidgets.QVBoxLayout(import_box)
+        self.import_box = QtWidgets.QGroupBox("Import Settings")
+        import_layout = QtWidgets.QVBoxLayout(self.import_box)
         timestamp_row = QtWidgets.QHBoxLayout()
-        timestamp_row.addWidget(QtWidgets.QLabel("Timestamp"))
+        self.timestamp_label = QtWidgets.QLabel("Timestamp")
+        timestamp_row.addWidget(self.timestamp_label)
         self.timestamp_edit = QtWidgets.QLineEdit("T0")
         self.timestamp_edit.setMaxLength(24)
         timestamp_row.addWidget(self.timestamp_edit, 1)
@@ -270,7 +320,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.auto_target_check = QtWidgets.QCheckBox("Auto detect intensity targets")
         self.auto_target_check.setChecked(True)
         import_layout.addWidget(self.auto_target_check)
-        layout.addWidget(import_box)
+        layout.addWidget(self.import_box)
 
         self.register_btn = QtWidgets.QPushButton("Sequential Register")
         self.register_btn.clicked.connect(self.register_stations)
@@ -280,8 +330,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.deformation_btn.clicked.connect(self.compute_deformation_heatmap)
         layout.addWidget(self.deformation_btn)
 
-        layer_box = QtWidgets.QGroupBox("Viewer Layers")
-        layer_layout = QtWidgets.QVBoxLayout(layer_box)
+        self.layer_box = QtWidgets.QGroupBox("Viewer Layers")
+        layer_layout = QtWidgets.QVBoxLayout(self.layer_box)
         self.centerline_check = QtWidgets.QCheckBox("Centerline")
         self.heatmap_check = QtWidgets.QCheckBox("Heatmap")
         self.ai_check = QtWidgets.QCheckBox("AI Detections")
@@ -291,17 +341,17 @@ class MainWindow(QtWidgets.QMainWindow):
         layer_layout.addWidget(self.centerline_check)
         layer_layout.addWidget(self.heatmap_check)
         layer_layout.addWidget(self.ai_check)
-        layout.addWidget(layer_box)
+        layout.addWidget(self.layer_box)
 
-        view_box = QtWidgets.QGroupBox("View")
-        view_layout = QtWidgets.QVBoxLayout(view_box)
-        reset_btn = QtWidgets.QPushButton("Reset Camera")
-        reset_btn.clicked.connect(self.reset_camera)
-        screenshot_btn = QtWidgets.QPushButton("Screenshot")
-        screenshot_btn.clicked.connect(self.save_screenshot)
-        view_layout.addWidget(reset_btn)
-        view_layout.addWidget(screenshot_btn)
-        layout.addWidget(view_box)
+        self.view_box = QtWidgets.QGroupBox("View")
+        view_layout = QtWidgets.QVBoxLayout(self.view_box)
+        self.reset_btn = QtWidgets.QPushButton("Reset Camera")
+        self.reset_btn.clicked.connect(self.reset_camera)
+        self.screenshot_btn = QtWidgets.QPushButton("Screenshot")
+        self.screenshot_btn.clicked.connect(self.save_screenshot)
+        view_layout.addWidget(self.reset_btn)
+        view_layout.addWidget(self.screenshot_btn)
+        layout.addWidget(self.view_box)
 
         layout.addStretch(1)
         self.point_count_label = QtWidgets.QLabel("Points: -")
@@ -396,31 +446,38 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _build_ransac_tab(self) -> None:
         layout = self.tab_widgets["RANSAC"].layout()
-        layout.addWidget(QtWidgets.QLabel("RANSAC segmentation controls will use tunnel_utils.py."))
+        self.ransac_label = QtWidgets.QLabel("RANSAC segmentation controls will use tunnel_utils.py.")
+        layout.addWidget(self.ransac_label)
 
     def _build_centerline_tab(self) -> None:
         layout = self.tab_widgets["Centerline"].layout()
-        layout.addWidget(QtWidgets.QLabel("Centerline layer is previewed in the Overview PyVista viewer."))
+        self.centerline_label = QtWidgets.QLabel("Centerline layer is previewed in the Overview PyVista viewer.")
+        layout.addWidget(self.centerline_label)
 
     def _build_section_tab(self) -> None:
         layout = self.tab_widgets["Section"].layout()
-        layout.addWidget(QtWidgets.QLabel("Cross-section slicing workspace."))
+        self.section_label = QtWidgets.QLabel("Cross-section slicing workspace.")
+        layout.addWidget(self.section_label)
 
     def _build_rings_tab(self) -> None:
         layout = self.tab_widgets["Rings"].layout()
-        layout.addWidget(QtWidgets.QLabel("Concrete segment ring analysis workspace."))
+        self.rings_label = QtWidgets.QLabel("Concrete segment ring analysis workspace.")
+        layout.addWidget(self.rings_label)
 
     def _build_timeseries_tab(self) -> None:
         layout = self.tab_widgets["Time-Series"].layout()
-        layout.addWidget(QtWidgets.QLabel("4D time-series settlement and convergence charts."))
+        self.timeseries_label = QtWidgets.QLabel("4D time-series settlement and convergence charts.")
+        layout.addWidget(self.timeseries_label)
 
     def _build_frenet_tab(self) -> None:
         layout = self.tab_widgets["Frenet"].layout()
-        layout.addWidget(QtWidgets.QLabel("Frenet frame analysis is rendered as a PyVista overlay in Overview."))
+        self.frenet_label = QtWidgets.QLabel("Frenet frame analysis is rendered as a PyVista overlay in Overview.")
+        layout.addWidget(self.frenet_label)
 
     def _build_heatmap_tab(self) -> None:
         layout = self.tab_widgets["Heatmap"].layout()
-        layout.addWidget(QtWidgets.QLabel("Heatmap layer is previewed in the Overview PyVista viewer."))
+        self.heatmap_label = QtWidgets.QLabel("Heatmap layer is previewed in the Overview PyVista viewer.")
+        layout.addWidget(self.heatmap_label)
 
     def _build_results_tab(self) -> None:
         layout = self.tab_widgets["Results"].layout()
@@ -440,14 +497,14 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         file_paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
-            "Import Faro Focus Point Clouds",
+            self.t("import_dialog_title"),
             "",
-            "Point Clouds (*.las *.laz *.ply);;All Files (*.*)",
+            self.t("import_dialog_filter"),
         )
         if not file_paths:
             return
 
-        self.set_status("Loading raw point cloud with laspy / vertex-only parser...", 10)
+        self.set_status(self.t("loading_status"), 10)
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         self.import_btn.setEnabled(False)
         self.register_btn.setEnabled(False)
@@ -460,6 +517,7 @@ class MainWindow(QtWidgets.QMainWindow):
             manager=self.station_manager,
             timestamp=timestamp,
             auto_detect_targets=self.auto_target_check.isChecked(),
+            language=self.current_language,
         )
         self.import_worker.moveToThread(self.import_thread)
         self.import_thread.started.connect(self.import_worker.run)
@@ -482,7 +540,7 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             loaded_stations = list(stations)
             if not loaded_stations:
-                raise RuntimeError("No stations were imported.")
+                raise RuntimeError(self.t("no_stations_error"))
 
             self.station_manager = manager
             station = loaded_stations[-1]
@@ -494,9 +552,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.current_colors = station.colors
             self.current_delta_mm = None
 
-            self.set_status("Rendering vertex-only PyVista overview...", 70)
+            self.set_status(self.t("rendering_status"), 70)
             if not self._ensure_pyvista():
-                raise RuntimeError("PyVista widget was not initialized.")
+                raise RuntimeError(self.t("pyvista_error"))
             self.view_manager.update_view(
                 centered_points,
                 intensity=self.current_intensity,
@@ -507,18 +565,34 @@ class MainWindow(QtWidgets.QMainWindow):
             self._refresh_all_layers()
             self._refresh_station_table()
             self.point_count_label.setText(
-                f"Points: {len(station.points):,} raw / {self.view_manager.rendered_point_count:,} rendered"
+                self.t("points_label_loaded").format(
+                    raw=f"{len(station.points):,}",
+                    rendered=f"{self.view_manager.rendered_point_count:,}",
+                )
             )
-            self.log_result(f"Imported {len(loaded_stations)} station(s) as timestamp {station.timestamp}")
+            self.log_result(
+                self.t("imported_n_stations").format(
+                    count=len(loaded_stations), timestamp=station.timestamp
+                )
+            )
             for imported in loaded_stations:
                 self.log_result(
-                    f"{imported.station_id}: {Path(imported.filepath).name}, "
-                    f"{len(imported.points):,} points, {len(imported.targets)} targets"
+                    self.t("station_log_entry").format(
+                        station=imported.station_id,
+                        filename=Path(imported.filepath).name,
+                        points=f"{len(imported.points):,}",
+                        targets=len(imported.targets),
+                    )
                 )
-            self.log_result(f"Rendered latest station: {self.view_manager.rendered_point_count:,} points")
-            self.set_status(f"Import complete: {len(self.station_manager.stations)} station(s) loaded", 100)
+            self.log_result(
+                self.t("rendered_latest").format(points=f"{self.view_manager.rendered_point_count:,}")
+            )
+            self._labels_have_data = True
+            self.set_status(
+                self.t("import_complete").format(count=len(self.station_manager.stations)), 100
+            )
         except Exception as exc:
-            self.show_error("Import LAS failed", exc)
+            self.show_error(self.t("import_failed_title"), exc)
 
     @QtCore.Slot(str, object)
     def _on_worker_failed(self, title: str, exc: Exception) -> None:
@@ -553,15 +627,17 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.registration_thread is not None:
             return
         if len(self.station_manager.stations) < 2:
-            QtWidgets.QMessageBox.information(self, "Registration", "Load at least two stations before stitching.")
+            QtWidgets.QMessageBox.information(
+                self, self.t("registration_dialog_title"), self.t("registration_need_two")
+            )
             return
-        self.set_status("Running sequential SVD/ICP stitching...", 10)
+        self.set_status(self.t("registration_status"), 10)
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         self.import_btn.setEnabled(False)
         self.register_btn.setEnabled(False)
         self.deformation_btn.setEnabled(False)
         self.registration_thread = QtCore.QThread(self)
-        self.registration_worker = RegistrationWorker(self.station_manager)
+        self.registration_worker = RegistrationWorker(self.station_manager, language=self.current_language)
         self.registration_worker.moveToThread(self.registration_thread)
         self.registration_thread.started.connect(self.registration_worker.run)
         self.registration_worker.status.connect(self._set_worker_status)
@@ -580,8 +656,12 @@ class MainWindow(QtWidgets.QMainWindow):
             for link in links:
                 rmse_mm = link.rmse_final_m * 1000.0
                 self.log_result(
-                    f"{link.source_station_id} -> {link.target_station_id}: "
-                    f"{link.method}, RMSE {rmse_mm:.2f} mm"
+                    self.t("registration_link_log").format(
+                        source=link.source_station_id,
+                        target=link.target_station_id,
+                        method=link.method,
+                        rmse=f"{rmse_mm:.2f}",
+                    )
                 )
             merged = merged - np.mean(merged, axis=0)
             self.current_points = merged
@@ -589,13 +669,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self.current_colors = None
             self.current_delta_mm = None
             if not self._ensure_pyvista():
-                raise RuntimeError("PyVista widget was not initialized.")
-            self.view_manager.update_view(merged, title="Registered Global Cloud", reset_camera=True)
+                raise RuntimeError(self.t("pyvista_error"))
+            self.view_manager.update_view(merged, title=self.t("registered_cloud_title"), reset_camera=True)
             self._refresh_all_layers()
-            self.rmse_label.setText(f"RMSE: {links[-1].rmse_final_m * 1000.0:.2f} mm")
-            self.set_status("Registration complete", 100)
+            self.rmse_label.setText(
+                self.t("rmse_label_value").format(rmse=f"{links[-1].rmse_final_m * 1000.0:.2f}")
+            )
+            self._labels_have_data = True
+            self.set_status(self.t("registration_complete"), 100)
         except Exception as exc:
-            self.show_error("Registration failed", exc)
+            self.show_error(self.t("registration_failed_title"), exc)
 
     @QtCore.Slot()
     def _finish_registration_thread(self) -> None:
@@ -612,8 +695,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if len(grouped) < 2:
             QtWidgets.QMessageBox.information(
                 self,
-                "Deformation Heatmap",
-                "Load at least two timestamps, for example T0 and T1.",
+                self.t("deformation_dialog_title"),
+                self.t("deformation_need_two_ts"),
             )
             return
 
@@ -622,8 +705,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if not current_candidates:
             QtWidgets.QMessageBox.information(
                 self,
-                "Deformation Heatmap",
-                "No current timestamp is available for comparison.",
+                self.t("deformation_dialog_title"),
+                self.t("deformation_no_current"),
             )
             return
         current_timestamp = current_candidates[-1]
@@ -633,7 +716,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.register_btn.setEnabled(False)
         self.deformation_btn.setEnabled(False)
         try:
-            self.set_status(f"Computing {current_timestamp} vs {reference_timestamp} deformation heatmap...", 10)
+            self.set_status(
+                self.t("computing_heatmap_vs").format(
+                    current=current_timestamp, reference=reference_timestamp
+                ),
+                10,
+            )
             results = self.station_manager.compute_temporal_overlap(
                 reference_timestamp=reference_timestamp,
                 current_timestamp=current_timestamp,
@@ -642,10 +730,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 max_points=350_000,
                 warning_mm=3.0,
                 status_cb=lambda message: self.set_status(str(message), None),
-                progress_cb=lambda value: self.set_status("Computing deformation heatmap...", float(value)),
+                progress_cb=lambda value: self.set_status(self.t("computing_heatmap_progress"), float(value)),
             )
             if not results:
-                raise RuntimeError("No deformation result was produced.")
+                raise RuntimeError(self.t("no_deformation_result"))
             result = results[-1]
             centered = result.points - np.mean(result.points, axis=0)
             self.current_points = centered
@@ -654,11 +742,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.current_delta_mm = result.delta_mm
 
             if not self._ensure_pyvista():
-                raise RuntimeError("PyVista widget was not initialized.")
+                raise RuntimeError(self.t("pyvista_error"))
             self.view_manager.show_deformation_heatmap(
                 centered,
                 result.delta_mm,
-                title=f"Deformation Heatmap - {current_timestamp} vs {reference_timestamp}",
+                title=self.t("deformation_title").format(
+                    current=current_timestamp, reference=reference_timestamp
+                ),
                 warning_mm=3.0,
             )
             self._refresh_all_layers()
@@ -666,23 +756,35 @@ class MainWindow(QtWidgets.QMainWindow):
 
             stats = result.statistics
             self.point_count_label.setText(
-                f"Heatmap: {int(stats['point_count']):,} pts, warning {stats['warning_point_pct']:.1f}%"
+                self.t("heatmap_points_label").format(
+                    points=f"{int(stats['point_count']):,}",
+                    pct=f"{stats['warning_point_pct']:.1f}",
+                )
             )
-            self.rmse_label.setText(f"P95 delta: {stats['p95_delta_mm']:.2f} mm")
-            self.log_result(
-                f"Deformation {current_timestamp} vs {reference_timestamp}: "
-                f"mean {stats['mean_delta_mm']:.2f} mm, "
-                f"p95 {stats['p95_delta_mm']:.2f} mm, "
-                f"max {stats['max_delta_mm']:.2f} mm, "
-                f"warning {stats['warning_point_pct']:.1f}%"
+            self.rmse_label.setText(
+                self.t("p95_label").format(p95=f"{stats['p95_delta_mm']:.2f}")
             )
             self.log_result(
-                f"Threshold bands: stable {stats['stable_point_pct']:.1f}%, "
-                f"caution {stats['caution_point_pct']:.1f}%, warning {stats['warning_point_pct']:.1f}%"
+                self.t("deformation_log_stats").format(
+                    current=current_timestamp,
+                    reference=reference_timestamp,
+                    mean=f"{stats['mean_delta_mm']:.2f}",
+                    p95=f"{stats['p95_delta_mm']:.2f}",
+                    max=f"{stats['max_delta_mm']:.2f}",
+                    warning=f"{stats['warning_point_pct']:.1f}",
+                )
             )
-            self.set_status("Deformation heatmap complete", 100)
+            self.log_result(
+                self.t("threshold_bands_log").format(
+                    stable=f"{stats['stable_point_pct']:.1f}",
+                    caution=f"{stats['caution_point_pct']:.1f}",
+                    warning=f"{stats['warning_point_pct']:.1f}",
+                )
+            )
+            self._labels_have_data = True
+            self.set_status(self.t("deformation_complete"), 100)
         except Exception as exc:
-            self.show_error("Deformation heatmap failed", exc)
+            self.show_error(self.t("deformation_failed_title"), exc)
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()
             self.import_btn.setEnabled(True)
@@ -844,17 +946,17 @@ class MainWindow(QtWidgets.QMainWindow):
     def save_screenshot(self) -> None:
         file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
-            "Save PyVista Screenshot",
+            self.t("screenshot_dialog_title"),
             "ssl_tunnel_view.png",
-            "PNG Image (*.png)",
+            self.t("screenshot_filter"),
         )
         if not file_path:
             return
         if not self._ensure_pyvista():
-            self.show_error("Screenshot failed", RuntimeError("PyVista widget was not initialized."))
+            self.show_error(self.t("screenshot_failed_title"), RuntimeError(self.t("pyvista_error")))
             return
         self.plotter.screenshot(file_path)
-        self.set_status(f"Screenshot saved: {file_path}", 100)
+        self.set_status(self.t("screenshot_saved").format(path=file_path), 100)
 
     def _refresh_station_table(self) -> None:
         stations = list(self.station_manager.stations)
@@ -959,6 +1061,62 @@ class MainWindow(QtWidgets.QMainWindow):
             }
             """
         )
+
+    def t(self, key: str) -> str:
+        """Return translated text for the current language (English fallback)."""
+        return get_text(key, self.current_language)
+
+    @QtCore.Slot(str)
+    def change_language(self, language_code: str) -> None:
+        """Switch the active UI language and retranslate every widget."""
+        if language_code not in get_available_languages():
+            return
+        self.current_language = language_code
+        self._retranslate_ui()
+
+    def _retranslate_ui(self) -> None:
+        """Apply current-language text to all static UI elements."""
+        self.setWindowTitle(self.t("window_title"))
+
+        # Sidebar
+        self.sidebar_title.setText(self.t("sidebar_title"))
+        self.sidebar_subtitle.setText(self.t("sidebar_subtitle"))
+        self.import_btn.setText(self.t("import_btn"))
+        self.import_box.setTitle(self.t("import_settings"))
+        self.timestamp_label.setText(self.t("timestamp_label"))
+        self.auto_target_check.setText(self.t("auto_target_check"))
+        self.register_btn.setText(self.t("register_btn"))
+        self.deformation_btn.setText(self.t("deformation_btn"))
+        self.layer_box.setTitle(self.t("viewer_layers"))
+        self.centerline_check.setText(self.t("centerline_check"))
+        self.heatmap_check.setText(self.t("heatmap_check"))
+        self.ai_check.setText(self.t("ai_check"))
+        self.view_box.setTitle(self.t("view_box"))
+        self.reset_btn.setText(self.t("reset_camera_btn"))
+        self.screenshot_btn.setText(self.t("screenshot_btn"))
+
+        # Tab titles
+        for index, key in enumerate(TAB_KEYS):
+            self.tabs.setTabText(index, self.t(key))
+
+        # Tab content labels
+        self.ransac_label.setText(self.t("ransac_label"))
+        self.centerline_label.setText(self.t("centerline_label"))
+        self.section_label.setText(self.t("section_label"))
+        self.rings_label.setText(self.t("rings_label"))
+        self.timeseries_label.setText(self.t("timeseries_label"))
+        self.frenet_label.setText(self.t("frenet_label"))
+        self.heatmap_label.setText(self.t("heatmap_label"))
+        self.ai_text.setPlaceholderText(self.t("ai_chat_placeholder"))
+
+        # Registration station table headers
+        self.station_table.setHorizontalHeaderLabels(self.t("station_table_headers"))
+
+        # Default status labels (only while they still show placeholders, not live data)
+        if not self._labels_have_data:
+            self.point_count_label.setText(self.t("points_label"))
+            self.rmse_label.setText(self.t("rmse_label"))
+            self.set_status(self.t("ready_status"))
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt override name
         if hasattr(self, "plotter") and self.plotter is not None:
