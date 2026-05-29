@@ -15,7 +15,6 @@ TRANSLATIONS = {
         "import_btn": "Import LAS / PLY",
         "register_btn": "Sequential Register",
         "deformation_btn": "Tn vs T0 Heatmap",
-        "language_btn": "🌐 English",
         
         # Import Settings
         "import_settings": "Import Settings",
@@ -137,7 +136,6 @@ TRANSLATIONS = {
         "import_btn": "Nhập LAS / PLY",
         "register_btn": "Đăng Ký Tuần Tự",
         "deformation_btn": "Bản Đồ Nhiệt Tn vs T0",
-        "language_btn": "🌐 Tiếng Việt",
         
         # Import Settings
         "import_settings": "Cài Đặt Nhập",
@@ -259,7 +257,6 @@ TRANSLATIONS = {
         "import_btn": "LAS / PLY 가져오기",
         "register_btn": "순차 정합",
         "deformation_btn": "Tn vs T0 히트맵",
-        "language_btn": "🌐 한국어",
         
         # Import Settings
         "import_settings": "가져오기 설정",
