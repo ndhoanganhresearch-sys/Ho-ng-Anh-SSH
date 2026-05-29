@@ -259,19 +259,21 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         ai_panel = QtWidgets.QWidget(); ai_lay = QtWidgets.QVBoxLayout(ai_panel)
         ai_lay.setContentsMargins(8, 8, 8, 8); ai_lay.setSpacing(6)
         self.ai_prompt = QtWidgets.QPlainTextEdit()
-        self.ai_prompt.setPlaceholderText("Enter a structural engineering question for the local AI assistant (Llama 3)...")
+        self.ai_prompt.setPlaceholderText(_tr("Enter a structural engineering question for the local AI assistant (Llama 3)...", self.current_language))
         self.ai_prompt.setMaximumHeight(90)
-        self.ai_send = QtWidgets.QPushButton("Query AI Assistant")
+        self.ai_send = QtWidgets.QPushButton(_tr("Query AI Assistant", self.current_language))
         self.ai_send.clicked.connect(self._slot_7_2_query_ai)
         self.ai_resp = QtWidgets.QPlainTextEdit(); self.ai_resp.setReadOnly(True)
-        ai_lay.addWidget(QtWidgets.QLabel("Engineering query:")); ai_lay.addWidget(self.ai_prompt)
+        self._ai_query_lbl = QtWidgets.QLabel(_tr("Engineering query:", self.current_language))
+        ai_lay.addWidget(self._ai_query_lbl); ai_lay.addWidget(self.ai_prompt)
         ai_lay.addWidget(self.ai_send)
-        ai_lay.addWidget(QtWidgets.QLabel("AI analysis report:")); ai_lay.addWidget(self.ai_resp, 1)
+        self._ai_report_lbl = QtWidgets.QLabel(_tr("AI analysis report:", self.current_language))
+        ai_lay.addWidget(self._ai_report_lbl); ai_lay.addWidget(self.ai_resp, 1)
         self.right_tabs.addTab(ai_panel, "AI Engineering Assistant")
 
         self.sb_pts  = QtWidgets.QLabel("Points: --")
         self.sb_rmse = QtWidgets.QLabel("RMSE: --")
-        self.sb_msg  = QtWidgets.QLabel("Ready")
+        self.sb_msg  = QtWidgets.QLabel(_tr("Ready", self.current_language))
         self.sb_prog = QtWidgets.QProgressBar(); self.sb_prog.setRange(0, 100)
         self.statusBar().addWidget(self.sb_pts)
         self.statusBar().addWidget(self.sb_rmse)
@@ -2213,6 +2215,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 if cur == src_title or cur in (_tr(src_title, "vi"), _tr(src_title, "ko")):
                     self.right_tabs.setTabText(i, _tr(src_title, lang))
                     break
+
+        # AI assistant panel
+        self.ai_prompt.setPlaceholderText(_tr("Enter a structural engineering question for the local AI assistant (Llama 3)...", lang))
+        self.ai_send.setText(_tr("Query AI Assistant", lang))
+        self._ai_query_lbl.setText(_tr("Engineering query:", lang))
+        self._ai_report_lbl.setText(_tr("AI analysis report:", lang))
 
     def _apply_theme(self) -> None:
         self.setStyleSheet("""
