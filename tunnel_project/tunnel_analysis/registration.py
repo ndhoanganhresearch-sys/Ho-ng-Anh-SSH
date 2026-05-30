@@ -193,4 +193,194 @@ class RegistrationLayer:
         d, _ = cKDTree(tgt).query(src[::step], k=1, workers=-1)
         return float(np.sqrt(np.mean(d ** 2))) * 1000.0
 
+    # ------------------------------------------------------------------ GROR --
+    # GROR-inspired robust registration. Re-implements the core idea of
+    # WPC-WHU/GROR (TPAMI 2022) in Python/Open3D + NumPy: build FPFH feature
+    # correspondences, then discard outliers using pairwise-distance
+    # consistency (a rigid transform preserves inter-point distances, so true
+    # correspondences form a mutually-consistent graph), solve the pose with
+    # Umeyama/SVD, and refine with the existing ICP. See _ref_GROR/ for the
+    # original C++ reference implementation.
+
+    def register_gror_like(
+        self,
+        context: PipelineContext,
+        voxel_factor: float = 1.0,
+        max_correspondences: int = 1500,
+        dist_tol_factor: float = 2.0,
+        min_inliers: int = 3,
+    ) -> Tuple[np.ndarray, float]:
+        """Robustly register the active scan to scan[0] via GROR-style outlier
+        removal, then ICP. Returns (registered_source_points, rmse_mm).
+
+        Falls back to anchor-translation + ICP when Open3D is unavailable or
+        too few reliable correspondences survive (e.g. tiny / featureless
+        clouds), so it is always safe to call in place of run_surface_icp.
+        """
+        pts = context.working_points
+        if pts is None:
+            raise RuntimeError("Load scan first.")
+        src = validate_xyz(pts)
+        if len(context.scans) < 2:
+            return src, 0.0
+        tgt = validate_xyz(context.scans[0].points)
+
+        transform = self._gror_estimate_transform(
+            src, tgt,
+            voxel_factor=voxel_factor,
+            max_correspondences=max_correspondences,
+            dist_tol_factor=dist_tol_factor,
+            min_inliers=min_inliers,
+        )
+        if transform is None:
+            # Coarse feature stage failed: fall back to the legacy anchor shift.
+            shift = self._anchor(tgt, context.scans[0].intensity) - self._anchor(
+                src, context.active_scan.intensity if context.active_scan else None)
+            return self._icp(src + shift, tgt)
+
+        ones = np.ones((src.shape[0], 1))
+        src_coarse = (transform @ np.hstack([src, ones]).T).T[:, :3]
+        # Refine the GROR coarse pose with the existing fine ICP/GICP stage.
+        return self._icp(src_coarse, tgt)
+
+    def _gror_estimate_transform(
+        self,
+        src: np.ndarray,
+        tgt: np.ndarray,
+        voxel_factor: float = 1.0,
+        max_correspondences: int = 1500,
+        dist_tol_factor: float = 2.0,
+        min_inliers: int = 3,
+    ) -> Optional[np.ndarray]:
+        """Estimate a coarse 4x4 rigid transform from src to tgt using FPFH
+        correspondences filtered by graph reliability. Returns None on failure.
+        """
+        if o3d is None or len(src) < 20 or len(tgt) < 20:
+            return None
+        resolution = float(np.clip(np.linalg.norm(np.ptp(tgt, axis=0)) / 600.0, 0.02, 0.12))
+        resolution *= float(max(voxel_factor, 1e-3))
+
+        kp_s, feat_s = self._fpfh_features(src, resolution)
+        kp_t, feat_t = self._fpfh_features(tgt, resolution)
+        if kp_s is None or kp_t is None or len(kp_s) < 3 or len(kp_t) < 3:
+            return None
+
+        corr = self._match_mutual(feat_s, feat_t)
+        if len(corr) < min_inliers:
+            return None
+        if len(corr) > max_correspondences:
+            # Keep a bounded random subset so the O(m^2) graph stays tractable.
+            rng = np.random.default_rng(42)
+            corr = corr[rng.choice(len(corr), max_correspondences, replace=False)]
+
+        ps = kp_s[corr[:, 0]]
+        pt = kp_t[corr[:, 1]]
+        inlier_mask = self._graph_reliable_inliers(
+            ps, pt, dist_tol=dist_tol_factor * resolution, min_inliers=min_inliers)
+        if int(inlier_mask.sum()) < min_inliers:
+            return None
+        return self._umeyama(ps[inlier_mask], pt[inlier_mask])
+
+    @staticmethod
+    def _fpfh_features(pts: np.ndarray, resolution: float) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        """Downsample, estimate normals, and compute FPFH-33 descriptors.
+
+        Mirrors GROR's preparation radii (normals 3x, FPFH 8x resolution).
+        Returns (keypoint_xyz Nx3, feature NxD) or (None, None) on failure.
+        """
+        try:
+            pc = o3d.geometry.PointCloud()
+            pc.points = o3d.utility.Vector3dVector(np.ascontiguousarray(pts, dtype=np.float64))
+            down = pc.voxel_down_sample(resolution)
+            if len(down.points) < 3:
+                return None, None
+            down.estimate_normals(
+                o3d.geometry.KDTreeSearchParamHybrid(radius=resolution * 3.0, max_nn=30))
+            fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+                down, o3d.geometry.KDTreeSearchParamHybrid(radius=resolution * 8.0, max_nn=100))
+            kp = np.asarray(down.points, dtype=np.float64)
+            feat = np.asarray(fpfh.data, dtype=np.float64).T  # N x 33
+            if feat.shape[0] != kp.shape[0] or kp.shape[0] < 3:
+                return None, None
+            return kp, feat
+        except Exception:
+            return None, None
+
+    @staticmethod
+    def _match_mutual(feat_s: np.ndarray, feat_t: np.ndarray) -> np.ndarray:
+        """Mutual (reciprocal) nearest-neighbour matching in FPFH space.
+
+        Returns an (M, 2) int array of (source_idx, target_idx) pairs.
+        """
+        if cKDTree is None:
+            return np.empty((0, 2), dtype=np.int64)
+        tree_t = cKDTree(feat_t)
+        _, nn_st = tree_t.query(feat_s, k=1, workers=-1)
+        tree_s = cKDTree(feat_s)
+        _, nn_ts = tree_s.query(feat_t, k=1, workers=-1)
+        s_idx = np.arange(len(feat_s))
+        mutual = nn_ts[nn_st] == s_idx
+        return np.column_stack([s_idx[mutual], nn_st[mutual]]).astype(np.int64)
+
+    @staticmethod
+    def _graph_reliable_inliers(ps: np.ndarray, pt: np.ndarray, dist_tol: float,
+                                min_inliers: int = 3) -> np.ndarray:
+        """Select inliers via pairwise-distance consistency (GROR node/edge
+        reliability). Two correspondences are consistent if the distance
+        between their source points matches that between their target points
+        (a rigid transform preserves distances). The correspondence with the
+        most consistent partners seeds a star-consistent inlier set.
+        """
+        m = len(ps)
+        if m < 3:
+            return np.ones(m, dtype=bool)
+        ds = np.linalg.norm(ps[:, None, :] - ps[None, :, :], axis=2)
+        dt = np.linalg.norm(pt[:, None, :] - pt[None, :, :], axis=2)
+        consistent = np.abs(ds - dt) < dist_tol
+        np.fill_diagonal(consistent, False)
+        degree = consistent.sum(axis=1)
+        seed = int(np.argmax(degree))
+
+        # Candidate clique: the seed plus every correspondence consistent
+        # with it (GROR node reliability).
+        cand = consistent[seed].copy()
+        cand[seed] = True
+        cand_idx = np.where(cand)[0]
+        if len(cand_idx) < 3:
+            return cand
+
+        # Refine to a mutually-consistent set: a coincidental outlier may
+        # agree with the seed yet disagree with the rest, so keep only
+        # members consistent with a majority of the candidate clique
+        # (maximum-consistent-set / edge reliability).
+        sub = consistent[np.ix_(cand_idx, cand_idx)]
+        votes = sub.sum(axis=1)
+        keep = votes >= max(min_inliers - 1, int(np.ceil(0.5 * (len(cand_idx) - 1))))
+        inliers = np.zeros(m, dtype=bool)
+        inliers[cand_idx[keep]] = True
+        if int(inliers.sum()) < 3:
+            inliers = cand  # fall back to the looser node-reliable set
+        return inliers
+
+    @staticmethod
+    def _umeyama(src: np.ndarray, tgt: np.ndarray) -> np.ndarray:
+        """Least-squares rigid transform (no scaling) via Umeyama/SVD.
+
+        Returns a 4x4 matrix mapping src onto tgt.
+        """
+        mu_s = src.mean(axis=0)
+        mu_t = tgt.mean(axis=0)
+        S = src - mu_s
+        T = tgt - mu_t
+        H = (S.T @ T) / len(src)
+        U, _, Vt = np.linalg.svd(H)
+        d = np.sign(np.linalg.det(Vt.T @ U.T))
+        D = np.diag([1.0, 1.0, d])
+        R = Vt.T @ D @ U.T
+        t = mu_t - R @ mu_s
+        M = np.eye(4, dtype=np.float64)
+        M[:3, :3] = R
+        M[:3, 3] = t
+        return M
+
 
