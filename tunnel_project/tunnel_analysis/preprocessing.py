@@ -439,5 +439,126 @@ class PreprocessingLayer:
             "n_radial": int(radial_noise.sum()),
             "noise_pts": pts[noise_mask].copy(),
         }
+    def extract_lining_density_variation(
+        self,
+        context: PipelineContext,
+        ring_count: int = 40,
+        theta_step_deg: float = 0.5,
+        r_step: float = 0.01,
+        grad_threshold: float = 0.2,
+        smooth_window: int = 5,
+    ) -> Tuple[np.ndarray, Dict]:
+        """Extract the tunnel lining via local density-difference denoising.
 
+        Pure-NumPy re-implementation of Algorithm 2 ("Local point cloud
+        density-difference-based denoising") from SAM4Tun (Ye et al., 2025,
+        Tunnelling and Underground Space Technology; repo zxy239/SAM4Tun). The
+        original notebook uses numba/torch; only the training-free density
+        logic is reproduced here, kept dependency-light for headless use.
 
+        Idea: convert the cloud to cylindrical coordinates (h along the axis,
+        theta around it, r = radial distance). For each axial section and each
+        angular bin, build a radial-distance histogram. The lining forms a
+        dense radial peak; scanning inward from that peak, the first place where
+        the point count drops sharply (negative gradient beyond grad_threshold)
+        marks the inner boundary of the lining. Points inside that cut-off
+        (cables, fixtures, vehicles in the bore) are discarded.
+
+        Returns the lining cloud plus statistics. Updates
+        context.normalized_points in place.
+        """
+        pts = context.working_points
+        if pts is None:
+            raise RuntimeError("extract_lining_density_variation: no working_points.")
+        pts = validate_xyz(pts)
+        n_raw = len(pts)
+        if n_raw < 50:
+            context.normalized_points = pts
+            return pts, {"n_raw": n_raw, "n_clean": n_raw, "n_removed": 0,
+                         "method": "skip-too-small"}
+
+        # --- cylindrical coordinates around the PCA axis ---
+        centroid = pts.mean(0)
+        centred = pts - centroid
+        ev, vecs = np.linalg.eigh(np.cov(centred.T))
+        order = np.argsort(ev)[::-1]
+        axis = vecs[:, order[0]]
+        e1 = vecs[:, order[1]]
+        e2 = vecs[:, order[2]]
+        h = centred @ axis                      # along-axis position
+        u = centred @ e1
+        v = centred @ e2
+        r = np.sqrt(u * u + v * v)              # radial distance to axis
+        theta = np.degrees(np.arctan2(v, u))    # angle around axis [-180,180]
+
+        keep = np.ones(n_raw, dtype=bool)
+        hmin, hmax = float(h.min()), float(h.max())
+        x_step = max((hmax - hmin) / max(ring_count, 1), 1e-6)
+        x_edges = np.arange(hmin, hmax + x_step, x_step)
+        t_edges = np.arange(-180.0, 180.0 + theta_step_deg, theta_step_deg)
+        n_removed_density = 0
+
+        for xi in range(len(x_edges) - 1):
+            xm = (h >= x_edges[xi]) & (h < x_edges[xi + 1])
+            if not xm.any():
+                continue
+            r_sub = r[xm]
+            th_sub = theta[xm]
+            idx_sub = np.where(xm)[0]
+
+            r_lo, r_hi = float(r_sub.min()), float(r_sub.max())
+            if r_hi - r_lo < r_step:
+                continue
+            r_bins = np.arange(r_lo, r_hi + r_step, r_step)
+            t_idx = np.clip(np.digitize(th_sub, t_edges) - 1, 0, len(t_edges) - 2)
+
+            def _inner_boundary(counts):
+                """Radius (bin edge) of the lining inner edge: scan inward from
+                the densest shell until the count drops off sharply."""
+                if counts.sum() == 0:
+                    return None
+                peak = int(np.argmax(counts))
+                grad = np.diff(counts) / (counts[:-1] + 1e-6)
+                cut_bin = peak
+                for j in range(peak, 0, -1):
+                    if grad[j - 1] < -grad_threshold or (counts[j] == 0 and counts[j - 1] == 0):
+                        cut_bin = j
+                        break
+                return float(r_bins[cut_bin])
+
+            # Section-level baseline: the lining inner edge from ALL points in
+            # this axial slice. Dense and robust, so sparse interior clutter
+            # (a cable at one fixed angle, with few points per angular cell) is
+            # still removed even where its own angular bin is too thin to fit.
+            section_counts, _ = np.histogram(r_sub, bins=r_bins)
+            base_cut = _inner_boundary(section_counts)
+            if base_cut is None:
+                continue
+            cutoff = np.full(len(t_edges) - 1, base_cut)
+
+            # Per-angle refinement only where a bin has enough points; never
+            # below the section baseline (avoids re-admitting interior clutter).
+            for ti in range(len(t_edges) - 1):
+                sel = t_idx == ti
+                if sel.sum() < 10:
+                    continue
+                counts, _ = np.histogram(r_sub[sel], bins=r_bins)
+                cut = _inner_boundary(counts)
+                if cut is not None:
+                    cutoff[ti] = max(cut, base_cut)
+
+            drop = r_sub < cutoff[t_idx]        # inside the lining boundary
+            if drop.any():
+                keep[idx_sub[drop]] = False
+                n_removed_density += int(drop.sum())
+
+        clean = validate_xyz(pts[keep])
+        context.normalized_points = clean
+        return clean, {
+            "n_raw": n_raw,
+            "n_clean": int(keep.sum()),
+            "n_removed": int((~keep).sum()),
+            "n_removed_density": n_removed_density,
+            "method": "density-variation",
+            "noise_pts": pts[~keep].copy(),
+        }
