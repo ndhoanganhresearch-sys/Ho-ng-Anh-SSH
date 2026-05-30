@@ -280,4 +280,158 @@ class PreprocessingLayer:
 
         return result
 
+    def auto_denoise(
+        self,
+        context: PipelineContext,
+        k_neighbors: int = 20,
+        cable_linearity_thr: float = 0.30,
+        light_sphericity_thr: float = 0.12,
+        light_size_thr: float = 0.20,
+        person_height_thr: float = 1.2,
+        person_width_thr: float = 0.8,
+        k_sigma: float = 2.5,
+        section_len: float = 0.5,
+        interior_ratio: float = 0.40,
+    ) -> Tuple[np.ndarray, Dict]:
+        """Fully automatic intelligent denoising (no manual interaction).
+
+        Combines morphological/semantic classification with distance-statistics
+        filtering to identify and remove every non-structural object (cables,
+        lights, signal devices, vehicles and people) from the tunnel lining,
+        in a single pass:
+
+        Stage A - Semantic morphology (local PCA shape per point):
+          * Cables/pipes  -> high linearity      (long, thin)
+          * Lights/signals-> high sphericity + small isolated cluster
+          * People/vehicles-> planar clusters of human/vehicle size (DBSCAN)
+        Stage B - Distance statistics along the tunnel axis (robust median+MAD):
+          * Per axial slice, keep points whose radial distance lies within
+            R_med +/- k_sigma*1.4826*MAD and outside the interior band
+            (r < interior_ratio*R_med) where stray fixtures/vehicles sit.
+
+        Returns the cleaned lining cloud plus per-class statistics. Pure
+        NumPy/SciPy with optional scikit-learn; degrades gracefully when a
+        dependency is missing so it is always safe to call headless.
+        """
+        pts = context.working_points
+        if pts is None:
+            raise RuntimeError("auto_denoise: no working_points.")
+        pts = validate_xyz(pts)
+        n_raw = len(pts)
+        if n_raw < 10:
+            return pts, {"n_raw": n_raw, "n_clean": n_raw, "n_removed": 0,
+                         "n_cable": 0, "n_light": 0, "n_person": 0,
+                         "n_radial": 0, "noise_pts": np.empty((0, 3))}
+
+        # ---- Stage A: semantic / morphological classification --------------
+        sem_noise = np.zeros(n_raw, dtype=bool)
+        n_cable = n_light = n_person = 0
+        if cKDTree is not None:
+            k = min(k_neighbors, n_raw - 1)
+            tree = cKDTree(pts)
+            _, idx = tree.query(pts, k=k + 1, workers=-1)
+            neighbors = pts[idx[:, 1:]]  # (N, k, 3)
+
+            linearity = np.zeros(n_raw)
+            planarity = np.zeros(n_raw)
+            sphericity = np.zeros(n_raw)
+            local_size = np.zeros(n_raw)
+            sig2_over_sig1 = np.ones(n_raw)  # transverse thinness (cables ~ 0)
+            for i in range(n_raw):
+                cov = np.cov(neighbors[i].T)
+                try:
+                    ev = np.sort(np.linalg.eigvalsh(cov))[::-1]
+                    ev = np.clip(ev, 0, None)
+                    # Demantke (2011) dimensionality features: use sigma = sqrt(lambda)
+                    # normalised by the largest sigma (matches lyuhaitao/PowerLineDetection,
+                    # see _ref_PowerLine/lyutool/core.py::extractFeathersByPointCloud).
+                    s1, s2, s3 = np.sqrt(ev)
+                    s1 = s1 if s1 > 1e-12 else 1e-12
+                    linearity[i] = (s1 - s2) / s1
+                    planarity[i] = (s2 - s3) / s1
+                    sphericity[i] = s3 / s1
+                    local_size[i] = float(s1)
+                    sig2_over_sig1[i] = s2 / s1
+                except Exception:
+                    pass
+
+            # A true cable/pipe is thin along BOTH transverse axes, so its
+            # second singular value is negligible. The Demantke linearity
+            # already encodes (1 - s2/s1); the explicit s2/s1 gate keeps
+            # merely elongated lining patches from being flagged as cables.
+            is_cable = (linearity >= cable_linearity_thr) & (sig2_over_sig1 < 0.15)
+            is_light = (sphericity >= light_sphericity_thr) & (local_size <= light_size_thr)
+            is_person = np.zeros(n_raw, dtype=bool)
+            person_mask = planarity > 0.4
+            if person_mask.sum() > 10:
+                try:
+                    from sklearn.cluster import DBSCAN
+                    person_pts = pts[person_mask]
+                    labels = DBSCAN(eps=0.15, min_samples=5).fit(person_pts).labels_
+                    for c in set(labels) - {-1}:
+                        cp = person_pts[labels == c]
+                        height = float(cp[:, 2].max() - cp[:, 2].min())
+                        width = float(np.ptp(cp[:, :2], axis=0).max())
+                        if person_height_thr <= height <= 2.2 and width <= person_width_thr:
+                            center = cp.mean(axis=0)
+                            is_person[np.linalg.norm(pts - center, axis=1) < 0.5] = True
+                except Exception:
+                    pass
+
+            sem_noise = is_cable | is_light | is_person
+            n_cable = int(is_cable.sum())
+            n_light = int(is_light.sum())
+            n_person = int(is_person.sum())
+
+        # ---- Stage B: radial distance statistics (median + MAD) ------------
+        radial_noise = np.zeros(n_raw, dtype=bool)
+        survivors = ~sem_noise
+        if survivors.sum() >= 6:
+            sidx = np.where(survivors)[0]
+            sp_all = pts[sidx]
+            centroid = sp_all.mean(0)
+            centred = sp_all - centroid
+            ev, vecs = np.linalg.eigh(np.cov(centred.T))
+            long_ax = vecs[:, np.argmax(ev)]
+            proj = centred @ long_ax
+            pmin, pmax = float(proj.min()), float(proj.max())
+            ns = max(1, int(np.ceil((pmax - pmin) / section_len)))
+            radial_keep_local = np.zeros(len(sidx), dtype=bool)
+            for s in range(ns):
+                lo = pmin + s * section_len
+                hi = pmin + (s + 1) * section_len
+                if s == ns - 1:
+                    hi = pmax + 1e-9
+                m = (proj >= lo) & (proj < hi)
+                loc = np.where(m)[0]
+                if len(loc) < 6:
+                    radial_keep_local[loc] = True
+                    continue
+                ao = centroid + float(proj[loc].mean()) * long_ax
+                diff = sp_all[loc] - ao
+                ri = np.linalg.norm(diff - (diff @ long_ax)[:, None] * long_ax, axis=1)
+                R_med = float(np.median(ri))
+                if R_med < 1e-4:
+                    radial_keep_local[loc] = True
+                    continue
+                mad = float(np.median(np.abs(ri - R_med))) + 1e-9
+                thr = k_sigma * 1.4826 * mad
+                band = (np.abs(ri - R_med) <= thr) & (ri >= R_med * interior_ratio)
+                radial_keep_local[loc[band]] = True
+            radial_noise[sidx[~radial_keep_local]] = True
+
+        noise_mask = sem_noise | radial_noise
+        clean_pts = validate_xyz(pts[~noise_mask])
+        context.normalized_points = clean_pts
+        return clean_pts, {
+            "n_raw": n_raw,
+            "n_clean": int((~noise_mask).sum()),
+            "n_removed": int(noise_mask.sum()),
+            "n_cable": n_cable,
+            "n_light": n_light,
+            "n_person": n_person,
+            "n_radial": int(radial_noise.sum()),
+            "noise_pts": pts[noise_mask].copy(),
+        }
+
 

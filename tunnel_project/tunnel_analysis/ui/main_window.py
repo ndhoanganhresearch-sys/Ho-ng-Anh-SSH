@@ -30,7 +30,7 @@ CORE_FEATURES_ONLY = True
 # of each button label (e.g. "4.3b"). Edit this set to fine-tune the scope.
 CORE_STEP_CODES = {
     "1.1", "1.2", "1.3", "1.4",                       # acquire + merge stations
-    "2.1", "2.2", "2.3",                              # preprocessing
+    "2.1", "2.2", "2.3", "2.5",                       # preprocessing
     "3.1", "3.2", "3.3",                              # registration + RMSE
     "4.1", "4.3b", "4.4",                             # centerline + section frames
     "5.1", "5.2", "5.3", "5.5", "5.6", "5.7",          # deformation parameters
@@ -392,6 +392,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 ("1.7  Registration error heatmap", self._slot_1_7_reg_error),
             ]),
             (2, "Preprocessing and noise filtering", "Pre.", [
+                ("2.5  Auto denoise (smart, no manual)", self._slot_2_5_auto_denoise),
                 ("2.1  Voxel downsampling", self._slot_2_1_voxel),
                 ("2.2  Statistical outlier removal", self._slot_2_2_sor),
                 ("2.3  Extract tunnel lining shell", self._slot_2_3_lining),
@@ -657,6 +658,21 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         elif key == "2.3_lining":
             pts = np.asarray(result, dtype=np.float64); self.context.normalized_points = pts
             self._render_pts(pts, "2.3 Isolated Tunnel Lining", "#6366F1"); self._log(f"Tunnel lining extraction complete: {len(pts):,} points retained.")
+
+        elif key == "2.5_auto_denoise":
+            pts, stats = result
+            pts = np.asarray(pts, dtype=np.float64)
+            self.context.normalized_points = pts
+            noise_pts = np.asarray(stats.get("noise_pts", np.empty((0, 3))), dtype=np.float64)
+            if self._auto_running:
+                self._render_pts(pts, "2.5 Auto Denoise - Clean lining (auto)", "#0EA5E9")
+            else:
+                self._render_filter_result(pts, noise_pts,
+                    "2.5 Auto Denoise | lining=blue, removed=red")
+            self.pt_label.setText(f"Points: {len(pts):,}")
+            self.sb_pts.setText(f"Points: {len(pts):,}")
+            self._log(f"Auto denoise: {stats.get('n_clean', len(pts)):,}/{stats.get('n_raw', len(pts)):,} kept, {stats.get('n_removed', 0):,} removed.")
+            self._log(f"  Cable={stats.get('n_cable', 0)} Light={stats.get('n_light', 0)} Person/Vehicle={stats.get('n_person', 0)} Radial={stats.get('n_radial', 0)}")
 
         elif key == "3.1_anchor":
             pts = np.asarray(result, dtype=np.float64); self.context.registered_points = pts
@@ -1004,6 +1020,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _slot_2_2_sor(self) -> None:
         self._hdr("Statistical Outlier Removal", "Remove environmental noise using distance-statistics filtering.")
         self._start_worker("2.2_sor", lambda: self.pre_mod.statistical_outlier_removal_run(self.context))
+
+    def _slot_2_5_auto_denoise(self) -> None:
+        self._hdr("Auto Denoise (Smart, No Manual)",
+                  "Automatically remove cables, lights, signal devices, vehicles and people "
+                  "using morphological classification + distance statistics. No manual picking.")
+        self._start_worker("2.5_auto_denoise", lambda: self.pre_mod.auto_denoise(self.context))
 
     def _slot_2_4_semantic(self) -> None:
         self._hdr("Semantic Noise Removal (PDF 3.2)",
