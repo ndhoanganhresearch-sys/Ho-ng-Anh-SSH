@@ -2086,8 +2086,13 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         btn_restore.clicked.connect(self._start_restore_selection)
         btn_cancel.clicked.connect(self._cancel_noise_removal)
         lay.addWidget(lbl, 1)
-        lay.addWidget(btn_add)
-        lay.addWidget(btn_restore)
+        # Manual noise picking (click points to mark/restore) is an advanced
+        # action; hide it in core mode and keep the automatic confirm/cancel.
+        if not CORE_FEATURES_ONLY:
+            lay.addWidget(btn_add)
+            lay.addWidget(btn_restore)
+        else:
+            btn_add.hide(); btn_restore.hide()
         lay.addWidget(btn_confirm)
         lay.addWidget(btn_cancel)
         self._noise_panel = panel
