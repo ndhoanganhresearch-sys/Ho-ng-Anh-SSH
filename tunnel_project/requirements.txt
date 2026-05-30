@@ -1,0 +1,28 @@
+﻿# SSL Smart Tunnel Monitoring System (4D-LiDAR) — pinned dependencies
+# Python 3.12. Install: pip install -r requirements.txt
+
+# Core numerics
+numpy==2.4.3
+scipy==1.17.1
+
+# Point-cloud I/O and processing
+laspy==2.7.0
+lazrs==0.8.1
+open3d==0.19.0
+
+# Registration (parallel GICP/ICP)
+small_gicp==1.0.0
+
+# 4D change analysis (M3C2)
+py4dgeo==0.7.0
+
+# GUI + 3D visualisation
+PySide6==6.11.0
+pyvista==0.48.0
+pyvistaqt==0.11.4
+vtk==9.3.1
+
+# Plotting / reporting
+matplotlib==3.10.8
+pandas==3.0.3
+seaborn==0.13.2

@@ -133,6 +133,11 @@ class RegistrationLayer:
         return est
 
     def _icp(self, src: np.ndarray, tgt: np.ndarray) -> Tuple[np.ndarray, float]:
+        if small_gicp is not None and len(src) >= 20 and len(tgt) >= 20:
+            try:
+                return self._icp_gicp(src, tgt)
+            except Exception:
+                pass
         if o3d is not None and len(src) >= 20 and len(tgt) >= 20:
             vs = float(np.clip(np.linalg.norm(np.ptp(tgt, axis=0)) / 600.0, 0.02, 0.12))
             def _pc(p):
@@ -156,6 +161,31 @@ class RegistrationLayer:
             reg  = (T @ np.hstack([src, ones]).T).T[:, :3]
             return reg, float(r2.inlier_rmse) * 1000.0
         return src, self._rmse(src, tgt)
+
+    def _icp_gicp(self, src: np.ndarray, tgt: np.ndarray) -> Tuple[np.ndarray, float]:
+        """Fine registration via small_gicp (parallel GICP).
+
+        Returns the transformed source cloud and post-alignment RMSE in mm.
+        Voxel/downsampling resolutions adapt to the target's bounding extent
+        so behaviour matches the Open3D path for tunnel-scale clouds.
+        """
+        extent = float(np.linalg.norm(np.ptp(tgt, axis=0)))
+        vs = float(np.clip(extent / 600.0, 0.02, 0.12))
+        src64 = np.ascontiguousarray(src, dtype=np.float64)
+        tgt64 = np.ascontiguousarray(tgt, dtype=np.float64)
+        result = small_gicp.align(
+            tgt64, src64,
+            registration_type="GICP",
+            voxel_resolution=max(vs * 4, 0.1),
+            downsampling_resolution=vs,
+            max_correspondence_distance=max(vs * 6, 0.15),
+            num_threads=max(1, (os.cpu_count() or 2)),
+            max_iterations=60,
+        )
+        T = np.asarray(result.T_target_source, dtype=np.float64)
+        ones = np.ones((src.shape[0], 1))
+        reg = (T @ np.hstack([src64, ones]).T).T[:, :3]
+        return reg, self._rmse(reg, tgt)
 
     def _rmse(self, src: np.ndarray, tgt: np.ndarray) -> float:
         if cKDTree is None: return float("nan")

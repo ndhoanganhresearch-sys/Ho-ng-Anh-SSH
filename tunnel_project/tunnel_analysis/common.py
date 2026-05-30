@@ -33,6 +33,16 @@ except ImportError:
     cKDTree = None
 
 try:
+    import small_gicp
+except ImportError:
+    small_gicp = None
+
+try:
+    import py4dgeo
+except ImportError:
+    py4dgeo = None
+
+try:
     import pyvista as pv
     if hasattr(pv, "set_qt_api"):
         try:
@@ -213,7 +223,7 @@ def make_vertex_cloud(
 __all__ = [
     "json", "math", "os", "sys", "warnings",
     "dataclass", "field", "Path", "Callable", "Dict", "List", "Optional", "Tuple",
-    "np", "laspy", "o3d", "cKDTree", "pv", "QtCore", "QtGui", "QtWidgets", "QtInteractor",
+    "np", "laspy", "o3d", "cKDTree", "small_gicp", "py4dgeo", "pv", "QtCore", "QtGui", "QtWidgets", "QtInteractor",
     "matplotlib", "plt", "mpatches", "FigureCanvas", "Figure", "_MPL_OK",
     "TUNNEL_PROFILES", "VL_BOX_W", "VL_BOX_H", "VL_CIR_R",
     "_BG", "_FG", "_GRID", "_ACC1", "_ACC2", "_ACC3", "_RED", "_YEL", "_GRN", "_DIM",

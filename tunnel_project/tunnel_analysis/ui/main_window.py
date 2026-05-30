@@ -400,6 +400,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             (6, "Time-series analysis", "T-S", [
                 ("6.1  Load T0 and Tn epochs", self._slot_6_1_epochs),
                 ("6.2  Plot deformation trend", self._slot_6_2_plot),
+                ("6.3  M3C2 deformation map T0→Tn", self._slot_6_3_m3c2),
             ]),
             (7, "BIM and AI", "BIM/AI", [
                 ("7.1  Export IFC package", self._slot_7_1_ifc),
@@ -775,6 +776,38 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             series = np.asarray(result, dtype=np.float64); self.context.time_series_plot = series
             self.ts_plot.set_values(series, "Deformation Trend Chart Across Chainage Line (mm)")
             self.right_tabs.setCurrentIndex(2)
+
+        elif key == "6.3_m3c2":
+            res = result
+            self.context.m3c2_result = res
+            pts = np.asarray(res["corepoints"], dtype=np.float64)
+            dist_mm = np.asarray(res["distance_mm"], dtype=np.float64)
+            self.context.heatmap_scalars = dist_mm
+            mesh = make_vertex_cloud(pts)
+            if len(dist_mm) == mesh.n_points:
+                mesh["M3C2_mm"] = dist_mm
+            if self.plotter is not None:
+                lim = float(np.nanmax(np.abs(dist_mm))) if dist_mm.size else 1.0
+                lim = max(lim, 1e-6)
+                self.plotter.clear(); self.plotter.set_background("#F8FAFC")
+                self.plotter.add_mesh(mesh, scalars="M3C2_mm", cmap="RdBu_r",
+                    style="points", point_size=2.8, render_points_as_spheres=False,
+                    reset_camera=True, clim=[-lim, lim],
+                    scalar_bar_args={"title": "M3C2 displacement (mm)"})
+                self.plotter.add_text(f"M3C2 Deformation Map T0\u2192Tn  [{res['method']}]",
+                    position="upper_left", font_size=11, color="#111827", name="ttl")
+                self.plotter.add_axes(color="#111827"); self.plotter.reset_camera(); self.plotter.render()
+            finite = dist_mm[np.isfinite(dist_mm)]
+            med = float(np.median(finite)) if finite.size else float("nan")
+            mx = float(np.nanmax(np.abs(finite))) if finite.size else float("nan")
+            sig = res.get("significant")
+            n_sig = int(np.count_nonzero(sig)) if sig is not None else 0
+            n_tot = int(dist_mm.size)
+            lod = res.get("lod_mm")
+            lod_med = float(np.nanmedian(lod)) if lod is not None and np.isfinite(lod).any() else float("nan")
+            self._log(f"M3C2 [{res['method']}]: median={med:+.2f}mm max|d|={mx:.2f}mm "
+                      f"significant={n_sig}/{n_tot} (LoD median={lod_med:.2f}mm)")
+            self.right_tabs.setCurrentIndex(0)
 
         elif key == "8.1_csv":
             path = result
@@ -1533,6 +1566,16 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _slot_6_2_plot(self) -> None:
         self._hdr("Deformation Trend Chart", "Plot deformation trend metrics along the chainage line.")
         self._start_worker("6.2_plot", lambda: self.ts_mod.plot_deformation(self.context))
+
+    def _slot_6_3_m3c2(self) -> None:
+        self._hdr("M3C2 Deformation Map T0\u2192Tn",
+                  "Compute multiscale surface displacement (M3C2) with level-of-detection between epochs.")
+        if len(self.context.scans) < 2:
+            self._log(_tr("Load at least 2 scans (T0 and Tn) first.", self.current_language)); return
+        epoch0 = self.context.scans[0].points
+        epoch1 = self.context.scans[1].points
+        self._start_worker("6.3_m3c2",
+            lambda: self.ts_mod.m3c2_distances(epoch0, epoch1, cyl_radius=0.5, normal_radius=0.6))
 
     def _slot_8_1_csv(self) -> None:
         self._hdr("Export CSV", "Export section parameters to CSV file.")

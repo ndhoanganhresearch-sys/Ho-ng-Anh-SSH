@@ -46,6 +46,7 @@ class PipelineContext:
     parameters:         Dict[str, float]         = field(default_factory=dict)
     heatmap_scalars:    Optional[np.ndarray]     = None
     time_series_plot:   Optional[np.ndarray]     = None
+    m3c2_result:        Optional[Dict[str, np.ndarray]] = None
     rmse_mm:            Optional[float]          = None
     polar_map:          Optional[np.ndarray]     = None
     polar_angles:       Optional[np.ndarray]     = None
