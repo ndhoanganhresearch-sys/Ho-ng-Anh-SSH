@@ -330,30 +330,36 @@ class PreprocessingLayer:
             k = min(k_neighbors, n_raw - 1)
             tree = cKDTree(pts)
             _, idx = tree.query(pts, k=k + 1, workers=-1)
-            neighbors = pts[idx[:, 1:]]  # (N, k, 3)
+            nbr_idx = idx[:, 1:]  # (N, k) neighbour ids, excluding self
 
+            # Vectorised local PCA in memory-bounded chunks: build the (m,3,3)
+            # neighbourhood covariance matrices per chunk and batch-solve their
+            # eigenvalues. This is orders of magnitude faster than a per-point
+            # Python loop while capping peak memory (a full (N,k,3) buffer would
+            # be multi-GB at the 5M-point ceiling).
             linearity = np.zeros(n_raw)
             planarity = np.zeros(n_raw)
             sphericity = np.zeros(n_raw)
             local_size = np.zeros(n_raw)
-            sig2_over_sig1 = np.ones(n_raw)  # transverse thinness (cables ~ 0)
-            for i in range(n_raw):
-                cov = np.cov(neighbors[i].T)
-                try:
-                    ev = np.sort(np.linalg.eigvalsh(cov))[::-1]
-                    ev = np.clip(ev, 0, None)
-                    # Demantke (2011) dimensionality features: use sigma = sqrt(lambda)
-                    # normalised by the largest sigma (matches lyuhaitao/PowerLineDetection,
-                    # see _ref_PowerLine/lyutool/core.py::extractFeathersByPointCloud).
-                    s1, s2, s3 = np.sqrt(ev)
-                    s1 = s1 if s1 > 1e-12 else 1e-12
-                    linearity[i] = (s1 - s2) / s1
-                    planarity[i] = (s2 - s3) / s1
-                    sphericity[i] = s3 / s1
-                    local_size[i] = float(s1)
-                    sig2_over_sig1[i] = s2 / s1
-                except Exception:
-                    pass
+            sig2_over_sig1 = np.ones(n_raw)
+            chunk = max(1, min(n_raw, 200_000 // max(k, 1)))
+            for start in range(0, n_raw, chunk):
+                end = min(start + chunk, n_raw)
+                nb = pts[nbr_idx[start:end]]                      # (m,k,3)
+                nb = nb - nb.mean(axis=1, keepdims=True)
+                cov = np.einsum('mki,mkj->mij', nb, nb) / max(k - 1, 1)
+                ev = np.clip(np.linalg.eigvalsh(cov), 0.0, None)  # (m,3) ascending
+                # Demantke (2011) features: sigma = sqrt(lambda) normalised by the
+                # largest sigma (matches lyuhaitao/PowerLineDetection, see
+                # _ref_PowerLine/lyutool/core.py::extractFeathersByPointCloud).
+                sig = np.sqrt(ev)
+                s3 = sig[:, 0]; s2 = sig[:, 1]; s1 = sig[:, 2]
+                s1_safe = np.where(s1 > 1e-12, s1, 1e-12)
+                linearity[start:end] = (s1 - s2) / s1_safe
+                planarity[start:end] = (s2 - s3) / s1_safe
+                sphericity[start:end] = s3 / s1_safe
+                local_size[start:end] = s1
+                sig2_over_sig1[start:end] = s2 / s1_safe
 
             # A true cable/pipe is thin along BOTH transverse axes, so its
             # second singular value is negligible. The Demantke linearity
