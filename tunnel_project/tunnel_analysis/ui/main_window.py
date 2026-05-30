@@ -79,6 +79,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._noise_pts:    Optional[np.ndarray] = None  # current noise candidates
         self._kept_pts:     Optional[np.ndarray] = None  # current kept candidates
         self._noise_panel:  Optional[QtWidgets.QWidget] = None
+        self._noise_visible: bool = True   # show/hide red noise points in 3D
+        self._noise_actor = None           # PyVista actor for removed noise
         self._auto_running: bool = False  # True while AUTO PIPELINE is driving steps
         self._ai_tab_idx:   int = 5
         self._section_tab_idx: int = 3
@@ -2221,17 +2223,22 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _render_filter_result(self, kept_pts: np.ndarray, removed_pts: np.ndarray, title: str) -> None:
         if self.plotter is None:
             return
+        self._clear_noise_overlay()
         self.plotter.clear(); self.plotter.set_background("#F8FAFC")
+        self._noise_actor = None
         if len(kept_pts):
             kept = make_vertex_cloud(kept_pts)
             self.plotter.add_mesh(kept, color="#0EA5E9", style="points", point_size=2.4,
                                   render_points_as_spheres=False, reset_camera=True)
         if len(removed_pts):
             removed = make_vertex_cloud(removed_pts)
-            self.plotter.add_mesh(removed, color="#DC2626", style="points", point_size=5.0,
-                                  render_points_as_spheres=True, reset_camera=False)
+            self._noise_actor = self.plotter.add_mesh(
+                removed, color="#DC2626", style="points", point_size=5.0,
+                render_points_as_spheres=True, reset_camera=False, name="noise_pts")
+            self._noise_actor.SetVisibility(self._noise_visible)
             self.plotter.add_text(f"Removed noise/outliers: {len(removed_pts):,} red points",
                                   position="lower_left", font_size=10, color="#DC2626", name="removed")
+            self._add_noise_toggle_widget()
         self.plotter.add_text(title + " | kept=blue, removed=red", position="upper_left",
                               font_size=11, color="#111827", name="ttl")
         self.plotter.add_axes(color="#111827")
@@ -2239,11 +2246,54 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.plotter.camera.parallel_projection = True
         self.plotter.reset_camera(); self.plotter.render()
 
+    def _clear_noise_overlay(self) -> None:
+        """Remove the noise toggle checkbox/label and actor when leaving a
+        filter view (plotter.clear() does not drop button widgets)."""
+        self._noise_actor = None
+        if self.plotter is None:
+            return
+        try:
+            self.plotter.clear_button_widgets()
+        except Exception:
+            pass
+        try:
+            self.plotter.remove_actor("noise_toggle_lbl")
+        except Exception:
+            pass
+
+    def _add_noise_toggle_widget(self) -> None:
+        """Add an in-viewport checkbox to show/hide the red noise points."""
+        if self.plotter is None:
+            return
+        try:
+            self.plotter.add_checkbox_button_widget(
+                self._toggle_noise_visibility,
+                value=self._noise_visible,
+                position=(10.0, 10.0), size=28,
+                color_on="#DC2626", color_off="#94A3B8", border_size=2)
+            self.plotter.add_text(_tr("Show noise", self.current_language), position=(44, 12),
+                                  font_size=9, color="#111827", name="noise_toggle_lbl")
+        except Exception as exc:
+            self._log(f"Noise toggle widget unavailable: {exc}")
+
+    def _toggle_noise_visibility(self, state: bool) -> None:
+        """Show/hide red noise points without re-rendering the whole scene."""
+        self._noise_visible = bool(state)
+        if self._noise_actor is not None:
+            try:
+                self._noise_actor.SetVisibility(self._noise_visible)
+                self.plotter.render()
+            except Exception:
+                pass
+        self._log(_tr("Noise points shown.", self.current_language) if self._noise_visible
+                  else _tr("Noise points hidden.", self.current_language))
+
     def _render_pts(self, pts: np.ndarray, title: str, color: str = "#2563EB") -> None:
         self._render_mesh(make_vertex_cloud(pts), title, color=color)
 
     def _render_mesh(self, mesh: "pv.PolyData", title: str, color: str = None) -> None:
         if self.plotter is None: return
+        self._clear_noise_overlay()
         rgb = mesh.get_array("RGB") if "RGB" in mesh.array_names else None
         clean = make_vertex_cloud(np.asarray(mesh.points, dtype=np.float64), intensity=mesh.get_array("Intensity") if "Intensity" in mesh.array_names else None, colors_raw=rgb.astype(np.float64)/255.0 if rgb is not None else None)
         self.plotter.clear(); self.plotter.set_background("#F8FAFC")
@@ -2271,6 +2321,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         mesh = make_vertex_cloud(pts)
         if len(sc) == mesh.n_points: mesh["Delta_mm"] = sc
         if self.plotter is None: return
+        self._clear_noise_overlay()
         self.plotter.clear(); self.plotter.set_background("#F8FAFC")
         self.plotter.add_mesh(mesh, scalars="Delta_mm", cmap="turbo", style="points", point_size=2.8, render_points_as_spheres=False, reset_camera=True, scalar_bar_args={"title": "Delta (mm)"})
         self.plotter.add_text("Heatmap - Vertical Displacement (Z-Axis Deviation)", position="upper_left", font_size=11, color="#111827", name="ttl")

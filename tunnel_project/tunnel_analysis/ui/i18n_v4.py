@@ -1,4 +1,4 @@
-"""Phrase-based translations for the TunnelApp v4.0 main window.
+﻿"""Phrase-based translations for the TunnelApp v4.0 main window.
 
 English is the base language. Each entry maps an English source phrase to its
 Vietnamese and Korean equivalents. Any phrase not present here falls back to
@@ -286,6 +286,9 @@ PHRASES = {
     "Already reference station.": {"vi": "Đã là trạm tham chiếu.", "ko": "이미 기준 스테이션입니다."},
     "All scan stations cleared.": {"vi": "Đã xóa toàn bộ trạm quét.", "ko": "모든 스캔 스테이션을 지웠습니다."},
     "Noise removal cancelled — all points kept.": {"vi": "Đã hủy khử nhiễu — giữ toàn bộ điểm.", "ko": "노이즈 제거 취소됨 — 모든 점 유지."},
+    "Noise points shown.": {"vi": "Đang hiển thị điểm nhiễu.", "ko": "노이즈 점 표시됨."},
+    "Noise points hidden.": {"vi": "Đã ẩn điểm nhiễu.", "ko": "노이즈 점 숨김."},
+    "Show noise": {"vi": "Hiện nhiễu", "ko": "노이즈 표시"},
     "Click on points in 3D viewport to mark as noise. Click again to deselect.": {"vi": "Bấm vào điểm trong khung nhìn 3D để đánh dấu nhiễu. Bấm lại để bỏ chọn.", "ko": "3D 뷰포트에서 점을 클릭하여 노이즈로 표시. 다시 클릭하면 선택 해제."},
     "Click on red noise points to restore them.": {"vi": "Bấm vào điểm nhiễu đỏ để khôi phục.", "ko": "빨간 노이즈 점을 클릭하여 복원하세요."},
     "Enter a structural engineering question for the local AI assistant (Llama 3)...": {"vi": "Nhập câu hỏi kỹ thuật kết cấu cho trợ lý AI cục bộ (Llama 3)...", "ko": "로컬 AI 비서(Llama 3)에게 구조 공학 질문을 입력하세요..."},
