@@ -1284,7 +1284,7 @@ class TunnelApp(QMainWindow):
         self.tabs.setCurrentWidget(self.overview_tab)
 
     def action_voxel_downsampling(self):
-        """2.1 Placeholder slot: voxel downsampling stage."""
+        """2.1 Voxel downsampling (Open3D voxel_down_sample)."""
         if not self.require_xyz():
             return
         voxel = self.params()["voxel_size"]
@@ -1301,7 +1301,7 @@ class TunnelApp(QMainWindow):
         self.run_worker(task, self.on_preprocess_done)
 
     def action_statistical_outlier_removal(self):
-        """2.2 Placeholder slot: statistical outlier removal stage."""
+        """2.2 Statistical outlier removal (Open3D remove_statistical_outlier)."""
         if not self.require_xyz():
             return
 
@@ -1317,7 +1317,7 @@ class TunnelApp(QMainWindow):
         self.run_worker(task, self.on_preprocess_done)
 
     def action_extract_tunnel_lining(self):
-        """2.3 Placeholder slot: tunnel lining extraction. Current hook runs RANSAC."""
+        """2.3 Tunnel lining extraction via RANSAC plane segmentation."""
         self.run_ransac()
 
     def action_anchor_translation(self):
@@ -1426,7 +1426,7 @@ class TunnelApp(QMainWindow):
         self.step6_timeseries()
 
     def action_export_ifc_bim(self):
-        """7.1 Export IFC/BIM placeholder."""
+        """7.1 Export IFC4 BIM (centerline + section psets), JSON fallback."""
         self.export_ifc()
 
     def action_query_local_ai(self):
@@ -1921,9 +1921,25 @@ class TunnelApp(QMainWindow):
         self.update_status(f"CSV exported: {Path(path).name}")
 
     def export_ifc(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Export IFC/BIM", "osong_tunnel.ifc", "IFC (*.ifc)")
+        default_name = "osong_tunnel.ifc" if HAS_IFC else "osong_tunnel.json"
+        flt = "IFC (*.ifc)" if HAS_IFC else "JSON (*.json)"
+        path, _ = QFileDialog.getSaveFileName(self, "Export IFC/BIM", default_name, flt)
         if not path:
             return
+        if HAS_IFC:
+            try:
+                self._write_ifc(path)
+            except Exception as exc:  # fall back to JSON so the user still gets data
+                fallback = str(Path(path).with_suffix(".json"))
+                self._write_bim_json(fallback)
+                self.update_status(f"IFC export failed ({exc}); wrote JSON: {Path(fallback).name}")
+                return
+            self.update_status(f"IFC4 BIM export written: {Path(path).name}")
+        else:
+            self._write_bim_json(path)
+            self.update_status(f"BIM JSON export written (install ifcopenshell for IFC4): {Path(path).name}")
+
+    def _write_bim_json(self, path):
         payload = {
             "app": APP_TITLE,
             "source": self.file_path,
@@ -1931,12 +1947,82 @@ class TunnelApp(QMainWindow):
             "deformation_results": self.deformation_results,
         }
         with open(path, "w", encoding="utf-8") as handle:
-            if HAS_IFC:
-                handle.write("ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('Tunnel Analysis placeholder export'),'2;1');\nENDSEC;\n")
-                handle.write("DATA;\n/* Geometry export hook for ifcopenshell pipeline */\nENDSEC;\nEND-ISO-10303-21;\n")
-            else:
-                handle.write(json.dumps(payload, indent=2))
-        self.update_status(f"BIM/IFC export written: {Path(path).name}")
+            handle.write(json.dumps(payload, indent=2))
+
+    def _write_ifc(self, path):
+        """Write a valid IFC4 model: project hierarchy, centerline polyline,
+        and one proxy element per cross-section carrying deformation psets."""
+        import ifcopenshell
+        import ifcopenshell.api
+
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        ifc = ifcopenshell.file(schema="IFC4")
+
+        project = ifcopenshell.api.run("root.create_entity", ifc,
+                                       ifc_class="IfcProject", name="Osong Tunnel")
+        ifcopenshell.api.run("unit.assign_unit", ifc)
+        ctx3d = ifcopenshell.api.run("context.add_context", ifc, context_type="Model")
+        body_ctx = ifcopenshell.api.run("context.add_context", ifc,
+                                        context_type="Model",
+                                        context_identifier="Body",
+                                        target_view="MODEL_VIEW", parent=ctx3d)
+
+        site = ifcopenshell.api.run("root.create_entity", ifc,
+                                    ifc_class="IfcSite", name="Osong Test Site")
+        building = ifcopenshell.api.run("root.create_entity", ifc,
+                                        ifc_class="IfcBuilding", name="Tunnel Structure")
+        storey = ifcopenshell.api.run("root.create_entity", ifc,
+                                      ifc_class="IfcBuildingStorey", name="Tunnel Level")
+        ifcopenshell.api.run("aggregate.assign_object", ifc,
+                             products=[site], relating_object=project)
+        ifcopenshell.api.run("aggregate.assign_object", ifc,
+                             products=[building], relating_object=site)
+        ifcopenshell.api.run("aggregate.assign_object", ifc,
+                             products=[storey], relating_object=building)
+
+        cl = self.centerline
+        if cl is not None and len(cl) >= 2:
+            annotation = ifcopenshell.api.run("root.create_entity", ifc,
+                                              ifc_class="IfcAnnotation",
+                                              name="Tunnel Centerline")
+            pts_3d = [ifc.createIfcCartesianPoint(
+                (float(p[0]), float(p[1]), float(p[2]))) for p in np.asarray(cl)]
+            polyline = ifc.createIfcPolyline(pts_3d)
+            shape = ifc.createIfcShapeRepresentation(body_ctx, "Axis", "Curve3D", [polyline])
+            annotation.Representation = ifc.createIfcProductDefinitionShape(None, None, [shape])
+            ifcopenshell.api.run("spatial.assign_container", ifc,
+                                 products=[annotation], relating_structure=storey)
+
+        results = self.deformation_results or []
+        for i, sec in enumerate(self.frenet_sections):
+            center = sec.get("center")
+            if center is None:
+                continue
+            elem = ifcopenshell.api.run("root.create_entity", ifc,
+                                        ifc_class="IfcBuildingElementProxy",
+                                        name=f"Section_{i + 1:03d}")
+            chainage = float(np.asarray(center)[1])
+            props = {"Index": int(i + 1), "Chainage_m": chainage}
+            if i < len(results):
+                res = results[i]
+                for src_key, ifc_key in (
+                    ("crown_settlement_mm", "CrownSettlement_mm"),
+                    ("convergence_mm", "Convergence_mm"),
+                    ("eccentricity_mm", "Eccentricity_mm"),
+                    ("ellipticity_%", "Ellipticity_pct"),
+                ):
+                    val = res.get(src_key)
+                    if isinstance(val, (int, float)) and np.isfinite(float(val)):
+                        props[ifc_key] = float(val)
+            pset = ifcopenshell.api.run("pset.add_pset", ifc,
+                                        product=elem, name="TunnelSectionProperties")
+            ifcopenshell.api.run("pset.edit_pset", ifc, pset=pset, properties=props)
+            ifcopenshell.api.run("spatial.assign_container", ifc,
+                                 products=[elem], relating_structure=storey)
+
+        ifc.write(str(out))
+        return str(out)
 
     def open_ai_tab(self):
         self.tabs.setCurrentIndex(self.tabs.indexOf(self.chat_display.parentWidget()))

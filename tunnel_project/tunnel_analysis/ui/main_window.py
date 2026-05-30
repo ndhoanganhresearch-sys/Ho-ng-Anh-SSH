@@ -19,6 +19,28 @@ from .i18n_v4 import tr as _tr
 from translations import get_available_languages
 from language_switcher import LanguageSwitcher
 
+# -- GUI feature scope -------------------------------------------------------
+# When True, the sidebar and output tabs expose only the core end-to-end
+# tunnel deformation workflow. Experimental "(PDF 3.x)" variants, redundant
+# duplicate methods and advanced diagnostics are hidden (not deleted) to keep
+# the interface focused. Set to False to restore the full feature set.
+CORE_FEATURES_ONLY = True
+
+# Sidebar sub-actions kept in core mode, keyed by the step code at the start
+# of each button label (e.g. "4.3b"). Edit this set to fine-tune the scope.
+CORE_STEP_CODES = {
+    "1.1", "1.2", "1.3", "1.4",                       # acquire + merge stations
+    "2.1", "2.2", "2.3",                              # preprocessing
+    "3.1", "3.2", "3.3",                              # registration + RMSE
+    "4.1", "4.3b", "4.4",                             # centerline + section frames
+    "5.1", "5.2", "5.3", "5.5", "5.6", "5.7",          # deformation parameters
+    "6.1", "6.2", "6.3",                              # 4D time-series
+    "7.1", "7.2",                                    # BIM export + AI assistant
+}
+
+# Output tabs hidden in core mode, matched by their English source title.
+NON_CORE_TAB_TITLES = {"Polar Deformation"}
+
 class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def __init__(self):
@@ -272,6 +294,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         ai_lay.addWidget(self._ai_report_lbl); ai_lay.addWidget(self.ai_resp, 1)
         self.right_tabs.addTab(ai_panel, "AI Engineering Assistant")
 
+        if CORE_FEATURES_ONLY:
+            self._hide_non_core_tabs()
+
         self.sb_pts  = QtWidgets.QLabel("Points: --")
         self.sb_rmse = QtWidgets.QLabel("RMSE: --")
         self.sb_msg  = QtWidgets.QLabel(_tr("Ready", self.current_language))
@@ -408,6 +433,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             ]),
         ]
         for step, title_s, tag, buttons in SECTIONS:
+            if CORE_FEATURES_ONLY:
+                buttons = [(label, slot) for (label, slot) in buttons
+                           if label.split()[0] in CORE_STEP_CODES]
+                if not buttons:
+                    continue
             sec = CollapsibleSection(title_s, step, tag)
             for label, slot in buttons:
                 btn = sec.add_sub_button(label, slot); self._all_sub_btns.append(btn)
@@ -422,6 +452,13 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _on_profile_changed(self, text: str) -> None:
         self.context.tunnel_profile = text
+
+    def _hide_non_core_tabs(self) -> None:
+        """Hide advanced output tabs while keeping their widgets and tab
+        indices intact (so hard-coded setCurrentIndex calls stay valid)."""
+        for i in range(self.right_tabs.count()):
+            if self.right_tabs.tabText(i) in NON_CORE_TAB_TITLES:
+                self.right_tabs.setTabVisible(i, False)
 
     def _init_pyvista(self) -> None:
         while self.vp_layout.count():

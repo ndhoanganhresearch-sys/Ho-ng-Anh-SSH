@@ -117,10 +117,17 @@ class GeometricLayer:
         ev, vecs = np.linalg.eigh(np.cov((pts - c).T))
         ax = vecs[:, np.argmax(ev)]
         proj = (pts - c) @ ax
-        order = np.argsort(proj)
+        # Bin by equal axial position (not equal point count): count-based
+        # splitting clusters key points in the dense tunnel middle and leaves the
+        # sparse ends uncovered, shortening the fitted B-spline centerline.
         n_chunks = max(section_count * 2, 40)
-        chunks = np.array_split(pts[order], n_chunks)
-        centers = np.asarray([ch.mean(axis=0) for ch in chunks if len(ch) >= 5], dtype=np.float64)
+        pmin, pmax = float(proj.min()), float(proj.max())
+        edges = np.linspace(pmin, pmax, n_chunks + 1)
+        slot = np.clip(np.searchsorted(edges, proj, side="right") - 1, 0, n_chunks - 1)
+        centers = np.asarray(
+            [pts[slot == s].mean(axis=0) for s in range(n_chunks) if int((slot == s).sum()) >= 5],
+            dtype=np.float64,
+        )
         if len(centers) < 4:
             raise RuntimeError(f"Only {len(centers)} raw centers (need >= 4).")
 

@@ -52,24 +52,40 @@ try:
 except ImportError:
     pv = None
 
+# Qt is required for the GUI, but the numeric analysis core (geometry,
+# registration, timeseries, ...) is pure NumPy/SciPy and must stay importable
+# headless for testing and batch processing. Defer the hard failure to the GUI
+# entry point (see tunnel_analysis.main) instead of aborting on import.
+QT_IMPORT_ERROR: Optional[str] = None
 try:
     from PySide6 import QtCore, QtGui, QtWidgets
     from pyvistaqt import QtInteractor
 except ImportError as _exc:
-    raise SystemExit(
+    QtCore = QtGui = QtWidgets = QtInteractor = None  # type: ignore[assignment]
+    QT_IMPORT_ERROR = (
         "PySide6 / pyvistaqt required.\n"
         "pip install PySide6 pyvista pyvistaqt vtk laspy open3d scipy matplotlib"
-    ) from _exc
+    )
 
 try:
     import matplotlib
-    matplotlib.use("QtAgg")
     import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
+    if QtCore is not None:
+        # Embed plots in the Qt GUI when the toolkit is available.
+        matplotlib.use("QtAgg")
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+    else:
+        # Headless (tests, batch reporting): render off-screen with Agg.
+        matplotlib.use("Agg")
+        from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
     _MPL_OK = True
 except ImportError:
+    plt = None  # type: ignore[assignment]
+    mpatches = None  # type: ignore[assignment]
+    FigureCanvas = None  # type: ignore[assignment]
+    Figure = None  # type: ignore[assignment]
     _MPL_OK = False
 
 
@@ -224,6 +240,7 @@ __all__ = [
     "json", "math", "os", "sys", "warnings",
     "dataclass", "field", "Path", "Callable", "Dict", "List", "Optional", "Tuple",
     "np", "laspy", "o3d", "cKDTree", "small_gicp", "py4dgeo", "pv", "QtCore", "QtGui", "QtWidgets", "QtInteractor",
+    "QT_IMPORT_ERROR",
     "matplotlib", "plt", "mpatches", "FigureCanvas", "Figure", "_MPL_OK",
     "TUNNEL_PROFILES", "VL_BOX_W", "VL_BOX_H", "VL_CIR_R",
     "_BG", "_FG", "_GRID", "_ACC1", "_ACC2", "_ACC3", "_RED", "_YEL", "_GRN", "_DIM",

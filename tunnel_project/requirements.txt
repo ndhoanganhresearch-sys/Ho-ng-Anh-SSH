@@ -1,4 +1,4 @@
-﻿# SSL Smart Tunnel Monitoring System (4D-LiDAR) — pinned dependencies
+# SSL Smart Tunnel Monitoring System (4D-LiDAR) — pinned dependencies
 # Python 3.12. Install: pip install -r requirements.txt
 
 # Core numerics
@@ -26,3 +26,13 @@ vtk==9.3.1
 matplotlib==3.10.8
 pandas==3.0.3
 seaborn==0.13.2
+
+# Reporting / BIM (used by exporter.py, ifc_exporter.py, TunnelApp.py)
+openpyxl==3.1.5
+ifcopenshell==0.8.5
+
+# Machine learning clustering (target_detector.py, preprocessing.py DBSCAN)
+scikit-learn==1.8.0
+
+# Local AI assistant / dashboards (rag_ai.py, digital_twin.py)
+requests==2.32.5
