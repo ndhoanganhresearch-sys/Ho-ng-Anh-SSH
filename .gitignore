@@ -65,3 +65,6 @@ _merged.json
 # Reference clones (read-only study material, not part of the project)
 # ---------------------------------------------------------------------------
 _ref_*/
+
+# Keep package markers (the _*.py rule above also matches __init__.py)
+!**/__init__.py
