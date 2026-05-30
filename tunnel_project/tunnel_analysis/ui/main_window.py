@@ -30,7 +30,7 @@ CORE_FEATURES_ONLY = True
 # of each button label (e.g. "4.3b"). Edit this set to fine-tune the scope.
 CORE_STEP_CODES = {
     "1.1", "1.2", "1.3", "1.4",                       # acquire + merge stations
-    "2.1", "2.2", "2.3", "2.5",                       # preprocessing
+    "2.1", "2.2", "2.3", "2.5", "2.6",                 # preprocessing
     "3.1", "3.2", "3.3",                              # registration + RMSE
     "4.1", "4.3b", "4.4",                             # centerline + section frames
     "5.1", "5.2", "5.3", "5.5", "5.6", "5.7",          # deformation parameters
@@ -40,6 +40,93 @@ CORE_STEP_CODES = {
 
 # Output tabs hidden in core mode, matched by their English source title.
 NON_CORE_TAB_TITLES = {"Polar Deformation"}
+
+
+class TaskProgressDialog(QtWidgets.QDialog):
+    """Modeless progress dialog for long-running pipeline tasks.
+
+    Shows a progress bar, elapsed time and an estimated countdown so the user
+    knows roughly how long processing will take. Progress is ETA-driven: the
+    pipeline callbacks run as one opaque call in the worker thread (no inner
+    progress signal), so we animate towards an estimate from the workload size
+    and smoothly finish when the task actually completes.
+    """
+
+    def __init__(self, title: str, eta_seconds: float, translate, parent=None):
+        super().__init__(parent)
+        self._tr = translate
+        self.setWindowTitle(title)
+        self.setModal(False)
+        self.setMinimumWidth(380)
+        self.setWindowFlags(self.windowFlags() & ~QtCore.Qt.WindowContextHelpButtonHint)
+
+        self._eta_ms = max(int(eta_seconds * 1000), 500)
+        self._elapsed = QtCore.QElapsedTimer()
+        self._elapsed.start()
+        self._finishing = False
+
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(10)
+
+        self._task_lbl = QtWidgets.QLabel(title)
+        self._task_lbl.setStyleSheet("font-weight:700;color:#0F4C81;font-size:10.5pt;")
+        self._task_lbl.setWordWrap(True)
+        lay.addWidget(self._task_lbl)
+
+        self._bar = QtWidgets.QProgressBar()
+        self._bar.setRange(0, 100)
+        self._bar.setValue(0)
+        self._bar.setTextVisible(True)
+        self._bar.setStyleSheet(
+            "QProgressBar{border:1px solid #CBD5E1;border-radius:6px;height:18px;"
+            "text-align:center;background:#F1F5F9;}"
+            "QProgressBar::chunk{background:#1D4ED8;border-radius:5px;}")
+        lay.addWidget(self._bar)
+
+        self._time_lbl = QtWidgets.QLabel()
+        self._time_lbl.setStyleSheet("color:#475569;font-size:9pt;")
+        lay.addWidget(self._time_lbl)
+
+        self._timer = QtCore.QTimer(self)
+        self._timer.setInterval(100)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+        self._tick()
+
+    @staticmethod
+    def _fmt(ms: int) -> str:
+        s = max(0, ms) / 1000.0
+        if s < 60:
+            return f"{s:0.1f}s"
+        m, s = divmod(int(s), 60)
+        return f"{m}m {s:02d}s"
+
+    def _tick(self) -> None:
+        elapsed = self._elapsed.elapsed()
+        if self._finishing:
+            return
+        # Asymptotic approach to 95% so the bar never claims completion early.
+        frac = 1.0 - 0.5 ** (elapsed / max(self._eta_ms, 1))
+        pct = int(min(frac, 0.95) * 100)
+        self._bar.setValue(pct)
+        remaining = max(self._eta_ms - elapsed, 0)
+        self._time_lbl.setText(
+            self._tr("Elapsed: {e}  |  Estimated remaining: {r}").format(
+                e=self._fmt(elapsed), r=self._fmt(remaining))
+            if remaining > 0 else
+            self._tr("Elapsed: {e}  |  Finishing...").format(e=self._fmt(elapsed)))
+
+    def finish(self) -> None:
+        """Snap to 100% and close (called when the task actually completes)."""
+        self._finishing = True
+        self._timer.stop()
+        self._bar.setValue(100)
+        elapsed = self._elapsed.elapsed()
+        self._time_lbl.setText(self._tr("Completed in {e}").format(e=self._fmt(elapsed)))
+        QtCore.QTimer.singleShot(250, self.accept)
+
+
 
 class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
@@ -81,6 +168,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._noise_panel:  Optional[QtWidgets.QWidget] = None
         self._noise_visible: bool = True   # show/hide red noise points in 3D
         self._noise_actor = None           # PyVista actor for removed noise
+        self._task_dialog = None           # TaskProgressDialog while a worker runs
+        self._task_start_ms: int = 0       # QDateTime msecs when current task began
         self._auto_running: bool = False  # True while AUTO PIPELINE is driving steps
         self._ai_tab_idx:   int = 5
         self._section_tab_idx: int = 3
@@ -395,6 +484,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             ]),
             (2, "Preprocessing and noise filtering", "Pre.", [
                 ("2.5  Auto denoise (smart, no manual)", self._slot_2_5_auto_denoise),
+                ("2.6  Extract lining (density-variation)", self._slot_2_6_density_lining),
                 ("2.1  Voxel downsampling", self._slot_2_1_voxel),
                 ("2.2  Statistical outlier removal", self._slot_2_2_sor),
                 ("2.3  Extract tunnel lining shell", self._slot_2_3_lining),
@@ -480,9 +570,27 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         lbl.setWordWrap(True); lbl.setObjectName("ViewportMessage")
         self.vp_layout.addWidget(lbl, 1)
 
+    def _estimate_eta_seconds(self, key: str) -> float:
+        """Rough ETA from the active workload size and the task type, used to
+        drive the progress dialog's countdown. Heuristic, not exact."""
+        pts = self.context.working_points
+        n = int(len(pts)) if pts is not None else 0
+        if n == 0 and self.context.active_scan is not None:
+            n = int(len(self.context.active_scan.points))
+        million = n / 1.0e6
+        # Per-million-point cost (seconds) by task family; tuned conservatively.
+        rate = 2.0
+        if key in ("2.5_auto_denoise",):                 rate = 60.0
+        elif key in ("2.6_density_lining",):             rate = 25.0
+        elif key in ("2.2_sor", "2.3_lining", "2.4_semantic"): rate = 12.0
+        elif key.startswith(("3.", "1.4", "1.6")):       rate = 15.0
+        elif key.startswith(("5.", "6.")):               rate = 10.0
+        return max(0.6, million * rate)
+
     def _start_worker(self, key: str, cb: Callable[[], object]) -> None:
         if self.worker_thread is not None: self._log(_tr("A workflow task is already running.", self.current_language)); return
         self._btns_enabled(False); self.sb_prog.setValue(10); self.sb_msg.setText(_tr("Running task: {key} ...", self.current_language).format(key=key))
+        self._show_task_dialog(key)
         self.worker_thread = QtCore.QThread(self)
         self.worker = PipelineWorker(key, cb); self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)
@@ -495,16 +603,48 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _clear_worker(self) -> None:
         self.worker_thread = None; self.worker = None; self._btns_enabled(True); self.sb_prog.setValue(0)
 
+    def _show_task_dialog(self, key: str) -> None:
+        """Show a progress dialog only if the task is likely to run a while,
+        so quick operations don't flash a dialog. Skipped during AUTO mode
+        (the sidebar button already reports per-step progress)."""
+        self._close_task_dialog()
+        if self._auto_running:
+            return
+        eta = self._estimate_eta_seconds(key)
+        if eta < 1.5:
+            return
+        title = _tr("Processing: {key}", self.current_language).format(key=key)
+        try:
+            self._task_dialog = TaskProgressDialog(
+                title, eta, lambda s: _tr(s, self.current_language), self)
+            self._task_dialog.show()
+        except Exception as exc:
+            self._task_dialog = None
+            self._log(f"Progress dialog unavailable: {exc}")
+
+    def _close_task_dialog(self, completed: bool = False) -> None:
+        dlg = self._task_dialog
+        self._task_dialog = None
+        if dlg is None:
+            return
+        try:
+            if completed:
+                dlg.finish()
+            else:
+                dlg.close()
+        except Exception:
+            pass
+
     def _btns_enabled(self, en: bool) -> None:
         for b in self._all_sub_btns: b.setEnabled(en)
 
     @QtCore.Slot(str, object)
     def _on_finished(self, key: str, result: object) -> None:
-        self.sb_prog.setValue(100); self.sb_msg.setText(_tr("Task completed: {key}", self.current_language).format(key=key)); self._dispatch(key, result); self._check_auto_pipeline(key)
+        self.sb_prog.setValue(100); self.sb_msg.setText(_tr("Task completed: {key}", self.current_language).format(key=key)); self._close_task_dialog(completed=True); self._dispatch(key, result); self._check_auto_pipeline(key)
 
     @QtCore.Slot(str, str)
     def _on_failed(self, key: str, msg: str) -> None:
-        self.sb_prog.setValue(0); self.sb_msg.setText(_tr("Task failed: {key}", self.current_language).format(key=key))
+        self.sb_prog.setValue(0); self.sb_msg.setText(_tr("Task failed: {key}", self.current_language).format(key=key)); self._close_task_dialog()
         self._log(f"[SYSTEM ERROR] {key}: {msg}")
         if self._auto_running:
             self._auto_running = False
@@ -675,6 +815,20 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self.sb_pts.setText(f"Points: {len(pts):,}")
             self._log(f"Auto denoise: {stats.get('n_clean', len(pts)):,}/{stats.get('n_raw', len(pts)):,} kept, {stats.get('n_removed', 0):,} removed.")
             self._log(f"  Cable={stats.get('n_cable', 0)} Light={stats.get('n_light', 0)} Person/Vehicle={stats.get('n_person', 0)} Radial={stats.get('n_radial', 0)}")
+
+        elif key == "2.6_density_lining":
+            pts, stats = result
+            pts = np.asarray(pts, dtype=np.float64)
+            self.context.normalized_points = pts
+            noise_pts = np.asarray(stats.get("noise_pts", np.empty((0, 3))), dtype=np.float64)
+            if self._auto_running:
+                self._render_pts(pts, "2.6 Lining (density-variation)", "#6366F1")
+            else:
+                self._render_filter_result(pts, noise_pts,
+                    "2.6 Lining density-variation | lining=blue, removed=red")
+            self.pt_label.setText(f"Points: {len(pts):,}")
+            self.sb_pts.setText(f"Points: {len(pts):,}")
+            self._log(f"Density-variation lining: {stats.get('n_clean', len(pts)):,}/{stats.get('n_raw', len(pts)):,} kept, {stats.get('n_removed', 0):,} interior points removed.")
 
         elif key == "3.1_anchor":
             pts = np.asarray(result, dtype=np.float64); self.context.registered_points = pts
@@ -1028,6 +1182,13 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                   "Automatically remove cables, lights, signal devices, vehicles and people "
                   "using morphological classification + distance statistics. No manual picking.")
         self._start_worker("2.5_auto_denoise", lambda: self.pre_mod.auto_denoise(self.context))
+
+    def _slot_2_6_density_lining(self) -> None:
+        self._hdr("Extract Lining (Density-Variation)",
+                  "Isolate the lining shell by local radial density drop-off "
+                  "(SAM4Tun Algorithm 2). Removes interior bore clutter automatically.")
+        self._start_worker("2.6_density_lining",
+            lambda: self.pre_mod.extract_lining_density_variation(self.context))
 
     def _slot_2_4_semantic(self) -> None:
         self._hdr("Semantic Noise Removal (PDF 3.2)",
@@ -2610,6 +2771,9 @@ class _TargetDetectDialog(QtWidgets.QDialog):
     def closeEvent(self, event) -> None:
         """Clean up timers and threads before closing."""
         try:
+            self._close_task_dialog()
+        except Exception: pass
+        try:
             self.settings.setValue("ui/language", self.current_language)
         except Exception: pass
         try:
@@ -2619,7 +2783,23 @@ class _TargetDetectDialog(QtWidgets.QDialog):
         try:
             if self.worker_thread and self.worker_thread.isRunning():
                 self.worker_thread.quit()
-                self.worker_thread.wait(1000)
+                self.worker_thread.wait(3000)
+        except Exception: pass
+        # Finalize the embedded VTK/pyvistaqt interactor BEFORE the Qt event
+        # loop tears down, otherwise its internal render timer outlives the
+        # event dispatcher ("QObject::startTimer: ... already been destroyed").
+        try:
+            if self.plotter is not None:
+                try:
+                    self.plotter.disable_picking()
+                except Exception:
+                    pass
+                try:
+                    self.plotter.clear_button_widgets()
+                except Exception:
+                    pass
+                self.plotter.close()
+                self.plotter = None
         except Exception: pass
         event.accept()
 
