@@ -511,7 +511,19 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                           boxstyle="round,pad=0.2", alpha=0.9), zorder=10)
 
         # ── e Eccentricity: measured center dot ─────────────────────────────
-        cx_meas = float(np.mean(x)); cz_meas = float(np.mean(z))
+        # Geometric centre via least-squares circle fit, NOT the mass centroid
+        # (mean). On real sections points are unevenly sampled (dense floor,
+        # sparse arcs), so the centroid drifts metres off and inflates e to
+        # absurd values (measured: e_mean ~0.6-1.7 m vs e_fit ~0.02-0.1 m).
+        try:
+            _A = np.column_stack([x, z, np.ones(len(x))])
+            _b = x * x + z * z
+            _sol, _, _, _ = np.linalg.lstsq(_A, _b, rcond=None)
+            cx_meas = float(_sol[0] / 2.0); cz_meas = float(_sol[1] / 2.0)
+            if not (np.isfinite(cx_meas) and np.isfinite(cz_meas)):
+                cx_meas = float(np.mean(x)); cz_meas = float(np.mean(z))
+        except Exception:
+            cx_meas = float(np.mean(x)); cz_meas = float(np.mean(z))
         ax.plot(cx_meas, cz_meas, "D", color="#7C3AED", ms=7, zorder=10,
                 label=f"C_meas")
         ax.plot(0, 0, "+", color="#64748B", ms=10, mew=2, zorder=10,
