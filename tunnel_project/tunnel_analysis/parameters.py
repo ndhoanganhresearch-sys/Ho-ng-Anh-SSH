@@ -398,10 +398,13 @@ class ParameterExtractionLayer:
         z_span = z_max - z_min if z_max > z_min else 1.0
 
         def _line_dir(p):
+            # 2D PCA (points are Nx2 here, so principal_axes' Nx3 guard does
+            # not apply): dominant eigenvector of the in-plane covariance.
             if len(p) < 4:
                 return None
-            _c, axis, _e1, _e2 = principal_axes(p)
-            return axis
+            c = p.mean(axis=0)
+            ev, vecs = np.linalg.eigh(np.cov((p - c).T))
+            return vecs[:, int(np.argmax(ev))]
 
         # Wall points: side region, middle 60% of the height (exclude crown/floor).
         if side == "left":
