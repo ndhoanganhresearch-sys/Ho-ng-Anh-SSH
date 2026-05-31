@@ -30,7 +30,7 @@ CORE_FEATURES_ONLY = True
 # of each button label (e.g. "4.3b"). Edit this set to fine-tune the scope.
 CORE_STEP_CODES = {
     "1.1", "1.2", "1.3", "1.4",                       # acquire + merge stations
-    "2.1", "2.2", "2.3", "2.5", "2.6",                 # preprocessing
+    "2.1", "2.5",                                     # preprocessing (2.5 = all-in-one denoise)
     "3.1", "3.2", "3.3",                              # registration + RMSE
     "4.1", "4.3b", "4.4",                             # centerline + section frames
     "5.1", "5.2", "5.3", "5.5", "5.6", "5.7",          # deformation parameters
@@ -483,12 +483,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 ("1.7  Registration error heatmap", self._slot_1_7_reg_error),
             ]),
             (2, "Preprocessing and noise filtering", "Pre.", [
-                ("2.5  Auto denoise (smart, no manual)", self._slot_2_5_auto_denoise),
-                ("2.6  Extract lining (density-variation)", self._slot_2_6_density_lining),
                 ("2.1  Voxel downsampling", self._slot_2_1_voxel),
+                ("2.5  Clean noise (auto: cables, lights, people, wall cables)", self._slot_2_5_auto_denoise),
                 ("2.2  Statistical outlier removal", self._slot_2_2_sor),
                 ("2.3  Extract tunnel lining shell", self._slot_2_3_lining),
                 ("2.4  Semantic noise removal (PDF 3.2)", self._slot_2_4_semantic),
+                ("2.6  Extract lining (density-variation)", self._slot_2_6_density_lining),
             ]),
             (3, "Registration and synchronization", "Reg.", [
                 ("3.1  Anchor translation", self._slot_3_1_anchor),
@@ -1236,24 +1236,22 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._auto_running = True
         self._auto_step = 0
         self._auto_steps = [
-            ("2.1_voxel",      lambda: self.pre_mod.voxel_downsample(self.context),
-             "Step 1/7: Voxel downsampling..."),
-            ("2.2_sor",        lambda: self.pre_mod.statistical_outlier_removal_run(self.context),
-             "Step 2/7: Statistical outlier removal..."),
-            ("2.3_lining",     lambda: self.pre_mod.extract_tunnel_lining(self.context),
-             "Step 3/7: Tunnel lining extraction..."),
-            ("4.1_centerline", lambda: self.geo_mod.extract_centerline(self.context),
-             "Step 4/7: Centerline extraction..."),
-            ("4.3b_bspline",   lambda: self.geo_mod.extract_centerline_bspline(self.context),
-             "Step 5/7: B-spline centerline..."),
-            ("5.7_sections",   lambda: self.par_mod.compute_all_sections(
+            ("2.1_voxel",       lambda: self.pre_mod.voxel_downsample(self.context),
+             "Step 1/6: Voxel downsampling..."),
+            ("2.5_auto_denoise", lambda: self.pre_mod.auto_denoise(self.context),
+             "Step 2/6: Smart noise removal (cables, lights, people, wall cables)..."),
+            ("4.1_centerline",  lambda: self.geo_mod.extract_centerline(self.context),
+             "Step 3/6: Centerline extraction..."),
+            ("4.3b_bspline",    lambda: self.geo_mod.extract_centerline_bspline(self.context),
+             "Step 4/6: B-spline centerline..."),
+            ("5.7_sections",    lambda: self.par_mod.compute_all_sections(
                 self.context,
                 vl_box_w=self._sp_vl_w.value(),
                 vl_box_h=self._sp_vl_h.value(),
                 vl_cir_r=self._sp_vl_r.value()),
-             "Step 6/7: 2D section analysis..."),
-            ("auto_params",    lambda: self._auto_extract_params(),
-             "Step 7/7: Parameter extraction..."),
+             "Step 5/6: 2D section analysis..."),
+            ("auto_params",     lambda: self._auto_extract_params(),
+             "Step 6/6: Parameter extraction..."),
         ]
         self._run_next_auto_step()
 
