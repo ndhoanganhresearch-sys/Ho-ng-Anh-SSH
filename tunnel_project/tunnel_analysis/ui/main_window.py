@@ -447,11 +447,17 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         vl_lay.addRow(self._lbl_vl_r, self._sp_vl_r)
         out.addWidget(vl_frame)
 
-        # Section count: number of cross-sections (= centerline control points
-        # / Frenet frames) produced by the centerline + 5.7 section pass.
+        # Analysis resolution: define the number of cross-sections either
+        # directly (count) or by axial spacing in metres (count is then derived
+        # from the measured tunnel length). Both feed section_count into the
+        # centerline + 5.7 section pass (= centerline control points / frames).
         sc_frame = QtWidgets.QGroupBox("Analysis Resolution"); self._sc_frame = sc_frame
         sc_frame.setStyleSheet("QGroupBox{color:#334155;border:1px solid #CBD5E1;border-radius:5px;margin-top:6px;padding:4px;}")
         sc_lay = QtWidgets.QFormLayout(sc_frame)
+        self._cmb_res_mode = QtWidgets.QComboBox()
+        self._cmb_res_mode.addItems(["By count", "By spacing (m)"])
+        self._lbl_res_mode = QtWidgets.QLabel("Resolution mode:")
+        sc_lay.addRow(self._lbl_res_mode, self._cmb_res_mode)
         self._sp_sections = QtWidgets.QSpinBox()
         self._sp_sections.setRange(8, 400)
         self._sp_sections.setSingleStep(10)
@@ -459,6 +465,17 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._sp_sections.setToolTip("Number of cross-sections along the tunnel (centerline control points). Higher = finer detail, slower.")
         self._lbl_sections = QtWidgets.QLabel("Number of sections:")
         sc_lay.addRow(self._lbl_sections, self._sp_sections)
+        self._sp_spacing = QtWidgets.QDoubleSpinBox()
+        self._sp_spacing.setRange(0.1, 20.0)
+        self._sp_spacing.setSingleStep(0.25)
+        self._sp_spacing.setDecimals(2)
+        self._sp_spacing.setValue(0.75)
+        self._sp_spacing.setSuffix(" m")
+        self._sp_spacing.setToolTip("Target axial distance between cross-sections. The section count is derived from the measured tunnel length.")
+        self._lbl_spacing = QtWidgets.QLabel("Section spacing:")
+        sc_lay.addRow(self._lbl_spacing, self._sp_spacing)
+        self._cmb_res_mode.currentIndexChanged.connect(self._on_res_mode_changed)
+        self._on_res_mode_changed(0)
         out.addWidget(sc_frame)
         if CORE_FEATURES_ONLY:
             # Manual vehicle-clearance entry is hidden in core mode; the gauge
@@ -1294,9 +1311,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
              "Step 1/6: Voxel downsampling..."),
             ("2.5_auto_denoise", lambda: self.pre_mod.auto_denoise(self.context),
              "Step 2/6: Smart noise removal (cables, lights, people, wall cables)..."),
-            ("4.1_centerline",  lambda: self.geo_mod.extract_centerline(self.context, section_count=self._sp_sections.value()),
+            ("4.1_centerline",  lambda: self.geo_mod.extract_centerline(self.context, section_count=self._resolve_section_count()),
              "Step 3/6: Centerline extraction..."),
-            ("4.3b_bspline",    lambda: self.geo_mod.extract_centerline_bspline(self.context, section_count=self._sp_sections.value()),
+            ("4.3b_bspline",    lambda: self.geo_mod.extract_centerline_bspline(self.context, section_count=self._resolve_section_count()),
              "Step 4/6: B-spline centerline..."),
             ("5.7_sections",    lambda: self._auto_sections_task(),
              "Step 5/6: 2D section analysis (auto profile + clearance)..."),
@@ -1740,7 +1757,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _slot_4_3b_bspline(self) -> None:
         self._hdr("B-Spline C2 Centerline (PDF 3.4)", "Sliding-window curvature detection + B-spline C2 fit.")
-        self._start_worker("4.3b_bspline", lambda: self.geo_mod.extract_centerline_bspline(self.context, section_count=self._sp_sections.value()))
+        self._start_worker("4.3b_bspline", lambda: self.geo_mod.extract_centerline_bspline(self.context, section_count=self._resolve_section_count()))
 
     def _slot_4_5b_intensity_seams(self) -> None:
         self._hdr("Intensity Ring Seam Detection (PDF 3.3)", "Detect ring seams from LiDAR intensity derivative.")
@@ -1757,13 +1774,13 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _slot_4_1_centerline(self) -> None:
         self._hdr("PCA Centerline Extraction", "Extract initial tunnel centerline control points from the working cloud.")
-        self._start_worker("4.1_centerline", lambda: self.geo_mod.extract_centerline(self.context, section_count=self._sp_sections.value()))
+        self._start_worker("4.1_centerline", lambda: self.geo_mod.extract_centerline(self.context, section_count=self._resolve_section_count()))
 
     def _slot_4_2_iterative(self) -> None:
         self._hdr("Iterative Centerline Refinement", "Refine the tunnel axis using orthogonal section fitting.")
         if self.context.centerline is None: self._log(_tr("Run Step 4.1 first.", self.current_language)); return
         cl = self.context.centerline
-        self._start_worker("4.2_iterative", lambda: self.geo_mod.extract_centerline_iterative(self.context, design_axis=cl, section_count=self._sp_sections.value(), mu=0.03, max_iter=20))
+        self._start_worker("4.2_iterative", lambda: self.geo_mod.extract_centerline_iterative(self.context, design_axis=cl, section_count=self._resolve_section_count(), mu=0.03, max_iter=20))
 
     def _slot_4_3_bspline(self) -> None:
         self._hdr("B-Spline Centerline Smoothing", "Generate a smooth differentiable tunnel axis for sectioning.")
@@ -1834,6 +1851,42 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             return pts, viol_mask, int(viol_mask.sum())
         self._start_worker("5.8_clearance_3d", _task)
 
+    def _on_res_mode_changed(self, index):
+        """Toggle the count vs spacing inputs for the resolution mode."""
+        by_spacing = index == 1
+        self._sp_sections.setVisible(not by_spacing)
+        self._lbl_sections.setVisible(not by_spacing)
+        self._sp_spacing.setVisible(by_spacing)
+        self._lbl_spacing.setVisible(by_spacing)
+
+    def _measured_axis_length(self):
+        """Length of the working cloud along its dominant axis (m), or None."""
+        pts = self.context.working_points
+        if pts is None:
+            return None
+        try:
+            p = validate_xyz(pts)
+            _c, axis, _e1, _e2 = principal_axes(p)
+            proj = (p - p.mean(axis=0)) @ axis
+            return float(proj.max() - proj.min())
+        except Exception:
+            return None
+
+    def _resolve_section_count(self):
+        """Section count from the active resolution mode.
+
+        By count: the spinbox value directly. By spacing: derived from the
+        measured tunnel length / spacing, clamped to the spinbox range; falls
+        back to the count value when the length cannot be measured yet.
+        """
+        if self._cmb_res_mode.currentIndex() == 1:
+            length = self._measured_axis_length()
+            spacing = float(self._sp_spacing.value())
+            if length and spacing > 1e-6:
+                n = int(round(length / spacing)) + 1
+                n = max(self._sp_sections.minimum(), min(self._sp_sections.maximum(), n))
+                return n
+        return int(self._sp_sections.value())
     def _compute_auto_gauge(self):
         """Return (w, h, r) clearance gauge from the measured bore radius, or
         None. Pure NumPy (no GUI), so it is safe to call from a worker thread.
@@ -2714,7 +2767,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._lbl_vl_h.setText(_tr("Clear height H:", lang))
         self._lbl_vl_r.setText(_tr("Circular clearance radius R:", lang))
         self._sc_frame.setTitle(_tr("Analysis Resolution", lang))
+        self._lbl_res_mode.setText(_tr("Resolution mode:", lang))
         self._lbl_sections.setText(_tr("Number of sections:", lang))
+        self._lbl_spacing.setText(_tr("Section spacing:", lang))
+        self._cmb_res_mode.setItemText(0, _tr("By count", lang))
+        self._cmb_res_mode.setItemText(1, _tr("By spacing (m)", lang))
         self._auto_btn.setText(_tr("AUTO PIPELINE  (1-click full analysis)", lang))
         self._reset_btn.setText(_tr("Reset Pipeline", lang))
 
