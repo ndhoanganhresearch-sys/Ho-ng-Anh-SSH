@@ -419,6 +419,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._profile_combo.addItems(TUNNEL_PROFILES)
         self._profile_combo.currentTextChanged.connect(self._on_profile_changed)
         pf_lay.addWidget(self._profile_combo); out.addWidget(pf_frame)
+        if CORE_FEATURES_ONLY:
+            # Profile is auto-detected per run (see ParameterExtractionLayer.
+            # detect_profile), so the manual selector is hidden in core mode.
+            pf_frame.setVisible(False)
 
         vl_frame = QtWidgets.QGroupBox("Vehicle Clearance Limit (m)"); self._vl_frame = vl_frame
         vl_frame.setStyleSheet("QGroupBox{color:#334155;border:1px solid #CBD5E1;border-radius:5px;margin-top:6px;padding:4px;}")
@@ -433,6 +437,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         vl_lay.addRow(self._lbl_vl_h, self._sp_vl_h)
         vl_lay.addRow(self._lbl_vl_r, self._sp_vl_r)
         out.addWidget(vl_frame)
+        if CORE_FEATURES_ONLY:
+            # Manual vehicle-clearance entry is hidden in core mode; the gauge
+            # is derived automatically from the measured tunnel radius
+            # (see _auto_set_clearance) so it no longer false-alarms.
+            vl_frame.setVisible(False)
 
         # ── Auto Pipeline button ──────────────────────────────────────
         auto_btn = QtWidgets.QPushButton("AUTO PIPELINE  (1-click full analysis)")
@@ -868,7 +877,14 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self._log(f"B-Spline centerline smoothing complete: {len(sm)} points.")
 
         elif key == "4.4_frenet":
-            self.context.frenet_frames = result; self._log(f"Gravity-aligned section frames generated successfully: {len(result)} N-B frames.")
+            self.context.frenet_frames = result
+            cl = self.context.centerline
+            if cl is not None and len(result):
+                # Show the gravity-aligned T/N/B frames on the 3D viewport so
+                # the step is visibly doing something (previously it only logged).
+                self._render_cl(np.asarray(cl, dtype=np.float64), result)
+            self._log(f"Gravity-aligned section frames generated successfully: {len(result)} N-B frames.")
+            self._log(_tr("Blue=T (axis), Green=N (vertical/up), Orange=B (lateral).", self.current_language))
 
         elif key == "4.5b_intensity_seams":
             d = result
@@ -1244,16 +1260,25 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
              "Step 3/6: Centerline extraction..."),
             ("4.3b_bspline",    lambda: self.geo_mod.extract_centerline_bspline(self.context),
              "Step 4/6: B-spline centerline..."),
-            ("5.7_sections",    lambda: self.par_mod.compute_all_sections(
-                self.context,
-                vl_box_w=self._sp_vl_w.value(),
-                vl_box_h=self._sp_vl_h.value(),
-                vl_cir_r=self._sp_vl_r.value()),
-             "Step 5/6: 2D section analysis..."),
+            ("5.7_sections",    lambda: self._auto_sections_task(),
+             "Step 5/6: 2D section analysis (auto profile + clearance)..."),
             ("auto_params",     lambda: self._auto_extract_params(),
              "Step 6/6: Parameter extraction..."),
         ]
         self._run_next_auto_step()
+
+    def _auto_sections_task(self):
+        """AUTO PIPELINE 2D-section step: pick the profile and clearance gauge
+        automatically (pure NumPy, safe in the worker thread), then compute
+        all sections.
+        """
+        self.context.tunnel_profile = self.par_mod.detect_profile(self.context)
+        g = self._compute_auto_gauge()
+        if g:
+            w, h, r = g
+        else:
+            w, h, r = self._sp_vl_w.value(), self._sp_vl_h.value(), self._sp_vl_r.value()
+        return self.par_mod.compute_all_sections(self.context, vl_box_w=w, vl_box_h=h, vl_cir_r=r)
 
     def _auto_extract_params(self) -> Dict:
         par = self.par_mod
@@ -1769,10 +1794,59 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             return pts, viol_mask, int(viol_mask.sum())
         self._start_worker("5.8_clearance_3d", _task)
 
+    def _compute_auto_gauge(self):
+        """Return (w, h, r) clearance gauge from the measured bore radius, or
+        None. Pure NumPy (no GUI), so it is safe to call from a worker thread.
+
+        A fixed default gauge (R=4.0 m) is larger than this tunnel (~2.75 m),
+        so every lining point read as a violation. Estimate the bore radius
+        (median radial distance to the PCA axis) and place the gauge just
+        inside it (95%).
+        """
+        pts = self.context.working_points
+        if pts is None:
+            return None
+        try:
+            p = validate_xyz(pts)
+            c = p.mean(axis=0)
+            ev, vecs = np.linalg.eigh(np.cov((p - c).T))
+            axis = vecs[:, int(np.argmax(ev))]
+            d = p - c
+            r = np.linalg.norm(d - np.outer(d @ axis, axis), axis=1)
+            # The clearance gauge must sit just INSIDE the innermost lining
+            # surface, not at the median radius (which is mid-wall and would
+            # flag ~half the lining). Use a low percentile of the radial
+            # distribution minus a small safety margin.
+            r_inner = float(np.percentile(r, 2))
+            if not np.isfinite(r_inner) or r_inner <= 0.1:
+                return None
+            gauge = max(0.3, r_inner - 0.20)   # 20 cm inside the bore
+            return gauge, 2.0 * gauge, gauge   # (w, h, r)
+        except Exception:
+            return None
+
+    def _auto_set_clearance(self) -> None:
+        """GUI-thread helper: update the (hidden) clearance spinboxes from the
+        measured radius so the 5.7 button uses an automatic envelope.
+        """
+        if not CORE_FEATURES_ONLY:
+            return
+        g = self._compute_auto_gauge()
+        if g is None:
+            return
+        w, h, r = g
+        self._sp_vl_w.setValue(w); self._sp_vl_h.setValue(h); self._sp_vl_r.setValue(r)
+        self._log(_tr("Auto clearance gauge set from measured radius: R={r:.2f} m", self.current_language).format(r=r))
+
     def _slot_5_7_sections(self) -> None:
         self._hdr("Plot 2D Technical Section", "Display flat 2D engineering cross-sections with vehicle clearance limits.")
         if not self.context.frenet_frames or self.context.working_points is None: self._log(_tr("Complete Steps 2 and 4 before running this analysis.", self.current_language)); return
-        self.context.tunnel_profile = self._profile_combo.currentText()
+        if CORE_FEATURES_ONLY:
+            self.context.tunnel_profile = self.par_mod.detect_profile(self.context)
+            self._log(_tr("Auto-detected tunnel profile: {p}", self.current_language).format(p=self.context.tunnel_profile))
+        else:
+            self.context.tunnel_profile = self._profile_combo.currentText()
+        self._auto_set_clearance()
         self._start_worker("5.7_sections", lambda: self.par_mod.compute_all_sections(self.context, vl_box_w=self._sp_vl_w.value(), vl_box_h=self._sp_vl_h.value(), vl_cir_r=self._sp_vl_r.value()))
 
     def _slot_6_1_epochs(self) -> None:

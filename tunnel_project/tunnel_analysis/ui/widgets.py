@@ -433,6 +433,15 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
             self._draw_empty(); return
         x = pts2d[:, 0]; z = pts2d[:, 1]
 
+        # Cap plotted points: a section can hold >10k points (mean ~6k on
+        # real scans); re-scattering all of them every refresh/animation
+        # frame stalls the Agg renderer. Geometry was already computed from
+        # the full cloud, so this only thins the on-screen display.
+        _MAX_DRAW = 2500
+        if len(x) > _MAX_DRAW:
+            _sub = np.linspace(0, len(x) - 1, _MAX_DRAW).astype(np.int64)
+            x = x[_sub]; z = z[_sub]; labels = labels[_sub]
+
         # ── 3. Deviation colormap from best-fit circle ─────────────────────
         r_ref = sg.radius_fit if np.isfinite(sg.radius_fit) else float(np.median(np.hypot(x, z)))
         radii = np.hypot(x, z)
@@ -471,7 +480,11 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                           boxstyle="round,pad=0.2", alpha=0.9), zorder=10)
 
         # ── δh Convergence arrows ───────────────────────────────────────────
-        if hasattr(sg, "W1") and np.isfinite(sg.W1):
+        # Convergence (delta-h) is a deformation that only has meaning across
+        # two epochs (T0 vs Tn); on a single scan it was just the absolute width,
+        # which misleads. Hidden here; set SHOW_CONVERGENCE = True to restore.
+        SHOW_CONVERGENCE = False
+        if SHOW_CONVERGENCE and hasattr(sg, "W1") and np.isfinite(sg.W1):
             mid_z = float(np.percentile(z, 50))
             left_x  = float(np.percentile(x, 2))
             right_x = float(np.percentile(x, 98))
