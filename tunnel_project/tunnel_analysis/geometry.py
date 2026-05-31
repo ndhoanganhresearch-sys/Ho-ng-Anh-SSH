@@ -172,14 +172,20 @@ class GeometricLayer:
         return fr
 
     def _frenet(self, cl: np.ndarray) -> List[Dict]:
-        """Bishop Parallel Transport (Double Reflection) section frames (PDF 3.1).
+        """Gravity-anchored section frames (twist-free about the axis).
 
-        Propagates a twist-free orthonormal frame along the centerline using the
-        double-reflection transport operator, eliminating the curvature
-        singularity of the classical Frenet-Serret normal at straight (zero
-        curvature) segments. The initial normal is anchored to the gravity
-        component orthogonal to the first tangent for a geotechnically
-        meaningful vertical orientation. The method name is kept for backward
+        A tunnel does not twist about its longitudinal axis, so every cross
+        section should share the same "up" direction. Bishop parallel
+        transport (used previously) accumulates roll from tangent noise and
+        on real data wound the frame through ~359 deg along the drive,
+        rotating the sections relative to each other ("twisted" sections).
+
+        Here each frame is anchored directly to gravity: the in-section
+        vertical N is the global Z projected orthogonal to the local tangent
+        T, and B = N x T completes the right-handed basis. This removes the
+        cumulative twist entirely. For near-vertical tangents (|Tz| ~ 1, a
+        steeply plunging tunnel) Z is degenerate in-plane, so we fall back to
+        global X as the reference up. The method name is kept for backward
         compatibility with existing callers.
         """
         pts = np.asarray(cl, dtype=np.float64)
@@ -187,51 +193,21 @@ class GeometricLayer:
         if n < 2: raise RuntimeError("Frame: need >= 2 pts.")
 
         T = self._tangents(pts)
-        fT = np.empty((n, 3))
-        fN = np.empty((n, 3))
-        fB = np.empty((n, 3))
-
         Z_global = np.array([0.0, 0.0, 1.0])
-
-        # Frame initialization: N0 anchored to gravity orthogonal to T0.
-        T0 = T[0]
-        if abs(T0[2]) > 0.9999:
-            N0 = np.array([1.0, 0.0, 0.0])
-        else:
-            N0 = _unit(np.cross(T0, Z_global))
-        B0 = _unit(np.cross(N0, T0))
-        fT[0] = T0; fN[0] = N0; fB[0] = B0
-
-        # Double Reflection transport (Wang et al. 2008) of the normal N.
-        # v1 uses the position difference x_{i+1} - x_i, not the tangents.
-        for i in range(n - 1):
-            Ti = fT[i]; Ti1 = T[i + 1]
-            Ni = fN[i]
-            Tp = Ti1
-
-            v1 = pts[i + 1] - pts[i]
-            c1 = float(v1 @ v1)
-            if c1 < 1e-18:
-                Np = Ni
-            else:
-                # First reflection across the plane normal to v1.
-                rL = Ni - (2.0 / c1) * float(v1 @ Ni) * v1
-                tL = Ti - (2.0 / c1) * float(v1 @ Ti) * v1
-                # Second reflection maps tL onto the next tangent Ti1.
-                v2 = Ti1 - tL
-                c2 = float(v2 @ v2)
-                if c2 < 1e-18:
-                    Np = rL
-                else:
-                    Np = rL - (2.0 / c2) * float(v2 @ rL) * v2
-            # Re-orthogonalize the transported normal against the tangent.
-            Np = Np - float(Np @ Tp) * Tp
-            Np = _unit(Np)
-            fT[i + 1] = Tp
-            fN[i + 1] = Np
-            fB[i + 1] = _unit(np.cross(Np, Tp))
-
-        return [{"center": pts[i], "T": fT[i], "N": fN[i], "B": fB[i]} for i in range(n)]
+        X_global = np.array([1.0, 0.0, 0.0])
+        frames: List[Dict] = []
+        for i in range(n):
+            Ti = T[i]
+            ref = X_global if abs(float(Ti[2])) > 0.9999 else Z_global
+            Ni = ref - float(ref @ Ti) * Ti           # vertical, in-section
+            nrm = float(np.linalg.norm(Ni))
+            if nrm < 1e-9:
+                Ni = X_global - float(X_global @ Ti) * Ti
+                nrm = float(np.linalg.norm(Ni))
+            Ni = Ni / (nrm + 1e-12)
+            Bi = _unit(np.cross(Ni, Ti))
+            frames.append({"center": pts[i], "T": Ti, "N": Ni, "B": Bi})
+        return frames
     @staticmethod
     def _tangents(pts: np.ndarray) -> np.ndarray:
         n = len(pts); T = np.empty_like(pts)
