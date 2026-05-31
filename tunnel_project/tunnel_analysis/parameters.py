@@ -375,39 +375,48 @@ class ParameterExtractionLayer:
 
     @staticmethod
     def _wall_angle(pts2d: np.ndarray, side: str = "left") -> float:
-        """Wall angle = angle between wall and floor (horizontal ground).
-        Per PDF 3.5: measured from horizontal (0 deg = vertical wall, 90 deg = flat floor).
-        Uses PCA on wall points to find wall direction vector.
+        """Angle between the wall and the actual floor at this section.
+
+        Fits a line (PCA) through the wall points and another through the
+        floor points, then returns the angle between the two directions in
+        degrees (0..90). This measures the real wall-to-floor angle instead
+        of assuming the floor is perfectly horizontal: a flat floor with a
+        vertical wall gives ~90 deg, an inclined wall gives less.
         """
         x = pts2d[:, 0]; z = pts2d[:, 1]
         z_min = float(np.percentile(z, 5))
         z_max = float(np.percentile(z, 95))
-        z_mid = (z_min + z_max) / 2.0
-        # Select wall points: side region, middle height range (exclude floor/crown)
+        z_span = z_max - z_min if z_max > z_min else 1.0
+
+        def _line_dir(p):
+            if len(p) < 4:
+                return None
+            c = p.mean(axis=0)
+            ev, vecs = np.linalg.eigh(np.cov((p - c).T))
+            return vecs[:, int(np.argmax(ev))]
+
+        # Wall points: side region, middle 60% of the height (exclude crown/floor).
         if side == "left":
             x_mask = x < float(np.percentile(x, 30))
         else:
             x_mask = x > float(np.percentile(x, 70))
-        # Focus on middle 60% height = wall region
-        z_mask = (z > z_min + (z_max - z_min) * 0.15) & (z < z_min + (z_max - z_min) * 0.85)
-        mask = x_mask & z_mask
-        wp = pts2d[mask]
-        if len(wp) < 4: return float("nan")
+        z_mask = (z > z_min + z_span * 0.15) & (z < z_min + z_span * 0.85)
+        wall_dir = _line_dir(pts2d[x_mask & z_mask])
+        if wall_dir is None:
+            return float("nan")
+
+        # Floor points: bottom band of the section on the same side.
+        floor_mask = (z < z_min + z_span * 0.15)
+        floor_dir = _line_dir(pts2d[floor_mask])
+
         try:
-            # PCA to find wall direction
-            c = wp.mean(axis=0)
-            cov = np.cov((wp - c).T)
-            ev, vecs = np.linalg.eigh(cov)
-            # Principal direction = wall line direction
-            wall_dir = vecs[:, np.argmax(ev)]  # [dx, dz]
-            # wall_dir = [dx, dz] principal direction of wall
-            # angle from horizontal ground = angle between wall_dir and X-axis
-            # atan2(dz, dx): 0=horizontal, 90=vertical
-            # For wall: we want angle between wall and floor
-            # vertical wall: wall_dir ~ [0,1] -> angle = 90 deg from floor
-            # inclined wall: wall_dir ~ [sin(a), cos(a)] -> angle = 90-a from floor
-            angle_from_floor = math.degrees(math.atan2(abs(wall_dir[1]), abs(wall_dir[0])))
-            return angle_from_floor
+            if floor_dir is not None:
+                # Angle between the wall line and the actual floor line.
+                cos_a = abs(float(np.dot(wall_dir, floor_dir)))
+                cos_a = float(np.clip(cos_a, 0.0, 1.0))
+                return math.degrees(math.acos(cos_a))
+            # Fallback: no floor points -> measure from the horizontal.
+            return math.degrees(math.atan2(abs(wall_dir[1]), abs(wall_dir[0])))
         except Exception:
             return float("nan")
 
