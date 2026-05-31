@@ -25,6 +25,11 @@ from language_switcher import LanguageSwitcher
 # duplicate methods and advanced diagnostics are hidden (not deleted) to keep
 # the interface focused. Set to False to restore the full feature set.
 CORE_FEATURES_ONLY = True
+# Max points sent to the 3D viewport in one mesh. Rendering every point of a
+# multi-million-point tunnel scan stalls VTK (the KeyboardInterrupt seen during
+# render_window.Render()); decimating for DISPLAY only keeps interaction smooth
+# while analysis still runs on the full cloud.
+DISPLAY_MAX_POINTS = 600_000
 
 # Sidebar sub-actions kept in core mode, keyed by the step code at the start
 # of each button label (e.g. "4.3b"). Edit this set to fine-tune the scope.
@@ -783,8 +788,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 self._log(f"  Station {i+1}: RMSE = {rmse:.3f} mm [{status}]")
         elif key == "1.7_reg_error":
             pts, dist_mm, colors = result
+            pts, dist_mm = self._decimate_for_display(pts, dist_mm)
             mesh = make_vertex_cloud(pts)
-            if len(dist_mm) == mesh.n_points:
+            if dist_mm is not None and len(dist_mm) == mesh.n_points:
                 mesh["RegError_mm"] = dist_mm
             if self.plotter is not None:
                 self.plotter.clear(); self.plotter.set_background("#F8FAFC")
@@ -952,8 +958,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         elif key == "5.3b_hausdorff":
             pts, dist_mm, colors = result
             self.context.heatmap_scalars = dist_mm
+            pts, dist_mm = self._decimate_for_display(pts, dist_mm)
             mesh = __import__("tunnel_analysis.common", fromlist=["make_vertex_cloud"]).make_vertex_cloud(pts)
-            if len(dist_mm) == mesh.n_points:
+            if dist_mm is not None and len(dist_mm) == mesh.n_points:
                 mesh["Hausdorff_mm"] = dist_mm
             if self.plotter is not None:
                 self.plotter.clear(); self.plotter.set_background("#F8FAFC")
@@ -980,15 +987,19 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
         elif key == "5.8_clearance_3d":
             pts, colors, n_viol = result
-            mesh = make_vertex_cloud(pts)
+            # Keep ALL violation points (the important highlight); decimate only
+            # the gray base cloud for display.
+            viol_pts_full = pts[colors] if len(colors) else np.empty((0, 3))
+            base_pts, _ = self._decimate_for_display(pts)
+            mesh = make_vertex_cloud(base_pts)
             if self.plotter is not None:
                 self.plotter.clear(); self.plotter.set_background("#F8FAFC")
                 self.plotter.add_mesh(mesh, scalars=None, style="points",
                     point_size=2.5, render_points_as_spheres=False,
                     reset_camera=True, color="#94A3B8")
                 # Highlight violation points in red
-                if len(colors):
-                    viol_pts = pts[colors]
+                if len(viol_pts_full):
+                    viol_pts = viol_pts_full
                     if len(viol_pts):
                         viol_mesh = make_vertex_cloud(viol_pts)
                         self.plotter.add_mesh(viol_mesh, color="#DC2626",
@@ -1059,8 +1070,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             pts = np.asarray(res["corepoints"], dtype=np.float64)
             dist_mm = np.asarray(res["distance_mm"], dtype=np.float64)
             self.context.heatmap_scalars = dist_mm
+            pts, dist_mm = self._decimate_for_display(pts, dist_mm)
             mesh = make_vertex_cloud(pts)
-            if len(dist_mm) == mesh.n_points:
+            if dist_mm is not None and len(dist_mm) == mesh.n_points:
                 mesh["M3C2_mm"] = dist_mm
             if self.plotter is not None:
                 lim = float(np.nanmax(np.abs(dist_mm))) if dist_mm.size else 1.0
@@ -2615,11 +2627,41 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _render_pts(self, pts: np.ndarray, title: str, color: str = "#2563EB") -> None:
         self._render_mesh(make_vertex_cloud(pts), title, color=color)
 
+    @staticmethod
+    def _decimate_for_display(pts, scalars=None):
+        """Stride pts (and matching scalars) down to DISPLAY_MAX_POINTS.
+
+        Used by the scalar heatmap renderers so a multi-million-point cloud
+        does not stall VTK. Returns (pts_d, scalars_d) with scalars kept aligned
+        (or None when not provided / length mismatch).
+        """
+        pts = np.asarray(pts, dtype=np.float64)
+        n = len(pts)
+        if scalars is not None:
+            scalars = np.asarray(scalars)
+            if len(scalars) != n:
+                scalars = None
+        if n > DISPLAY_MAX_POINTS:
+            step = int(np.ceil(n / DISPLAY_MAX_POINTS))
+            pts = pts[::step]
+            if scalars is not None:
+                scalars = scalars[::step]
+        return pts, scalars
     def _render_mesh(self, mesh: "pv.PolyData", title: str, color: str = None) -> None:
         if self.plotter is None: return
         self._clear_noise_overlay()
+        # Decimate for display only (see DISPLAY_MAX_POINTS); analysis is
+        # unaffected. Strided so the subsample stays spatially representative.
+        pts_all = np.asarray(mesh.points, dtype=np.float64)
         rgb = mesh.get_array("RGB") if "RGB" in mesh.array_names else None
-        clean = make_vertex_cloud(np.asarray(mesh.points, dtype=np.float64), intensity=mesh.get_array("Intensity") if "Intensity" in mesh.array_names else None, colors_raw=rgb.astype(np.float64)/255.0 if rgb is not None else None)
+        inten = mesh.get_array("Intensity") if "Intensity" in mesh.array_names else None
+        n = len(pts_all)
+        if n > DISPLAY_MAX_POINTS:
+            step = int(np.ceil(n / DISPLAY_MAX_POINTS))
+            pts_all = pts_all[::step]
+            if rgb is not None: rgb = rgb[::step]
+            if inten is not None: inten = inten[::step]
+        clean = make_vertex_cloud(pts_all, intensity=inten, colors_raw=rgb.astype(np.float64)/255.0 if rgb is not None else None)
         self.plotter.clear(); self.plotter.set_background("#F8FAFC")
         kw = dict(style="points", point_size=2.4, render_points_as_spheres=False, reset_camera=True)
         if "RGB" in clean.array_names and color is None: self.plotter.add_mesh(clean, scalars="RGB", rgb=True, **kw)
@@ -2642,8 +2684,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.plotter.render()
 
     def _render_heatmap(self, pts: np.ndarray, sc: np.ndarray) -> None:
+        pts, sc = self._decimate_for_display(pts, sc)
         mesh = make_vertex_cloud(pts)
-        if len(sc) == mesh.n_points: mesh["Delta_mm"] = sc
+        if sc is not None and len(sc) == mesh.n_points: mesh["Delta_mm"] = sc
         if self.plotter is None: return
         self._clear_noise_overlay()
         self.plotter.clear(); self.plotter.set_background("#F8FAFC")
