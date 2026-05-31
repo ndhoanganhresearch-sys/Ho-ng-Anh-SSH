@@ -66,10 +66,7 @@ class ClearanceLayer:
         n = len(pts)
 
         # --- Tunnel axis + per-point radial distance to it ---
-        centroid = pts.mean(axis=0)
-        ev, vecs = np.linalg.eigh(np.cov((pts - centroid).T))
-        axis = vecs[:, int(np.argmax(ev))]
-        axis = axis / (np.linalg.norm(axis) + 1e-12)
+        centroid, axis, _e1, _e2 = principal_axes(pts)
         d = pts - centroid
         proj = d @ axis                                   # axial coordinate
         radial_vec = d - np.outer(proj, axis)

@@ -220,6 +220,15 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.results_text = QtWidgets.QPlainTextEdit(); self.results_text.setReadOnly(True)
         self.right_tabs.addTab(self.results_text, "Results Log")
 
+        # Parameters table: unit-aware values grouped by theme with a status
+        # column (OK/CAUTION/CRITICAL), fed by _fill_param_table via _show_params.
+        self.param_table = QtWidgets.QTableWidget(0, 4)
+        self.param_table.setHorizontalHeaderLabels(["Parameter", "Value", "Unit", "Status"])
+        self.param_table.horizontalHeader().setStretchLastSection(True)
+        self.param_table.verticalHeader().setVisible(False)
+        self.param_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.right_tabs.addTab(self.param_table, "Parameters")
+
         self.meta_table = QtWidgets.QTableWidget(0, 2)
         self.meta_table.setHorizontalHeaderLabels(["Property", "Value"])
         self.meta_table.horizontalHeader().setStretchLastSection(True)
@@ -496,6 +505,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 ("2.5  Clean noise (auto: cables, lights, people, wall cables)", self._slot_2_5_auto_denoise),
                 ("2.2  Statistical outlier removal", self._slot_2_2_sor),
                 ("2.3  Extract tunnel lining shell", self._slot_2_3_lining),
+                ("2.3b Extract lining by label (FY387/STSD)", self._slot_2_3b_lining_label),
                 ("2.4  Semantic noise removal (PDF 3.2)", self._slot_2_4_semantic),
                 ("2.6  Extract lining (density-variation)", self._slot_2_6_density_lining),
             ]),
@@ -809,6 +819,16 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         elif key == "2.3_lining":
             pts = np.asarray(result, dtype=np.float64); self.context.normalized_points = pts
             self._render_pts(pts, "2.3 Isolated Tunnel Lining", "#6366F1"); self._log(f"Tunnel lining extraction complete: {len(pts):,} points retained.")
+
+        elif key == "2.3b_lining_label":
+            pts, stats = result
+            pts = np.asarray(pts, dtype=np.float64); self.context.normalized_points = pts
+            self._render_pts(pts, "2.3b Lining by Label", "#6366F1")
+            self.sb_pts.setText(f"Points: {len(pts):,}")
+            if stats.get("method") == "geometric_fallback":
+                self._log(f"Lining by label: no per-point labels, used geometric fallback ({stats.get('n_clean',len(pts)):,} pts).")
+            else:
+                self._log(f"Lining by label: kept {stats.get('n_clean',len(pts)):,}/{stats.get('n_raw',len(pts)):,} pts, classes {stats.get('structure_labels')} (auto_detected={stats.get('auto_detected')}).")
 
         elif key == "2.5_auto_denoise":
             pts, stats = result
@@ -1216,6 +1236,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._hdr("Tunnel Lining Extraction", "Isolate the structural tunnel lining surface for downstream analysis.")
         self._start_worker("2.3_lining", lambda: self.pre_mod.extract_tunnel_lining(self.context))
 
+    def _slot_2_3b_lining_label(self) -> None:
+        self._hdr("Lining Extraction by Label", "Keep structural lining classes from the per-point semantic label (FY387/STSD); interior objects are dropped. Auto-detects lining classes by shell radius when none are specified.")
+        self._start_worker("2.3b_lining_label", lambda: self.pre_mod.extract_lining_by_label(self.context))
+
     def _slot_3_1_anchor(self) -> None:
         self._hdr("Target Anchor Translation", "Apply the initial target-based translation alignment.")
         self._start_worker("3.1_anchor", lambda: self.reg_mod.anchor_translation(self.context))
@@ -1315,8 +1339,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if p:
             self._log(_tr("--- Results Summary ---", self.current_language))
             for k, v in p.items():
-                if isinstance(v, (int, float)) and np.isfinite(float(v)):
-                    self._log(f"  {k}: {v:.3f}")
+                label, text, status = format_parameter(k, v)
+                tag = f"  [{status}]" if status and status != "OK" else ""
+                self._log(f"  {label}: {text}{tag}")
         n_viol = sum(1 for s in self.context.sections if s.clearance_violation)
         if n_viol:
             self._log(f"  WARNING: {n_viol} clearance violation(s) detected!")
@@ -1636,8 +1661,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if p:
             lines.append("=== Tunnel Analysis Results ===")
             for k, v in p.items():
-                if isinstance(v, (int, float)) and np.isfinite(float(v)):
-                    lines.append(f"  {k}: {v:.3f}")
+                label, text, status = format_parameter(k, v)
+                tag = f"  [{status}]" if status and status != "OK" else ""
+                lines.append(f"  {label}: {text}{tag}")
         if self.context.sections:
             lines.append(f"Sections analyzed: {len(self.context.sections)}")
             n_viol = sum(1 for s in self.context.sections if s.clearance_violation)
@@ -1807,10 +1833,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if pts is None:
             return None
         try:
+            c, axis, _e1, _e2 = principal_axes(pts)
             p = validate_xyz(pts)
-            c = p.mean(axis=0)
-            ev, vecs = np.linalg.eigh(np.cov((p - c).T))
-            axis = vecs[:, int(np.argmax(ev))]
             d = p - c
             r = np.linalg.norm(d - np.outer(d @ axis, axis), axis=1)
             # The clearance gauge must sit just INSIDE the innermost lining
@@ -2565,10 +2589,82 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         lang = self.current_language
         self.task_title.setText(_tr(title, lang)); self.task_desc.setText(_tr(desc, lang))
 
+    # Group extracted-parameter keys by theme for display.
+    _PARAM_GROUPS = [
+        ("Deformation", ["crown_settlement_mm", "crown_settlement_max_mm",
+                         "lateral_convergence_mm", "lateral_convergence_max_mm",
+                         "polar_max_outward_mm", "polar_max_inward_mm"]),
+        ("Geometry", ["ovality_mean_pct", "ovality_max_pct",
+                      "eccentricity_mean_mm", "eccentricity_max_mm", "eccentricity_min_mm",
+                      "crown_B_mean_m", "total_height_mm", "width_Tn_m", "width_Tn_mean_m"]),
+        ("Context", ["reference", "n_sections"]),
+    ]
+
+    def _grouped_params(self, params):
+        """Yield (group_name, [(key, value), ...]) in theme order, then extras."""
+        seen = set()
+        for name, keys in self._PARAM_GROUPS:
+            rows = [(k, params[k]) for k in keys if k in params]
+            seen.update(k for k in keys if k in params)
+            if rows:
+                yield name, rows
+        extras = [(k, v) for k, v in params.items() if k not in seen]
+        if extras:
+            yield "Other", extras
+
+    @staticmethod
+    def _split_value_unit(text):
+        """Split "12.34 mm" -> ("12.34", "mm"); strings without a unit return
+        (text, ""). Keeps the value column right-alignable and the unit separate."""
+        parts = str(text).split(' ', 1)
+        if len(parts) == 2 and parts[1] in ('mm', 'm', '%', '\u00b0'):
+            return parts[0], parts[1]
+        return str(text), ''
+
+    def _fill_param_table(self, params):
+        """Populate the Parameters tab: grouped rows, unit-aware, status-coloured."""
+        tbl = self.param_table
+        tbl.setRowCount(0)
+        status_fill = {
+            "OK": QtGui.QColor(_GRN), "CAUTION": QtGui.QColor(_YEL),
+            "CRITICAL": QtGui.QColor(_RED),
+        }
+        for group, rows in self._grouped_params(params):
+            # Group header row (spanning).
+            r = tbl.rowCount(); tbl.insertRow(r)
+            hdr = QtWidgets.QTableWidgetItem(group)
+            f = hdr.font(); f.setBold(True); hdr.setFont(f)
+            hdr.setBackground(QtGui.QColor(_GRID) if '_GRID' in globals() else QtGui.QColor('#E5E7EB'))
+            tbl.setItem(r, 0, hdr)
+            tbl.setSpan(r, 0, 1, 4)
+            for k, v in rows:
+                label, text, status = format_parameter(k, v)
+                value, unit = self._split_value_unit(text)
+                r = tbl.rowCount(); tbl.insertRow(r)
+                tbl.setItem(r, 0, QtWidgets.QTableWidgetItem(label))
+                vi = QtWidgets.QTableWidgetItem(value)
+                vi.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+                tbl.setItem(r, 1, vi)
+                tbl.setItem(r, 2, QtWidgets.QTableWidgetItem(unit))
+                si = QtWidgets.QTableWidgetItem(status)
+                si.setTextAlignment(QtCore.Qt.AlignCenter)
+                if status in status_fill:
+                    si.setForeground(QtGui.QColor('#FFFFFF'))
+                    si.setBackground(status_fill[status])
+                tbl.setItem(r, 3, si)
+        tbl.resizeColumnsToContents()
     def _show_params(self, params: Dict[str, float]) -> None:
+        # Text log: grouped, unit-aware, with status flags (handles strings).
         self.results_text.appendPlainText("--- Parameters Extracted ---")
-        for k, v in params.items(): self.results_text.appendPlainText(f"  {k}: {v:.4f}")
-        self.results_text.appendPlainText("----------------------------"); self.right_tabs.setCurrentIndex(0)
+        for group, rows in self._grouped_params(params):
+            self.results_text.appendPlainText(f"[{group}]")
+            for k, v in rows:
+                label, text, status = format_parameter(k, v)
+                tag = f"  [{status}]" if status and status != "OK" else ""
+                self.results_text.appendPlainText(f"  {label}: {text}{tag}")
+        self.results_text.appendPlainText("----------------------------")
+        self._fill_param_table(params)
+        self.right_tabs.setCurrentIndex(0)
 
     def _update_meta(self, b: PointCloudBundle) -> None:
         rows = list(b.metadata.items()); self.meta_table.setRowCount(len(rows))

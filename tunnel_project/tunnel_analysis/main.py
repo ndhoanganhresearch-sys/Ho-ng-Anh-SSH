@@ -1,4 +1,4 @@
-﻿from .common import QtWidgets, sys, QT_IMPORT_ERROR
+from .common import QtWidgets, sys, QT_IMPORT_ERROR
 
 
 def main() -> int:

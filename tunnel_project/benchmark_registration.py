@@ -1,4 +1,4 @@
-﻿"""Benchmark: small_gicp (parallel GICP) vs Open3D point-to-plane ICP.
+"""Benchmark: small_gicp (parallel GICP) vs Open3D point-to-plane ICP.
 
 Loads a real LAS scan, applies a known small rigid transform, then times and
 scores recovery for both backends. Run from tunnel_project/:

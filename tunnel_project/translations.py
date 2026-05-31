@@ -1,4 +1,4 @@
-﻿"""
+"""
 SSL Smart Tunnel Monitoring System - Multilingual Translations (English/Vietnamese/Korean)
 
 This module provides all UI text in English, Vietnamese, and Korean.

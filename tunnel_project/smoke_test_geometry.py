@@ -1,4 +1,4 @@
-﻿"""Smoke tests for GeometricLayer centerline extraction.
+"""Smoke tests for GeometricLayer centerline extraction.
 
 Run from the tunnel_project directory:
     python smoke_test_geometry.py

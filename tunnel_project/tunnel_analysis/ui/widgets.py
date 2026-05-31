@@ -1,4 +1,4 @@
-﻿from ..common import *
+from ..common import *
 from ..models import SectionGeometry
 
 class CollapsibleSection(QtWidgets.QWidget):

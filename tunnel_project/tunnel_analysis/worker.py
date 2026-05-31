@@ -1,4 +1,4 @@
-﻿from .common import *
+from .common import *
 
 class PipelineWorker(QtCore.QObject):
     finished = QtCore.Signal(str, object)

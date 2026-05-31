@@ -1,4 +1,4 @@
-﻿from .common import *
+from .common import *
 from .models import PipelineContext, SectionGeometry
 # ------------------------------------------------------------------------------
 # Layer 4 - ParameterExtractionLayer (2D flat cross-section processing)
@@ -147,8 +147,8 @@ class ParameterExtractionLayer:
                     dist_list.append(d)
                 scalars = np.concatenate(dist_list) * 1e3
                 return pts, scalars
-            except Exception:
-                pass
+            except Exception as e:
+                warnings.warn(f"M3C2 heatmap failed, using Z-deviation fallback: {e}")
         return pts, (pts[:, 2] - float(np.median(pts[:, 2]))) * 1e3
 
 
@@ -316,13 +316,22 @@ class ParameterExtractionLayer:
                     C0_meas = C + float(np.mean(xf0)) * N + float(np.mean(yf0)) * B
                     centers_0.append(C0_meas)
                 d_centers = np.asarray(centers_0, dtype=np.float64)
-            except Exception:
+            except Exception as e:
+                warnings.warn(f"T0 design-centre computation failed: {e}")
                 d_centers = None
         else:
             d_centers = None
 
         ec: List[float] = []
         ec_per_section: List[Dict] = []
+        # Real chainage from the centerline (cumulative arc length), not the
+        # frame index, so per-section eccentricity maps to true position.
+        cl = context.centerline
+        if cl is not None and len(cl) == len(context.frenet_frames):
+            chainages = np.concatenate([[0.0], np.cumsum(
+                np.linalg.norm(np.diff(cl, axis=0), axis=1))]).tolist()
+        else:
+            chainages = list(range(len(context.frenet_frames)))
         for i, fr in enumerate(context.frenet_frames):
             C, T, N, B = fr["center"], fr["T"], fr["N"], fr["B"]
             mask = np.abs((pts - C) @ T) < eps
@@ -339,7 +348,7 @@ class ParameterExtractionLayer:
             ecc_mm = float(np.linalg.norm(C_meas - C_des)) * 1e3
             ec.append(ecc_mm)
             ec_per_section.append({
-                "chainage": float(i),
+                "chainage": float(chainages[i]),
                 "eccentricity_mm": ecc_mm,
                 "C_meas": C_meas.tolist(),
                 "C_design": C_des.tolist(),
@@ -391,9 +400,8 @@ class ParameterExtractionLayer:
         def _line_dir(p):
             if len(p) < 4:
                 return None
-            c = p.mean(axis=0)
-            ev, vecs = np.linalg.eigh(np.cov((p - c).T))
-            return vecs[:, int(np.argmax(ev))]
+            _c, axis, _e1, _e2 = principal_axes(p)
+            return axis
 
         # Wall points: side region, middle 60% of the height (exclude crown/floor).
         if side == "left":
@@ -617,6 +625,7 @@ class ParameterExtractionLayer:
                         val = float(smoothed[i])
                         if fld == "radius_fit": val = float(np.clip(val, 2.0, 15.0))
                         setattr(s, fld, val)
-            except Exception: pass
+            except Exception as e:
+                warnings.warn(f"Section series smoothing failed: {e}")
         return sections
 

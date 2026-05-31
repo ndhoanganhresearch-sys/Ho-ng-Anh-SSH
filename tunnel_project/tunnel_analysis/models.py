@@ -1,4 +1,4 @@
-﻿from .common import *
+from .common import *
 # ------------------------------------------------------------------------------
 # Data structures
 # ------------------------------------------------------------------------------
@@ -70,4 +70,45 @@ class PipelineContext:
             return self.normalized_points
         s = self.active_scan
         return None if s is None else s.points
+
+    def _aligned_channel(self, channel: str) -> Optional[np.ndarray]:
+        """Return a per-point channel (intensity / label) aligned to
+        working_points, even after voxel/SOR/lining changed the point count.
+
+        The raw channel lives on the active scan and matches scan.points. When
+        working_points are a subset (SOR / lining) or resampled (voxel) cloud,
+        the channel is re-attached by nearest-neighbour lookup against the raw
+        scan, so intensity/label stay row-aligned with the current points
+        instead of being silently dropped on a length mismatch (T2). Returns
+        None when the scan has no such channel.
+        """
+        scan = self.active_scan
+        wp = self.working_points
+        if scan is None or wp is None:
+            return None
+        if channel == 'intensity':
+            raw = scan.intensity
+        else:
+            raw = scan.metadata.get('labels') if scan.metadata else None
+        if raw is None:
+            return None
+        raw = np.asarray(raw).ravel()
+        base = np.asarray(scan.points, dtype=np.float64)
+        if len(raw) != len(base):
+            return None
+        wp = np.asarray(wp, dtype=np.float64)
+        if len(wp) == len(base):
+            return raw
+        if cKDTree is None:
+            return None
+        _d, idx = cKDTree(base).query(wp, k=1, workers=-1)
+        return raw[idx]
+
+    def working_intensity(self) -> Optional[np.ndarray]:
+        """Intensity aligned to working_points (see _aligned_channel)."""
+        return self._aligned_channel('intensity')
+
+    def working_labels(self) -> Optional[np.ndarray]:
+        """Semantic labels aligned to working_points (see _aligned_channel)."""
+        return self._aligned_channel('label')
 

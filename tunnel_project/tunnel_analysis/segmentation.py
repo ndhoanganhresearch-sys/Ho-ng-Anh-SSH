@@ -1,4 +1,4 @@
-﻿from .common import *
+from .common import *
 from .models import PipelineContext
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
@@ -12,9 +12,8 @@ class SegmentationLayer:
         if pts is None: raise RuntimeError("No working_points.")
         pts = validate_xyz(pts)
         if not context.frenet_frames: raise RuntimeError("Run centerline first.")
-        cl = context.centerline; c = cl.mean(axis=0)
-        ev, vecs = np.linalg.eigh(np.cov((cl - c).T))
-        ax = vecs[:, np.argmax(ev)]
+        cl = context.centerline
+        c, ax, _e1, _e2 = principal_axes(cl)
         proj = (pts - c) @ ax
         pmin, pmax = float(proj.min()), float(proj.max())
         nr = max(1, int(np.ceil((pmax - pmin) / segment_width)))
@@ -46,23 +45,20 @@ class SegmentationLayer:
         pts = validate_xyz(pts)
         if scan.intensity is None:
             raise RuntimeError("Intensity data is required for seam detection.")
-        intensity = np.asarray(scan.intensity, dtype=np.float64).ravel()
-        if len(intensity) != len(scan.points):
-            raise RuntimeError("Intensity length does not match point count.")
-
-        # Align intensity to working_points if they are exactly active scan points.
+        # T2: intensity re-aligned to the current points (handles voxel/SOR),
+        # so seam detection no longer requires the raw unfiltered scan.
+        intensity = context.working_intensity()
+        if intensity is None:
+            raise RuntimeError("Intensity could not be aligned to working points.")
+        intensity = np.asarray(intensity, dtype=np.float64).ravel()
         if len(intensity) != len(pts):
-            raise RuntimeError("Intensity-based seams require unfiltered active scan points.")
+            raise RuntimeError("Intensity length does not match working points.")
 
         if context.centerline is not None and len(context.centerline) >= 2:
             cl = validate_xyz(context.centerline, "centerline")
-            center = cl.mean(axis=0)
-            ev, vecs = np.linalg.eigh(np.cov((cl - center).T))
-            axis = vecs[:, np.argmax(ev)]
+            center, axis, _e1, _e2 = principal_axes(cl)
         else:
-            center = pts.mean(axis=0)
-            ev, vecs = np.linalg.eigh(np.cov((pts - center).T))
-            axis = vecs[:, np.argmax(ev)]
+            center, axis, _e1, _e2 = principal_axes(pts)
 
         proj = (pts - center) @ axis
         pmin, pmax = float(np.nanmin(proj)), float(np.nanmax(proj))

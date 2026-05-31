@@ -1,4 +1,4 @@
-﻿"""Smoke tests for py4dgeo (M3C2) and small_gicp integrations.
+"""Smoke tests for py4dgeo (M3C2) and small_gicp integrations.
 
 Run from the tunnel_project directory:
     python smoke_test_advanced_integrations.py

@@ -1,1 +1,1 @@
-﻿"""UI components for Tunnel Analysis."""
+"""UI components for Tunnel Analysis."""

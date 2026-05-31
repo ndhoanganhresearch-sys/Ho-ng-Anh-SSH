@@ -16,9 +16,7 @@ class GeometricLayer:
         pts = context.working_points
         if pts is None: raise RuntimeError("No working_points.")
         pts = validate_xyz(pts)
-        c = pts.mean(axis=0)
-        ev, vecs = np.linalg.eigh(np.cov((pts - c).T))
-        ax = vecs[:, np.argmax(ev)]
+        c, ax, _e1, _e2 = principal_axes(pts)
         proj = (pts - c) @ ax
         # Bin by equal axial position (not equal point count): count-based
         # splitting clusters all sections in the dense tunnel middle and leaves
@@ -142,9 +140,7 @@ class GeometricLayer:
             raise RuntimeError("No working_points.")
         pts = validate_xyz(pts)
 
-        c = pts.mean(axis=0)
-        ev, vecs = np.linalg.eigh(np.cov((pts - c).T))
-        ax = vecs[:, np.argmax(ev)]
+        c, ax, _e1, _e2 = principal_axes(pts)
         proj = (pts - c) @ ax
         # Bin by equal axial position (not equal point count): count-based
         # splitting clusters key points in the dense tunnel middle and leaves the

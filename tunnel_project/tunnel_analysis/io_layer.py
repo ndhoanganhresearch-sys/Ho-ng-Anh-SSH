@@ -193,6 +193,14 @@ def _read_txt(fp: str, max_points: int = MAX_POINTS_DEFAULT) -> PointCloudBundle
         if float(np.nanmax(lum)) > 1e-6:
             intensity = lum
 
+    # Filter non-finite rows once on XYZ and apply the same mask to every
+    # channel so intensity / colors / labels stay row-aligned with points.
+    finite = np.isfinite(pts).all(axis=1)
+    if not finite.all():
+        pts = pts[finite]
+        if intensity is not None: intensity = intensity[finite]
+        if colors is not None: colors = colors[finite]
+        if labels is not None: labels = labels[finite]
     pts = validate_xyz(pts, path.name)
     cloud = make_vertex_cloud(pts, intensity=intensity, colors_raw=colors)
     meta = {

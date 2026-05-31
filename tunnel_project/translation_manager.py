@@ -1,4 +1,4 @@
-﻿"""
+"""
 Integration module for Language Switcher in Tunnel Analysis Window
 
 This module provides helper functions to integrate multilingual support

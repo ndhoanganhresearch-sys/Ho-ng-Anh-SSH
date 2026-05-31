@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Smoke tests for the ASCII (.txt/.xyz/.csv) point-cloud reader.
 
 Run from the tunnel_project directory:

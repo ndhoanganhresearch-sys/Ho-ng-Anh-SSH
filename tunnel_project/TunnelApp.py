@@ -1,4 +1,4 @@
-﻿"""
+"""
 Tunnel Analysis Tool v2.1 - PySide6/PyVista edition
 CBNU Smart Structure Lab | Osong Tunnel Project 2026-2028
 """

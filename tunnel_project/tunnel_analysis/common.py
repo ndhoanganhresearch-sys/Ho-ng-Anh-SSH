@@ -1,4 +1,4 @@
-﻿'Shared imports, constants, and utilities.'
+'Shared imports, constants, and utilities.'
 import json
 import math
 import os
@@ -124,6 +124,28 @@ def _unit(v: np.ndarray, fallback: Optional[np.ndarray] = None) -> np.ndarray:
         raise ValueError(f"Cannot normalise near-zero vector: {v}")
     return v / n
 
+def principal_axes(pts: np.ndarray):
+    """Centroid and principal axes of a point set via PCA (shared T1 helper).
+
+    Returns (centroid, axis, e1, e2) where axis/e1/e2 are unit eigenvectors of
+    the covariance ordered by DESCENDING eigenvalue: axis is the dominant
+    (longitudinal) direction, e1/e2 span the orthogonal cross-section plane.
+    Centralises the np.linalg.eigh(np.cov(...)) pattern that was duplicated
+    across geometry/preprocessing/segmentation/parameters/clearance so every
+    module estimates the tunnel axis identically.
+    """
+    p = validate_xyz(pts)
+    c = p.mean(axis=0)
+    ev, vecs = np.linalg.eigh(np.cov((p - c).T))
+    order = np.argsort(ev)[::-1]
+    axis = vecs[:, order[0]]
+    e1 = vecs[:, order[1]]
+    e2 = vecs[:, order[2]]
+    axis = axis / (np.linalg.norm(axis) + 1e-12)
+    e1 = e1 / (np.linalg.norm(e1) + 1e-12)
+    e2 = e2 / (np.linalg.norm(e2) + 1e-12)
+    return c, axis, e1, e2
+
 def fit_ellipse_fitzgibbon(x: np.ndarray, y: np.ndarray) -> Optional[Tuple[float, float, float, float, float]]:
     """Fit an ellipse by Fitzgibbon Direct Least-Squares (PDF section 3.2).
 
@@ -236,6 +258,116 @@ def make_vertex_cloud(
     return cloud
 
 
+# ------------------------------------------------------------------------------
+# Parameter presentation (shared by Results log, auto summary, and table)
+# ------------------------------------------------------------------------------
+
+# Caution/critical thresholds. Keyed by the canonical metric name; mean/max
+# variants reuse the same band (per PDF proposal; mirrors exporter.THRESHOLDS).
+PARAM_THRESHOLDS = {
+    "crown_settlement_mm":    {"caution": 10.0, "critical": 25.0},
+    "lateral_convergence_mm": {"caution": 15.0, "critical": 30.0},
+    "ovality_pct":            {"caution": 0.5,  "critical": 1.0},
+    "eccentricity_mm":        {"caution": 10.0, "critical": 25.0},
+}
+
+# Human-readable labels for the raw metric keys produced by ParameterLayer.
+PARAM_LABELS = {
+    "crown_settlement_mm":      "Crown settlement (mean)",
+    "crown_settlement_max_mm":  "Crown settlement (max)",
+    "crown_B_mean_m":           "Crown height (mean)",
+    "total_height_mm":          "Total height",
+    "lateral_convergence_mm":     "Lateral convergence (mean)",
+    "lateral_convergence_max_mm": "Lateral convergence (max)",
+    "width_Tn_m":                 "Section width",
+    "width_Tn_mean_m":            "Section width (mean)",
+    "ovality_mean_pct":         "Ovality (mean)",
+    "ovality_max_pct":          "Ovality (max)",
+    "eccentricity_mean_mm":     "Eccentricity (mean)",
+    "eccentricity_max_mm":      "Eccentricity (max)",
+    "eccentricity_min_mm":      "Eccentricity (min)",
+    "polar_max_outward_mm":     "Polar deformation (outward)",
+    "polar_max_inward_mm":      "Polar deformation (inward)",
+    "n_sections":               "Sections analysed",
+    "reference":                "Reference",
+}
+
+# Map a metric key to its threshold band, collapsing mean/max/min variants.
+_PARAM_THRESHOLD_ALIAS = {
+    "crown_settlement_mm": "crown_settlement_mm",
+    "crown_settlement_max_mm": "crown_settlement_mm",
+    "lateral_convergence_mm": "lateral_convergence_mm",
+    "lateral_convergence_max_mm": "lateral_convergence_mm",
+    "ovality_mean_pct": "ovality_pct",
+    "ovality_max_pct": "ovality_pct",
+    "eccentricity_mean_mm": "eccentricity_mm",
+    "eccentricity_max_mm": "eccentricity_mm",
+}
+
+# References that are absolute geometry (single scan), not true T0 deformation.
+_SINGLE_SCAN_REFS = {"single_scan_global", "single_scan_per_section"}
+
+
+def classify_parameter(key, value):
+    """Return "OK" / "CAUTION" / "CRITICAL" / "" for a metric against its band.
+
+    Uses the absolute value so negative settlement/convergence is judged by
+    magnitude. Returns "" when the key has no defined threshold or the value
+    is not a finite number.
+    """
+    base = _PARAM_THRESHOLD_ALIAS.get(key)
+    if base is None:
+        return ""
+    band = PARAM_THRESHOLDS.get(base)
+    if band is None:
+        return ""
+    try:
+        v = abs(float(value))
+    except (TypeError, ValueError):
+        return ""
+    if not np.isfinite(v):
+        return ""
+    if v >= band["critical"]:
+        return "CRITICAL"
+    if v >= band["caution"]:
+        return "CAUTION"
+    return "OK"
+
+
+def format_parameter(key, value):
+    """Format a single extracted parameter for display.
+
+    Returns (label, text, status):
+      - label: human-readable name (falls back to the raw key),
+      - text: value formatted by unit suffix (_mm/_pct/_m/_deg/n_*), strings
+        kept verbatim, NaN shown as "n/a",
+      - status: classify_parameter(...) result (may be empty).
+    """
+    label = PARAM_LABELS.get(key, key)
+    status = classify_parameter(key, value)
+    if isinstance(value, str):
+        text = value
+        if key == "reference" and value in _SINGLE_SCAN_REFS:
+            text = value + " (absolute geometry, not T0 deformation)"
+        return label, text, status
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return label, str(value), status
+    if not np.isfinite(v):
+        return label, "n/a", status
+    if key.startswith("n_") or key.endswith("_count") or key == "n_sections":
+        return label, f"{int(round(v))}", status
+    if key.endswith("_mm"):
+        return label, f"{v:.2f} mm", status
+    if key.endswith("_pct"):
+        return label, f"{v:.3f} %", status
+    if key.endswith("_deg"):
+        return label, f"{v:.2f}°", status
+    if key.endswith("_m"):
+        return label, f"{v:.3f} m", status
+    return label, f"{v:.4f}", status
+
 __all__ = [
     "json", "math", "os", "sys", "warnings",
     "dataclass", "field", "Path", "Callable", "Dict", "List", "Optional", "Tuple",
@@ -244,7 +376,8 @@ __all__ = [
     "matplotlib", "plt", "mpatches", "FigureCanvas", "Figure", "_MPL_OK",
     "TUNNEL_PROFILES", "VL_BOX_W", "VL_BOX_H", "VL_CIR_R",
     "_BG", "_FG", "_GRID", "_ACC1", "_ACC2", "_ACC3", "_RED", "_YEL", "_GRN", "_DIM",
-    "_unit", "validate_xyz", "_normalize_rgb", "make_vertex_cloud", "fit_ellipse_fitzgibbon",
+    "_unit", "principal_axes", "validate_xyz", "_normalize_rgb", "make_vertex_cloud", "fit_ellipse_fitzgibbon",
+    "format_parameter", "classify_parameter", "PARAM_THRESHOLDS", "PARAM_LABELS",
 ]
 
 

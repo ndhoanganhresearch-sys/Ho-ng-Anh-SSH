@@ -1,4 +1,4 @@
-﻿"""Phrase-based translations for the TunnelApp v4.0 main window.
+"""Phrase-based translations for the TunnelApp v4.0 main window.
 
 English is the base language. Each entry maps an English source phrase to its
 Vietnamese and Korean equivalents. Any phrase not present here falls back to

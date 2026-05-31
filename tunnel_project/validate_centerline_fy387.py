@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Validate GeometricLayer centerline on real FY387 tunnel data.
 
 Run from the tunnel_project directory:

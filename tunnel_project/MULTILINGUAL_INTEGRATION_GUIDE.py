@@ -1,4 +1,4 @@
-﻿"""
+"""
 Patch to add multilingual support to Tunnel Analysis Window
 
 This file demonstrates how to integrate the language switcher into the existing application.

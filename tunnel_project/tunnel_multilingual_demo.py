@@ -1,4 +1,4 @@
-﻿"""
+"""
 Tunnel Analysis Multilingual Demo Application
 
 This is a simplified demo showing how the language switcher works

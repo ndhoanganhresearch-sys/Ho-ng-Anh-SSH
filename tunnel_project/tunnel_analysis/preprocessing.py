@@ -1,4 +1,4 @@
-﻿from .common import *
+from .common import *
 from .models import PipelineContext
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
@@ -145,9 +145,8 @@ class PreprocessingLayer:
             colors = None
 
         # Dominant axis
-        centroid = pts.mean(0); centred = pts - centroid
-        ev, vecs = np.linalg.eigh(np.cov(centred.T))
-        long_ax = vecs[:, np.argmax(ev)]
+        centroid, long_ax, _e1, _e2 = principal_axes(pts)
+        centred = pts - centroid
         proj = centred @ long_ax
         pmin, pmax = float(proj.min()), float(proj.max())
         ns = max(1, int(np.ceil((pmax - pmin) / section_len)))
@@ -205,18 +204,16 @@ class PreprocessingLayer:
         pts = context.working_points
         if pts is None: raise RuntimeError("No working_points.")
         pts = validate_xyz(pts)
-        scan = context.active_scan
-        intensity = None
-        if scan is not None and scan.intensity is not None:
-            raw_int = np.asarray(scan.intensity, dtype=np.float64).ravel()
-            # align intensity to working_points if sizes match
-            if len(raw_int) == len(pts):
-                intensity = raw_int
+        # T2: intensity is re-aligned to the current points even after
+        # voxel/SOR/lining changed the count (nearest-neighbour to raw scan).
+        intensity = context.working_intensity()
+        if intensity is not None:
+            intensity = np.asarray(intensity, dtype=np.float64).ravel()
+            if len(intensity) != len(pts):
+                intensity = None
 
         # Pass 1: dominant axis
-        c = pts.mean(axis=0)
-        ev, vecs = np.linalg.eigh(np.cov((pts - c).T))
-        ax = vecs[:, np.argmax(ev)]
+        c, ax, _e1, _e2 = principal_axes(pts)
         proj = (pts - c) @ ax
         pmin, pmax = float(proj.min()), float(proj.max())
         section_len = max(0.3, (pmax - pmin) / 60.0)
@@ -266,9 +263,7 @@ class PreprocessingLayer:
 
         # Global pass: remove points far outside expected tunnel radius
         if len(result) >= 10:
-            c2 = result.mean(axis=0)
-            ev2, vecs2 = np.linalg.eigh(np.cov((result - c2).T))
-            ax2 = vecs2[:, np.argmax(ev2)]
+            c2, ax2, _e1, _e2 = principal_axes(result)
             diff2 = result - c2
             ax_c2 = (diff2 @ ax2)[:, None] * ax2
             ri2 = np.linalg.norm(diff2 - ax_c2, axis=1)
@@ -279,6 +274,90 @@ class PreprocessingLayer:
             result = validate_xyz(result[global_keep])
 
         return result
+
+    def extract_lining_by_label(
+        self,
+        context: PipelineContext,
+        structure_labels: Optional[set] = None,
+        band: Tuple[float, float] = (0.80, 1.20),
+        min_inband_frac: float = 0.60,
+    ) -> Tuple[np.ndarray, Dict]:
+        """Isolate the lining using per-point semantic labels (FY387 / STSD).
+
+        The ASCII reader stores a per-point label channel in
+        ``scan.metadata['labels']`` for >=8-column files. This keeps only the
+        structural classes and drops interior objects (cables, lights, signal
+        devices, vehicles, people) without any geometric fitting.
+
+        structure_labels: explicit set of label ids to keep. When None they are
+        auto-detected: the dominant-axis radius is computed per point and any
+        label whose points mostly (>= ``min_inband_frac``) fall inside the
+        shell radius band (``band`` x median radius) is treated as lining.
+        Returns (kept_xyz, stats). Falls back to the geometric
+        extract_tunnel_lining when no labels are present.
+        """
+        scan = context.active_scan
+        if scan is None:
+            raise RuntimeError("extract_lining_by_label: no active scan.")
+        wp = context.working_points
+        if wp is None:
+            raise RuntimeError("extract_lining_by_label: no working_points.")
+        pts = validate_xyz(wp)
+        # T2: labels are re-aligned to the current working_points (handles
+        # voxel/SOR/lining), so this no longer has to run on the raw scan.
+        labels = context.working_labels()
+        if labels is None:
+            # No semantic labels available -> geometric fallback.
+            kept = self.extract_tunnel_lining(context)
+            return kept, {"method": "geometric_fallback", "reason": "no labels",
+                          "n_raw": int(len(pts)),
+                          "n_clean": int(len(kept))}
+        labels = np.asarray(labels).ravel()
+        if len(labels) != len(pts):
+            raise RuntimeError(
+                f"label/point mismatch ({len(labels)} vs {len(pts)}) after alignment.")
+        labels = labels.astype(np.int64)
+
+        # Radius of each point about the PCA dominant axis (for auto-detect and
+        # stats), computed once on the whole cloud.
+        c, ax, _e1, _e2 = principal_axes(pts)
+        diff = pts - c
+        axc = (diff @ ax)[:, None] * ax
+        radial = np.linalg.norm(diff - axc, axis=1)
+        r_med = float(np.median(radial))
+        lo, hi = band[0] * r_med, band[1] * r_med
+
+        uniq = np.unique(labels)
+        if structure_labels is None:
+            detected = set()
+            per_label = {}
+            for lb in uniq.tolist():
+                m = labels == lb
+                inband = float(np.mean((radial[m] >= lo) & (radial[m] <= hi)))
+                per_label[int(lb)] = round(inband, 3)
+                if inband >= min_inband_frac:
+                    detected.add(int(lb))
+            structure_labels = detected
+            detect_info = {"auto_detected": True, "inband_by_label": per_label,
+                           "r_median": round(r_med, 4), "band": [round(lo, 3), round(hi, 3)]}
+        else:
+            structure_labels = {int(x) for x in structure_labels}
+            detect_info = {"auto_detected": False}
+
+        keep_mask = np.isin(labels, list(structure_labels)) if structure_labels \
+            else np.ones(len(pts), dtype=bool)
+        kept = validate_xyz(pts[keep_mask], "lining_by_label")
+
+        stats = {
+            "method": "label",
+            "structure_labels": sorted(structure_labels),
+            "n_raw": int(len(pts)),
+            "n_clean": int(len(kept)),
+            "n_removed": int(len(pts) - int(keep_mask.sum())),
+            "labels_present": uniq.astype(int).tolist(),
+        }
+        stats.update(detect_info)
+        return kept, stats
 
     def auto_denoise(
         self,
@@ -396,10 +475,8 @@ class PreprocessingLayer:
         if survivors.sum() >= 6:
             sidx = np.where(survivors)[0]
             sp_all = pts[sidx]
-            centroid = sp_all.mean(0)
+            centroid, long_ax, _e1, _e2 = principal_axes(sp_all)
             centred = sp_all - centroid
-            ev, vecs = np.linalg.eigh(np.cov(centred.T))
-            long_ax = vecs[:, np.argmax(ev)]
             proj = centred @ long_ax
             pmin, pmax = float(proj.min()), float(proj.max())
             ns = max(1, int(np.ceil((pmax - pmin) / section_len)))
@@ -438,7 +515,8 @@ class PreprocessingLayer:
             try:
                 wall_noise = self._detect_wall_protrusion(
                     pts, candidate, protrusion_thr=float(wall_protrusion_thr))
-            except Exception:
+            except Exception as e:
+                warnings.warn(f"Wall-protrusion detection failed: {e}")
                 wall_noise = np.zeros(n_raw, dtype=bool)
 
         noise_mask = sem_noise | radial_noise | wall_noise
@@ -490,12 +568,7 @@ class PreprocessingLayer:
         p = pts[idx_all]
 
         # Cylindrical coordinates about the PCA long axis.
-        c = p.mean(0)
-        ev, vecs = np.linalg.eigh(np.cov((p - c).T))
-        order = np.argsort(ev)[::-1]
-        axis = vecs[:, order[0]]
-        e1 = vecs[:, order[1]]
-        e2 = vecs[:, order[2]]
+        c, axis, e1, e2 = principal_axes(p)
         d = p - c
         h = d @ axis
         u = d @ e1
@@ -580,13 +653,8 @@ class PreprocessingLayer:
                          "method": "skip-too-small"}
 
         # --- cylindrical coordinates around the PCA axis ---
-        centroid = pts.mean(0)
+        centroid, axis, e1, e2 = principal_axes(pts)
         centred = pts - centroid
-        ev, vecs = np.linalg.eigh(np.cov(centred.T))
-        order = np.argsort(ev)[::-1]
-        axis = vecs[:, order[0]]
-        e1 = vecs[:, order[1]]
-        e2 = vecs[:, order[2]]
         h = centred @ axis                      # along-axis position
         u = centred @ e1
         v = centred @ e2

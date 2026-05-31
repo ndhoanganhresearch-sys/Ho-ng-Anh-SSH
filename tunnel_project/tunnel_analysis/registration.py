@@ -1,4 +1,4 @@
-﻿from .common import *
+from .common import *
 from .models import PipelineContext
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
@@ -136,8 +136,8 @@ class RegistrationLayer:
         if small_gicp is not None and len(src) >= 20 and len(tgt) >= 20:
             try:
                 return self._icp_gicp(src, tgt)
-            except Exception:
-                pass
+            except Exception as e:
+                warnings.warn(f"GICP failed, falling back to Open3D ICP: {e}")
         if o3d is not None and len(src) >= 20 and len(tgt) >= 20:
             vs = float(np.clip(np.linalg.norm(np.ptp(tgt, axis=0)) / 600.0, 0.02, 0.12))
             def _pc(p):

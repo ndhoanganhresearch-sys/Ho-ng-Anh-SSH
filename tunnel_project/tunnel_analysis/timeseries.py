@@ -1,4 +1,4 @@
-﻿from .common import *
+from .common import *
 from .models import PointCloudBundle, PipelineContext
 from .io_layer import BaseLayer
 # ------------------------------------------------------------------------------

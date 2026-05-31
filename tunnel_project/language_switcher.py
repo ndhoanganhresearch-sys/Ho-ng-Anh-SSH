@@ -1,4 +1,4 @@
-﻿"""
+"""
 Language Switcher Widget for SSL Tunnel Monitoring System
 
 This module provides a professional language switcher widget with dropdown menu.
