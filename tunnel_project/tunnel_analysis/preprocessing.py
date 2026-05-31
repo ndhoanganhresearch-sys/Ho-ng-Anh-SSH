@@ -292,6 +292,7 @@ class PreprocessingLayer:
         k_sigma: float = 2.5,
         section_len: float = 0.5,
         interior_ratio: float = 0.40,
+        wall_protrusion_thr: float = 0.05,
     ) -> Tuple[np.ndarray, Dict]:
         """Fully automatic intelligent denoising (no manual interaction).
 
@@ -426,7 +427,21 @@ class PreprocessingLayer:
                 radial_keep_local[loc[band]] = True
             radial_noise[sidx[~radial_keep_local]] = True
 
-        noise_mask = sem_noise | radial_noise
+        # ---- Stage C: wall-mounted cable/conduit detection -----------------
+        # Per-point shape and radial-MAD both fail for cables hugging the
+        # wall (their neighbourhood looks planar and their radius matches the
+        # lining). Detect them by inward protrusion from the local wall
+        # envelope plus axial continuity. Only consider points still kept.
+        wall_noise = np.zeros(n_raw, dtype=bool)
+        if wall_protrusion_thr and wall_protrusion_thr > 0:
+            candidate = ~(sem_noise | radial_noise)
+            try:
+                wall_noise = self._detect_wall_protrusion(
+                    pts, candidate, protrusion_thr=float(wall_protrusion_thr))
+            except Exception:
+                wall_noise = np.zeros(n_raw, dtype=bool)
+
+        noise_mask = sem_noise | radial_noise | wall_noise
         clean_pts = validate_xyz(pts[~noise_mask])
         context.normalized_points = clean_pts
         return clean_pts, {
@@ -437,8 +452,95 @@ class PreprocessingLayer:
             "n_light": n_light,
             "n_person": n_person,
             "n_radial": int(radial_noise.sum()),
+            "n_wall_cable": int(wall_noise.sum()),
             "noise_pts": pts[noise_mask].copy(),
         }
+    @staticmethod
+    def _detect_wall_protrusion(
+        pts: np.ndarray,
+        candidate: np.ndarray,
+        protrusion_thr: float = 0.05,
+        n_axial: int = 60,
+        n_theta: int = 180,
+        wall_percentile: float = 90.0,
+        min_axial_runs: int = 3,
+    ) -> np.ndarray:
+        """Detect wall-mounted cables/conduits by inward protrusion + axial run.
+
+        Per-point shape features cannot separate a cable that hugs the wall: its
+        k-neighbourhood is dominated by wall points, so its local geometry looks
+        planar (verified on labelled real data: cable linearity median ~0.14,
+        same as the wall). The discriminative signal is that a cable sits *inside*
+        the local wall envelope and runs continuously along the tunnel axis.
+
+        Builds a coarse wall-radius envelope (high percentile of r per
+        axial x angular cell), flags points protruding inward beyond
+        ``protrusion_thr``, then keeps only angular columns whose protruding
+        points span several axial cells (a continuous run), which rejects
+        isolated wall bumps. Returns a boolean mask over ``pts`` (True = cable).
+
+        ``candidate`` restricts which points are eligible (e.g. points not
+        already removed by other stages) to save work.
+        """
+        n = len(pts)
+        mask = np.zeros(n, dtype=bool)
+        idx_all = np.where(candidate)[0]
+        if len(idx_all) < 50:
+            return mask
+        p = pts[idx_all]
+
+        # Cylindrical coordinates about the PCA long axis.
+        c = p.mean(0)
+        ev, vecs = np.linalg.eigh(np.cov((p - c).T))
+        order = np.argsort(ev)[::-1]
+        axis = vecs[:, order[0]]
+        e1 = vecs[:, order[1]]
+        e2 = vecs[:, order[2]]
+        d = p - c
+        h = d @ axis
+        u = d @ e1
+        w = d @ e2
+        r = np.sqrt(u * u + w * w)
+        theta = np.degrees(np.arctan2(w, u))
+
+        h_edges = np.linspace(h.min(), h.max(), n_axial + 1)
+        t_edges = np.linspace(-180.0, 180.0, n_theta + 1)
+        hi = np.clip(np.digitize(h, h_edges) - 1, 0, n_axial - 1)
+        ti = np.clip(np.digitize(theta, t_edges) - 1, 0, n_theta - 1)
+
+        # Wall-radius envelope per (axial, angular) cell = high percentile of r.
+        wall = np.full((n_axial, n_theta), np.nan)
+        cell = hi * n_theta + ti
+        order_c = np.argsort(cell, kind="stable")
+        cs = cell[order_c]
+        rs = r[order_c]
+        uniq, first = np.unique(cs, return_index=True)
+        bounds = np.append(first, len(cs))
+        for gi in range(len(uniq)):
+            seg = rs[bounds[gi]:bounds[gi + 1]]
+            if len(seg) >= 5:
+                wall.flat[uniq[gi]] = np.percentile(seg, wall_percentile)
+
+        wall_r = wall[hi, ti]
+        protrusion = wall_r - r
+        prot = np.isfinite(protrusion) & (protrusion > protrusion_thr)
+
+        # Axial continuity: keep an angular column only if its protruding points
+        # span >= min_axial_runs distinct axial cells (cables run along h).
+        keep_local = np.zeros(len(p), dtype=bool)
+        prot_ti = ti[prot]
+        prot_hi = hi[prot]
+        prot_loc = np.where(prot)[0]
+        if len(prot_loc):
+            # Count distinct axial cells per angular column.
+            for tcol in np.unique(prot_ti):
+                in_col = prot_ti == tcol
+                if np.unique(prot_hi[in_col]).size >= min_axial_runs:
+                    keep_local[prot_loc[in_col]] = True
+
+        mask[idx_all[keep_local]] = True
+        return mask
+
     def extract_lining_density_variation(
         self,
         context: PipelineContext,
