@@ -206,8 +206,77 @@ class GeometricLayer:
 
         u_fine = np.linspace(0.0, 1.0, section_count)
         cl = np.column_stack(splev(u_fine, tck)).astype(np.float64)
+        # C7: the slices above are cut perpendicular to the GLOBAL PCA axis,
+        # which is only the chord of a curved tunnel - the cross-sections are
+        # then tilted and the fitted centres drift. When the axis is
+        # noticeably curved, refine once by re-slicing perpendicular to the
+        # LOCAL tangent (Frenet) and re-fitting the spline.
+        if self._is_curved(cl):
+            cl = self._refine_centerline_tangent(pts, cl, section_count, smooth_factor)
         return cl, self._frenet(cl)
 
+    @staticmethod
+    def _is_curved(cl: np.ndarray, tol_ratio: float = 0.02) -> bool:
+        """True when the centerline bends away from its chord enough that a
+        global-axis slicing assumption is unsafe. Measured as max perpendicular
+        deviation from the best-fit straight line divided by total length.
+        """
+        cl = np.asarray(cl, dtype=np.float64)
+        if len(cl) < 5:
+            return False
+        c = cl.mean(axis=0)
+        _u, _s, vt = np.linalg.svd(cl - c)
+        axis = vt[0]
+        t = (cl - c) @ axis
+        resid = cl - c - np.outer(t, axis)
+        perp = float(np.linalg.norm(resid, axis=1).max())
+        length = float(t.max() - t.min()) + 1e-9
+        return (perp / length) > tol_ratio
+
+    def _refine_centerline_tangent(self, pts: np.ndarray, cl: np.ndarray,
+                                   section_count: int, smooth_factor: float) -> np.ndarray:
+        """One refinement pass: re-slice perpendicular to the local tangent.
+
+        For each frame of the current centerline, take points within an
+        adaptive half-thickness of the plane orthogonal to the LOCAL tangent T
+        and re-fit the geometric centre (LSQ circle + guard). The refit centres
+        are de-spiked and re-splined. Returns the refined centerline, or the
+        original when the refinement cannot produce enough centres (so it is
+        always safe).
+        """
+        try:
+            from scipy.interpolate import splev, splprep
+        except ImportError:
+            return cl
+        frames = self._frenet(cl)
+        eps = self._axial_eps(cl)
+        refit = []
+        for fr in frames:
+            C, T = fr["center"], fr["T"]
+            mask = np.abs((pts - C) @ T) < eps
+            sl = pts[mask]
+            if len(sl) < MIN_SLICE_POINTS:
+                continue
+            refit.append(self._slice_center(sl, T))
+        if len(refit) < 4:
+            return cl
+        refit = self._despike_centers(np.asarray(refit, dtype=np.float64),
+                                      cl[-1] - cl[0])
+        ch = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(refit, axis=0), axis=1))])
+        tot = ch[-1]
+        if tot < 1e-6:
+            return cl
+        u = ch / tot
+        _, ui = np.unique(u, return_index=True)
+        if len(ui) < 4:
+            return cl
+        try:
+            tck, _ = splprep(refit[ui].T, u=u[ui], s=smooth_factor * len(ui), k=3, quiet=True)
+        except Exception as e:
+            warnings.warn(f"Tangent refinement spline failed: {e}")
+            return cl
+        u_fine = np.linspace(0.0, 1.0, section_count)
+        return np.column_stack(splev(u_fine, tck)).astype(np.float64)
     def generate_frenet_planes(self, fr: List[Dict]) -> List[Dict]:
         """Return gravity-aligned section frames.
 

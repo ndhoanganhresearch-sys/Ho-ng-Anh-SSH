@@ -102,12 +102,47 @@ def test_curved_radius_recovery():
     assert cov > 0.85, f"curved centerline covers only {cov:.2%} of length"
     return cov
 
+def _curved_axis_truth(radius_arc=40.0, sweep_deg=80.0, radius=3.0,
+                       n_axial=400, n_theta=60, seed=4):
+    """Curved tunnel + its true axis polyline, for centre-error measurement."""
+    rng = np.random.default_rng(seed)
+    s = np.sort(rng.uniform(0.0, 1.0, n_axial))
+    phi = np.deg2rad(sweep_deg) * s
+    axis = np.column_stack([radius_arc * np.cos(phi),
+                            radius_arc * np.sin(phi),
+                            np.zeros_like(phi)])
+    theta = np.linspace(0.0, 2.0 * np.pi, n_theta, endpoint=False)
+    pts = []
+    for c, pangle in zip(axis, phi):
+        radial = np.array([np.cos(pangle), np.sin(pangle), 0.0])
+        up = np.array([0.0, 0.0, 1.0])
+        ring = c + radius * (np.outer(np.cos(theta), radial) +
+                             np.outer(np.sin(theta), up))
+        pts.append(ring + rng.normal(0, 0.006, ring.shape))
+    return np.vstack(pts).astype(np.float64), axis
+
+
+def test_curved_centre_error():
+    """C7: on a curved tunnel the refined centerline should sit close to the
+    true axis (global-PCA slicing alone drifts metres at the ends).
+    """
+    pts, axis = _curved_axis_truth()
+    layer = GeometricLayer()
+    cl, _ = layer.extract_centerline_bspline(_ctx(pts), section_count=80)
+    err = np.array([np.linalg.norm(axis - c, axis=1).min() for c in cl])
+    mean_e, max_e = float(err.mean()), float(err.max())
+    assert mean_e < 0.20, f"curved centre mean error too high: {mean_e:.3f} m"
+    assert max_e < 0.60, f"curved centre max error too high: {max_e:.3f} m"
+    return mean_e, max_e
+
 
 if __name__ == "__main__":
     straight = test_straight_full_coverage()
     bspline = test_bspline_full_coverage()
     curved = test_curved_radius_recovery()
+    ce_mean, ce_max = test_curved_centre_error()
     print("SMOKE TEST PASSED")
     print(f"Straight centerline axial coverage: {straight:.2%}")
     print(f"B-spline centerline axial coverage: {bspline:.2%}")
     print(f"Curved centerline axial coverage:   {curved:.2%}")
+    print(f"Curved centre error (mean/max):     {ce_mean:.3f} / {ce_max:.3f} m")
