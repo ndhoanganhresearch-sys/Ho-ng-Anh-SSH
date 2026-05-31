@@ -417,7 +417,15 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         # ── Background & grid ──────────────────────────────────────────────
         ax.set_facecolor("#FFFFFF")
         self._fig.patch.set_facecolor("#FFFFFF")
-        ax.grid(True, color="#DDDDDD", lw=0.4, linestyle="--", alpha=0.7, zorder=0)
+        # Show only the point cloud and measurement dimensions; hide the
+        # decorative reference lines (grid, hull, fit circle, radial spokes,
+        # clearance envelope, centre cross, ovality ellipse).
+        SHOW_OVERLAY_LINES = False
+        if SHOW_OVERLAY_LINES:
+            ax.grid(True, color="#DDDDDD", lw=0.4, linestyle="--", alpha=0.7, zorder=0)
+        else:
+            ax.grid(False)
+            ax.grid(False, which="both", axis="both")
         ax.set_axisbelow(True)
         for spine in ax.spines.values():
             spine.set_color("#888888"); spine.set_linewidth(0.8)
@@ -518,7 +526,7 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                           boxstyle="round,pad=0.15", alpha=0.85), zorder=10)
 
         # ── ε Ovality: show fitted ellipse ──────────────────────────────────
-        if hasattr(sg, "ovality") and np.isfinite(sg.ovality) and sg.ovality > 0.1:
+        if SHOW_OVERLAY_LINES and hasattr(sg, "ovality") and np.isfinite(sg.ovality) and sg.ovality > 0.1:
             a_semi = float(np.max(np.abs(x)))
             b_semi = float(np.max(np.abs(z)))
             if a_semi > 0.1 and b_semi > 0.1:
@@ -555,7 +563,7 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                     boxstyle="round,pad=0.3", alpha=0.9), zorder=10)
 
         # ── 2. Convex hull outline ─────────────────────────────────────────
-        if len(pts2d) >= 4:
+        if SHOW_OVERLAY_LINES and len(pts2d) >= 4:
             try:
                 hull = ConvexHull(pts2d)
                 hull_pts = pts2d[hull.vertices]
@@ -567,7 +575,7 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                 pass
 
         # ── Best-fit circle ────────────────────────────────────────────────
-        if self._profile == "Circle" and np.isfinite(sg.radius_fit):
+        if SHOW_OVERLAY_LINES and self._profile == "Circle" and np.isfinite(sg.radius_fit):
             fit_c = plt.Circle((0.0, 0.0), sg.radius_fit,
                                fill=False, edgecolor="#2563EB", lw=1.6,
                                ls="--", alpha=0.9, zorder=4,
@@ -576,7 +584,7 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
 
         # ── 4. Radial lines every 30° ──────────────────────────────────────
         r_max = float(np.percentile(radii, 97)) * 1.05
-        for deg in range(0, 360, 30):
+        for deg in (range(0, 360, 30) if SHOW_OVERLAY_LINES else ()):
             rad = math.radians(deg)
             ax.plot([0, r_max * math.cos(rad)], [0, r_max * math.sin(rad)],
                     color="#CCCCCC", lw=0.5, ls=":", zorder=1, alpha=0.7)
@@ -593,11 +601,11 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         vl_lw    = 1.6 if vl_ok else 2.4
         vl_ls    = "-." if vl_ok else "-"
         vl_label = "Clearance limit" if vl_ok else "⚠ CLEARANCE VIOLATION"
-        if self._profile == "Circle":
+        if SHOW_OVERLAY_LINES and self._profile == "Circle":
             ax.add_patch(plt.Circle((0.0, 0.0), self._vl_cir_r,
                 fill=False, edgecolor=vl_color, lw=vl_lw, ls=vl_ls,
                 alpha=0.95, zorder=5, label=vl_label))
-        else:
+        elif SHOW_OVERLAY_LINES:
             ax.add_patch(mpatches.Rectangle(
                 (-self._vl_box_w, 0.0), 2*self._vl_box_w, self._vl_box_h,
                 fill=False, edgecolor=vl_color, lw=vl_lw, ls=vl_ls,
@@ -608,8 +616,9 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
 
         # ── Centre cross ───────────────────────────────────────────────────
         cs = max(0.12, r_max * 0.04)
-        ax.plot([-cs, cs], [0, 0], color="#333333", lw=1.0, zorder=6)
-        ax.plot([0, 0], [-cs, cs], color="#333333", lw=1.0, zorder=6)
+        if SHOW_OVERLAY_LINES:
+            ax.plot([-cs, cs], [0, 0], color="#333333", lw=1.0, zorder=6)
+            ax.plot([0, 0], [-cs, cs], color="#333333", lw=1.0, zorder=6)
 
         # ── Dimension helpers ──────────────────────────────────────────────
         xmn = float(np.percentile(x, 1)); xmx = float(np.percentile(x, 99))
