@@ -1,0 +1,204 @@
+# -*- coding: utf-8 -*-
+"""Headless batch pipeline: run a point-cloud file end-to-end to CSV/Excel.
+
+Mirrors the GUI auto-pipeline (voxel -> auto-denoise -> centerline -> sections
+-> parameters) without Qt, so any supported file (.txt/.xyz/.pts/.csv/.asc/
+.las/.laz/.ply) produces the same per-section table and summary parameters that
+the app exports. Pure NumPy/SciPy core; only the optional Excel export needs
+openpyxl.
+
+CLI:
+    python -m tunnel_analysis.batch INPUT [-o OUTDIR] [--sections N]
+        [--spacing M] [--label-lining] [--no-denoise] [--voxel V] [--excel]
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from typing import Dict, List, Optional
+
+import numpy as np
+
+from .common import format_parameter
+from .models import PipelineContext, PointCloudBundle
+from .io_layer import BaseLayer
+from .preprocessing import PreprocessingLayer
+from .geometry import GeometricLayer
+from .parameters import ParameterExtractionLayer
+from .exporter import TunnelExporter
+
+
+def _log(cb, msg):
+    if cb is not None:
+        cb(msg)
+
+
+def run_pipeline(
+    input_path: str,
+    out_dir: Optional[str] = None,
+    section_count: int = 80,
+    spacing_m: Optional[float] = None,
+    voxel_size: float = 0.0,
+    denoise: bool = True,
+    label_lining: bool = False,
+    vl_box_w: float = 5.0,
+    vl_box_h: float = 5.0,
+    vl_cir_r: float = 2.7,
+    write_excel: bool = False,
+    status_cb=None,
+) -> Dict[str, object]:
+    """Run the full analysis on one file and write CSV (and optional Excel).
+
+    Returns a dict with output paths, section count, and summary parameters.
+    section_count is used directly unless spacing_m is given, in which case the
+    count is derived from the measured tunnel length / spacing.
+    """
+    base = BaseLayer()
+    pre = PreprocessingLayer()
+    geo = GeometricLayer()
+    par = ParameterExtractionLayer()
+
+    _log(status_cb, f"Loading {input_path}")
+    bundle = base.load_scan(input_path)
+    ctx = PipelineContext()
+    ctx.scans.append(bundle)
+    ctx.active_index = 0
+
+    # Optional voxel downsample (keeps memory bounded on big scans).
+    if voxel_size and voxel_size > 0:
+        _log(status_cb, f"Voxel downsampling at {voxel_size} m")
+        dn, _c = pre.voxel_downsample(ctx, voxel_size=float(voxel_size))
+        ctx.normalized_points = dn
+
+    # Lining isolation: label-based when requested and available, else denoise.
+    if label_lining:
+        _log(status_cb, "Extracting lining by label")
+        kept, stats = pre.extract_lining_by_label(ctx)
+        ctx.normalized_points = kept
+        _log(status_cb, f"  lining: {stats.get('method')} -> {stats.get('n_clean')} pts")
+    elif denoise:
+        _log(status_cb, "Auto-denoising (cables/lights/people/wall cables)")
+        clean, stats = pre.auto_denoise(ctx)
+        ctx.normalized_points = clean
+        _log(status_cb, f"  denoise: {stats.get('n_clean')}/{stats.get('n_raw')} kept")
+
+    # Resolve section count from spacing if requested.
+    if spacing_m and spacing_m > 1e-6:
+        length = _axis_length(ctx)
+        if length:
+            section_count = max(8, min(400, int(round(length / spacing_m)) + 1))
+            _log(status_cb, f"Spacing {spacing_m} m over {length:.2f} m -> {section_count} sections")
+
+    _log(status_cb, f"Extracting B-spline centerline ({section_count} sections)")
+    cl, fr = geo.extract_centerline_bspline(ctx, section_count=section_count)
+    ctx.centerline = cl
+    ctx.frenet_frames = fr
+
+    ctx.tunnel_profile = par.detect_profile(ctx)
+    _log(status_cb, f"Profile: {ctx.tunnel_profile}")
+
+    _log(status_cb, "Computing cross-sections")
+    ctx.sections = par.compute_all_sections(
+        ctx, vl_box_w=vl_box_w, vl_box_h=vl_box_h, vl_cir_r=vl_cir_r)
+
+    _log(status_cb, "Extracting parameters")
+    params: Dict[str, float] = {}
+    params.update(par.calc_arch_settlement(ctx))
+    params.update(par.calc_horizontal_convergence(ctx))
+    params.update(par.calc_ovality(ctx))
+    params.update(par.calc_eccentricity(ctx))
+    ctx.parameters.update(params)
+
+    # Output paths.
+    stem = os.path.splitext(os.path.basename(input_path))[0]
+    out_dir = out_dir or os.path.dirname(os.path.abspath(input_path))
+    os.makedirs(out_dir, exist_ok=True)
+    exporter = TunnelExporter()
+    csv_path = os.path.join(out_dir, f"{stem}_sections.csv")
+    exporter.export_csv(ctx, csv_path)
+    _log(status_cb, f"Wrote {csv_path}")
+
+    xlsx_path = None
+    if write_excel:
+        xlsx_path = os.path.join(out_dir, f"{stem}_report.xlsx")
+        try:
+            exporter.export_excel(ctx, xlsx_path)
+            _log(status_cb, f"Wrote {xlsx_path}")
+        except Exception as exc:
+            _log(status_cb, f"Excel export skipped: {exc}")
+            xlsx_path = None
+
+    return {
+        "input": input_path,
+        "csv": csv_path,
+        "excel": xlsx_path,
+        "n_sections": len(ctx.sections),
+        "profile": ctx.tunnel_profile,
+        "parameters": params,
+    }
+
+
+def _axis_length(ctx: PipelineContext) -> Optional[float]:
+    from .common import principal_axes, validate_xyz
+    pts = ctx.working_points
+    if pts is None:
+        return None
+    try:
+        p = validate_xyz(pts)
+        _c, axis, _e1, _e2 = principal_axes(p)
+        proj = (p - p.mean(axis=0)) @ axis
+        return float(proj.max() - proj.min())
+    except Exception:
+        return None
+
+
+def _print_summary(result: Dict[str, object]) -> None:
+    print(f"\nInput   : {result['input']}")
+    print(f"Profile : {result['profile']}")
+    print(f"Sections: {result['n_sections']}")
+    print(f"CSV     : {result['csv']}")
+    if result.get("excel"):
+        print(f"Excel   : {result['excel']}")
+    print("Parameters:")
+    for k, v in result["parameters"].items():
+        label, text, status = format_parameter(k, v)
+        tag = f"  [{status}]" if status and status != "OK" else ""
+        print(f"  {label}: {text}{tag}")
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    ap = argparse.ArgumentParser(
+        prog="tunnel_analysis.batch",
+        description="Headless tunnel analysis: file -> CSV/Excel.")
+    ap.add_argument("input", help="point-cloud file (.txt/.xyz/.las/.ply/...)")
+    ap.add_argument("-o", "--out-dir", default=None, help="output directory")
+    ap.add_argument("--sections", type=int, default=80, help="number of cross-sections")
+    ap.add_argument("--spacing", type=float, default=None, help="section spacing (m); overrides --sections")
+    ap.add_argument("--voxel", type=float, default=0.0, help="voxel size (m); 0 = off")
+    ap.add_argument("--no-denoise", action="store_true", help="skip auto-denoise")
+    ap.add_argument("--label-lining", action="store_true", help="isolate lining by per-point label")
+    ap.add_argument("--excel", action="store_true", help="also write an Excel report")
+    args = ap.parse_args(argv)
+
+    if not os.path.isfile(args.input):
+        print(f"Input not found: {args.input}", file=sys.stderr)
+        return 2
+
+    result = run_pipeline(
+        args.input,
+        out_dir=args.out_dir,
+        section_count=args.sections,
+        spacing_m=args.spacing,
+        voxel_size=args.voxel,
+        denoise=not args.no_denoise,
+        label_lining=args.label_lining,
+        write_excel=args.excel,
+        status_cb=lambda m: print(f"[batch] {m}"),
+    )
+    _print_summary(result)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
