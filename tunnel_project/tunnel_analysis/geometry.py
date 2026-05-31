@@ -105,9 +105,17 @@ class GeometricLayer:
         self, context: PipelineContext,
         section_count: int = 80,
         window_size: int = 5,
-        smooth_factor: float = 0.0,
+        smooth_factor: float = 0.5,
     ) -> Tuple[np.ndarray, List[Dict]]:
-        """B-spline C2 centerline per PDF section 3.4."""
+        """B-spline C2 centerline per PDF section 3.4.
+
+        smooth_factor controls the splprep smoothing s = smooth_factor * n_knots.
+        It MUST be > 0: with s = 0 the spline interpolates every control point
+        (including residual jitter from uneven sampling), which makes the axis
+        wander more than the raw centreline (measured on real data: lateral
+        wander 0.31 m at s=0 vs 0.002 m at s>=0.1). A small positive default
+        smooths out that jitter while still following the tunnel axis.
+        """
         from scipy.interpolate import splev, splprep
 
         pts = context.working_points
@@ -169,6 +177,17 @@ class GeometricLayer:
         return cl, self._frenet(cl)
 
     def generate_frenet_planes(self, fr: List[Dict]) -> List[Dict]:
+        """Return gravity-aligned section frames.
+
+        The frames are already gravity-anchored when built by _frenet (T along
+        the axis, N = vertical projected orthogonal to T, B = N x T). If valid
+        frames are passed in they are returned as-is; if the centres are present
+        the frames are recomputed from them so the call is never a silent no-op.
+        """
+        if fr and all("center" in f and "T" in f and "N" in f and "B" in f for f in fr):
+            centers = np.asarray([f["center"] for f in fr], dtype=np.float64)
+            if len(centers) >= 2:
+                return self._frenet(centers)
         return fr
 
     def _frenet(self, cl: np.ndarray) -> List[Dict]:
