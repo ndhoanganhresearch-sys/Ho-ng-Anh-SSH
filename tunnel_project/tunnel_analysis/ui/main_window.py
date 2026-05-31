@@ -1,4 +1,4 @@
-﻿from ..common import *
+from ..common import *
 from ..models import PointCloudBundle, PipelineContext
 from ..io_layer import BaseLayer
 from ..preprocessing import PreprocessingLayer
@@ -874,7 +874,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             if self.plotter:
                 self.plotter.add_lines(sm, color="#F59E0B", width=4, connected=True, name="cl_sm")
                 self.plotter.render()
-            self._log(f"B-Spline centerline smoothing complete: {len(sm)} points.")
+            self._log(f"B-Spline centerline smoothing complete: {len(sm)} points (display overlay only; analysis still uses the 4.1/4.3b centerline).")
 
         elif key == "4.4_frenet":
             self.context.frenet_frames = result

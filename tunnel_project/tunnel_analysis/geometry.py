@@ -1,5 +1,10 @@
-﻿from .common import *
+from .common import *
 from .models import PipelineContext
+
+# Minimum points in an axial slice before a centre is computed. Matches the
+# circle-fit floor in _slice_center (below this it returns the slice mean), so
+# both centerline paths gate consistently (C5) instead of 30 vs 5.
+MIN_SLICE_POINTS = 12
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
@@ -24,12 +29,13 @@ class GeometricLayer:
         centers = []
         for s in range(section_count):
             ch = pts[slot == s]
-            if len(ch) >= 30:
+            if len(ch) >= MIN_SLICE_POINTS:
                 # Geometric centre via circle fit (robust to uneven sampling),
                 # not the mass centroid which zig-zags on real scans.
                 centers.append(self._slice_center(ch, ax))
         if len(centers) < 4: raise RuntimeError(f"Only {len(centers)} centers (need >= 4).")
         cl = np.asarray(centers, dtype=np.float64)
+        cl = self._despike_centers(cl, ax)   # C1: pull back sparse-ring spikes
         return cl, self._frenet(cl)
 
     def extract_centerline_iterative(
@@ -46,16 +52,22 @@ class GeometricLayer:
         new_ax = cur.copy(); iters = 0
         for it in range(max_iter):
             iters = it + 1; frs = self._frenet(cur); c3d: List[np.ndarray] = []
+            # C3: adaptive slice half-thickness from the current axis spacing
+            # (was a hardcoded 0.05 m, which assumes metres and a fixed section
+            # pitch). Mirrors ParameterLayer._section_epsilon.
+            eps = self._axial_eps(cur)
             for fr in frs:
                 C, T, N, B = fr["center"], fr["T"], fr["N"], fr["B"]
-                mask = np.abs((pts - C) @ T) < 0.05; sl = pts[mask]
-                if len(sl) < 10: continue
-                d = sl - C; p2 = np.column_stack([d @ N, d @ B])
-                try: c2d, _, _ = self._ransac_circle(p2)
-                except Exception: continue
-                c3d.append(C + float(c2d[0]) * N + float(c2d[1]) * B)
+                mask = np.abs((pts - C) @ T) < eps; sl = pts[mask]
+                if len(sl) < 12: continue
+                # C2: reuse the LSQ + angular-coverage guard slice centre.
+                # _ransac_circle (fixed tol) extrapolated centres metres away on
+                # real data (verified: iterative wander 205 m, hook 35 m); the
+                # LSQ fit with the partial-arc guard is far more stable.
+                c3d.append(self._slice_center(sl, T))
             if len(c3d) < 4: warnings.warn(f"Iter {iters}: only {len(c3d)} centers."); break
             ca = np.asarray(c3d, dtype=np.float64)
+            ca = self._despike_centers(ca, ca[-1] - ca[0])   # C1: pull back spikes
             # FIX-1: axis=
             ch = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(ca, axis=0), axis=1))])
             tot = ch[-1]
@@ -82,6 +94,14 @@ class GeometricLayer:
         return new_ax, self._frenet(new_ax), iters
 
     def smooth_bspline(self, cl: np.ndarray, sf: float = 0.5) -> np.ndarray:
+        """Cosmetic display smoothing of an existing centerline (C6).
+
+        Returns a denser, smoothed polyline for the 3D overlay only. It does NOT
+        recompute Frenet frames and downstream analysis (sections, settlement,
+        eccentricity) keeps using context.centerline, not this result. Use
+        extract_centerline_bspline if you need an analysis-grade smoothed axis
+        with matching frames. Resampled at 4x the input control points.
+        """
         try:
             from scipy.interpolate import splev, splprep
         except ImportError: return np.asarray(cl, dtype=np.float64)
@@ -104,7 +124,6 @@ class GeometricLayer:
     def extract_centerline_bspline(
         self, context: PipelineContext,
         section_count: int = 80,
-        window_size: int = 5,
         smooth_factor: float = 0.5,
     ) -> Tuple[np.ndarray, List[Dict]]:
         """B-spline C2 centerline per PDF section 3.4.
@@ -136,24 +155,41 @@ class GeometricLayer:
         slot = np.clip(np.searchsorted(edges, proj, side="right") - 1, 0, n_chunks - 1)
         # Geometric centre per chunk via circle fit (robust to uneven
         # sampling), not the mass centroid which zig-zags on real scans.
-        centers = np.asarray(
-            [self._slice_center(pts[slot == s], ax) for s in range(n_chunks)
-             if int((slot == s).sum()) >= 5],
-            dtype=np.float64,
-        )
+        # Also record how far the circle-fit centre sits from the chunk mean:
+        # for a full ring they coincide, but a one-sided partial arc (typical
+        # of the sparse first/last chunks) makes the fit extrapolate outward,
+        # which is the source of the B-spline 'hook' at the ends.
+        centers_list = []
+        fitdev_list = []
+        for s in range(n_chunks):
+            chunk = pts[slot == s]
+            if len(chunk) < MIN_SLICE_POINTS:
+                continue
+            ctr = self._slice_center(chunk, ax)
+            centers_list.append(ctr)
+            fitdev_list.append(float(np.linalg.norm(ctr - chunk.mean(axis=0))))
+        centers = np.asarray(centers_list, dtype=np.float64)
+        fitdev = np.asarray(fitdev_list, dtype=np.float64)
         if len(centers) < 4:
             raise RuntimeError(f"Only {len(centers)} raw centers (need >= 4).")
+        centers = self._despike_centers(centers, ax)   # C1: kill lateral spikes
 
-        ws = max(3, min(window_size, len(centers) // 4))
-        curvatures = np.zeros(len(centers))
-        for i in range(ws, len(centers) - ws):
-            v1 = centers[i] - centers[i - ws]
-            v2 = centers[i + ws] - centers[i]
-            n1 = float(np.linalg.norm(v1))
-            n2 = float(np.linalg.norm(v2))
-            if n1 > 1e-9 and n2 > 1e-9:
-                cos_a = float(np.clip(np.dot(v1 / n1, v2 / n2), -1.0, 1.0))
-                curvatures[i] = 1.0 - cos_a
+        # Trim contiguous END chunks whose fit deviates from the mean far more
+        # than the interior (partial-arc extrapolation). Full-ring sections
+        # (incl. genuinely curved tunnels) have tiny fitdev, so this never
+        # trims them and axial coverage is preserved.
+        if len(centers) >= 10:
+            q = len(centers) // 5
+            interior_med = float(np.median(fitdev[q:len(centers) - q]))
+            tol = max(0.30, interior_med + 0.50)
+            lo = 0
+            while lo < len(centers) // 4 and fitdev[lo] > tol:
+                lo += 1
+            hi = len(centers)
+            while hi > len(centers) - len(centers) // 4 and fitdev[hi - 1] > tol:
+                hi -= 1
+            if hi - lo >= 4:
+                centers = centers[lo:hi]
 
         key_pts = centers
         ch = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(key_pts, axis=0), axis=1))])
@@ -245,10 +281,62 @@ class GeometricLayer:
         return T / norms
 
     @staticmethod
-    def _perp(t: np.ndarray) -> np.ndarray:
-        cands = [np.array([0., 0., 1.]), np.array([0., 1., 0.]), np.array([1., 0., 0.])]
-        seed = cands[int(np.argmin([abs(float(c @ t)) for c in cands]))]
-        return _unit(seed - (seed @ t) * t)
+    def _axial_eps(axis_pts: np.ndarray, default: float = 0.05) -> float:
+        """Adaptive slice half-thickness from centerline spacing (C3).
+
+        Uses ~0.55x the median spacing between consecutive axis points so the
+        slice is thick enough to catch a full ring but thin enough not to mix
+        neighbouring sections. Falls back to a small default when the axis is
+        degenerate. Mirrors ParameterLayer._section_epsilon.
+        """
+        a = np.asarray(axis_pts, dtype=np.float64)
+        if a.ndim != 2 or len(a) < 2:
+            return default
+        d = np.linalg.norm(np.diff(a, axis=0), axis=1)
+        d = d[np.isfinite(d) & (d > 1e-6)]
+        if len(d) == 0:
+            return default
+        return float(np.clip(np.median(d) * 0.55, default, 0.5))
+
+    @staticmethod
+    def _despike_centers(centers: np.ndarray, axis: np.ndarray) -> np.ndarray:
+        """Pull back slice centres that jump sideways off the local trend (C1).
+
+        Sparse rings at segment boundaries / tunnel ends fit a circle whose
+        centre extrapolates 1-3 m laterally even though the radial RMS stays
+        small, so the per-slice angular guard cannot catch them. Here each
+        centre is compared to the median of its neighbours in the plane
+        orthogonal to the axis; if its lateral offset from that local median
+        exceeds a robust threshold (median + 3*MAD, floored at 0.25 m) it is
+        replaced by the neighbour median. This is curvature-preserving: a
+        genuinely curved tunnel moves smoothly so no point is flagged.
+        """
+        cl = np.asarray(centers, dtype=np.float64)
+        n = len(cl)
+        if n < 5:
+            return cl
+        a = np.asarray(axis, dtype=np.float64)
+        a = a / (np.linalg.norm(a) + 1e-12)
+        out = cl.copy()
+        win = max(2, n // 20)
+        lat = np.empty(n)
+        meds = np.empty((n, 3))
+        for i in range(n):
+            lo = max(0, i - win); hi = min(n, i + win + 1)
+            nb = np.delete(cl[lo:hi], i - lo, axis=0)
+            med = np.median(nb, axis=0)
+            meds[i] = med
+            off = cl[i] - med
+            off = off - (off @ a) * a            # lateral component only
+            lat[i] = float(np.linalg.norm(off))
+        mad = float(np.median(np.abs(lat - np.median(lat)))) + 1e-9
+        thr = max(0.25, float(np.median(lat)) + 3.0 * 1.4826 * mad)
+        spike = lat > thr
+        for i in np.where(spike)[0]:
+            # keep the axial position, replace only the lateral coordinates
+            proj = (cl[i] - meds[i]) @ a
+            out[i] = meds[i] + proj * a
+        return out
 
     def _slice_center(self, slice_pts: np.ndarray, axis: np.ndarray) -> np.ndarray:
         """Robust geometric centre of an axial slice.
@@ -273,6 +361,25 @@ class GeometricLayer:
         e2 = np.cross(a, e1)
         d = slice_pts - c
         p2 = np.column_stack([d @ e1, d @ e2])
+        # Angular coverage guard: an end-of-tunnel slice often holds only a
+        # one-sided arc (sparse, partial ring). Circle-fitting a partial arc
+        # is ill-conditioned and extrapolates the centre OUTWARD, which is
+        # exactly the B-spline 'hook' seen at the two ends. If the points do
+        # not wrap around enough of the ring, fall back to the mean (which
+        # stays inside the points and cannot curl outward).
+        ang = np.arctan2(p2[:, 1], p2[:, 0])
+        occ = np.zeros(36, dtype=bool)
+        occ[np.clip(((ang + np.pi) / (2 * np.pi) * 36).astype(int), 0, 35)] = True
+        # Angular-coverage guard (C1). A one-sided arc makes the circle fit
+        # extrapolate the centre outward by 1-3 m even when the radial RMS is
+        # small, which is the source of the end 'hook'. We also require the arc
+        # to span a wide angle (not just many bins on one side): a partial arc
+        # clustered in half the circle has a small angular span and is rejected.
+        n_occ = int(occ.sum())
+        span = float(ang.max() - ang.min())
+        wrapped = (span > np.deg2rad(220)) or (n_occ >= 24)
+        if n_occ < 20 or not wrapped:   # too little / one-sided coverage
+            return c
         # Least-squares circle fit (Kasa). On real tunnel rings this is far
         # more stable than RANSAC with a fixed tolerance, which on large-radius
         # rings produced centres metres away (verified: LSQ jump max ~0.5 m vs
@@ -288,38 +395,6 @@ class GeometricLayer:
         if np.linalg.norm(c2d) > spread:
             return c
         return c + float(c2d[0]) * e1 + float(c2d[1]) * e2
-
-    def _ransac_circle(
-        self, pts2d: np.ndarray, n_iter: int = 200, tol: float = 0.02
-    ) -> Tuple[np.ndarray, float, np.ndarray]:
-        K = len(pts2d)
-        if K < 3: raise ValueError("Need >= 3 pts.")
-        bc = pts2d.mean(axis=0)
-        # FIX-1 & 2: axis=1 for norm, bn=-1
-        br = float(np.median(np.linalg.norm(pts2d - bc, axis=1)))
-        bm = np.ones(K, dtype=bool); bn = -1
-        rng = np.random.default_rng(42)
-        for _ in range(n_iter):
-            idx = rng.choice(K, 3, replace=False)
-            try: c, r = self._c3(pts2d[idx[0]], pts2d[idx[1]], pts2d[idx[2]])
-            except Exception: continue
-            # FIX-1: axis=1
-            mask = np.abs(np.linalg.norm(pts2d - c, axis=1) - r) < tol
-            ni   = int(mask.sum())
-            if ni > bn:
-                bn = ni; bm = mask
-                inl = pts2d[mask]
-                if len(inl) >= 3: bc, br = self._lsq_c(inl)
-        return bc, br, bm
-
-    @staticmethod
-    def _c3(p1, p2, p3):
-        ax, ay = p1; bx, by = p2; cx, cy = p3
-        D = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
-        if abs(D) < 1e-10: raise ValueError("Collinear.")
-        ux = ((ax ** 2 + ay ** 2) * (by - cy) + (bx ** 2 + by ** 2) * (cy - ay) + (cx ** 2 + cy ** 2) * (ay - by)) / D
-        uy = ((ax ** 2 + ay ** 2) * (cx - bx) + (bx ** 2 + by ** 2) * (ax - cx) + (cx ** 2 + cy ** 2) * (bx - ax)) / D
-        c = np.array([ux, uy]); return c, float(np.linalg.norm(p1 - c))
 
     @staticmethod
     def _lsq_c(pts):
