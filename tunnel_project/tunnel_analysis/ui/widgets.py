@@ -682,12 +682,14 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                     f"{angle:.1f}°", color="#D97706", fontsize=7.5, fontweight="bold",
                     ha="center", va="center", bbox=lbox, zorder=8)
 
-        # Anchor the angle arcs at the wall-floor corner (bottom of each
-        # side wall), not at mid-height, so the value sits where the floor
-        # meets the wall as expected.
-        z_corner = zmn + z_span * 0.08
-        _angle_arc(sg.wall_angle_L, xmn + x_span * 0.04, z_corner, "left")
-        _angle_arc(sg.wall_angle_R, xmx - x_span * 0.04, z_corner, "right")
+        # Wall-to-floor angle arcs/labels are hidden on the section view.
+        # Set SHOW_WALL_ANGLE = True to restore them; they are anchored at
+        # the wall-floor corner (bottom of each side wall).
+        SHOW_WALL_ANGLE = False
+        if SHOW_WALL_ANGLE:
+            z_corner = zmn + z_span * 0.08
+            _angle_arc(sg.wall_angle_L, xmn + x_span * 0.04, z_corner, "left")
+            _angle_arc(sg.wall_angle_R, xmx - x_span * 0.04, z_corner, "right")
 
         # ── Clearance violation banner ─────────────────────────────────────
         if sg.clearance_violation:
