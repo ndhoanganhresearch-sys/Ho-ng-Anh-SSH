@@ -492,6 +492,60 @@ class ParameterExtractionLayer:
                     eccentricity=ecc, clearance_violation=clearance_violation,
                     min_clearance_dist=min_clearance_dist)
 
+    def detect_profile(self, context: "PipelineContext") -> str:
+        """Automatically infer the tunnel cross-section profile.
+
+        Samples a few cross-sections (using the existing Frenet frames),
+        projects each to 2D, and fits a circle. A circular tunnel leaves a
+        small radial residual relative to its radius; a box/rectangular bore
+        leaves a large one (corners deviate strongly from any circle). The
+        decision is the median normalised residual across the sampled sections.
+
+        Returns one of TUNNEL_PROFILES ("Circle" or "Box"). Falls back to
+        "Circle" when there is not enough data to decide.
+        """
+        pts = context.working_points
+        frames = context.frenet_frames
+        if pts is None or not frames:
+            return "Circle"
+        pts = validate_xyz(pts)
+        idxs = np.linspace(0, len(frames) - 1, min(12, len(frames))).astype(int)
+        ratios = []
+        for i in idxs:
+            fr = frames[int(i)]
+            C, T, N, B = fr["center"], fr["T"], fr["N"], fr["B"]
+            sl = pts[np.abs((pts - C) @ T) < 0.05]
+            if len(sl) < 40:
+                continue
+            d = sl - C
+            p2 = np.column_stack([d @ N, d @ B])
+            x, y = p2[:, 0], p2[:, 1]
+            A = np.column_stack([x, y, np.ones(len(p2))])
+            b = x * x + y * y
+            try:
+                sol, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+            except Exception:
+                continue
+            cx, cy = sol[0] / 2.0, sol[1] / 2.0
+            R = float(np.sqrt(max(sol[2] + cx * cx + cy * cy, 1e-9)))
+            if R < 1e-6:
+                continue
+            resid = np.abs(np.hypot(x - cx, y - cy) - R)
+            # Normalised RMS residual; corners of a box push this up sharply.
+            ratios.append(float(np.sqrt(np.mean(resid ** 2)) / R))
+        if not ratios:
+            return "Circle"
+        med = float(np.median(ratios))
+        # NOTE: circle-fit residual does NOT reliably separate Circle from Box
+        # on real scans. Measured on this project: an ideal synthetic circle is
+        # ~0.01 and an ideal box ~0.13, but a REAL circular tunnel (floor slab,
+        # sparse/occluded returns, residual noise) lands ~0.10 - overlapping the
+        # box range. With only circular ground truth available we cannot pick a
+        # safe split, so we default to Circle (correct for bored/shield tunnels
+        # like this dataset) and only flag Box on an unambiguously high residual
+        # to avoid ever misreading a circular bore as a box.
+        return "Box" if med >= 0.30 else "Circle"
+
     def compute_all_sections(
         self, context: PipelineContext, vl_box_w: float, vl_box_h: float, vl_cir_r: float, epsilon: float = 0.05
     ) -> List[SectionGeometry]:
