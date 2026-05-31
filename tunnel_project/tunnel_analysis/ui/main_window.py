@@ -1057,7 +1057,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _slot_1_1_import(self) -> None:
         self._hdr("LiDAR Data Acquisition", "Load LAS/LAZ/PLY point-cloud data into the project database.")
-        fp, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load tunnel point-cloud data", "", "Point Clouds (*.las *.laz *.ply);;All Files (*.*)")
+        fp, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load tunnel point-cloud data", "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
         if not fp: return
         max_pts = self._ask_max_points(fp)
         if max_pts is None: return
@@ -1164,7 +1164,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._hdr("Add Scan Station", "Load additional scan station to merge with existing scans.")
         fp, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load Scan Station", "",
-            "Point Clouds (*.las *.laz *.ply);;All Files (*.*)")
+            "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
         if not fp: return
         max_pts = self._ask_max_points(fp)
         if max_pts is None: return
@@ -1851,9 +1851,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _slot_6_1_epochs(self) -> None:
         self._hdr("Load Time-Series Epochs", "Load reference and monitoring point-cloud epochs for deformation comparison.")
-        fp0, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load reference epoch T0", "", "Point Clouds (*.las *.laz *.ply);;All Files (*.*)")
+        fp0, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load reference epoch T0", "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
         if not fp0: return
-        fpn, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load monitoring epoch", "", "Point Clouds (*.las *.laz *.ply);;All Files (*.*)")
+        fpn, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load monitoring epoch", "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
         if not fpn: return
         self._start_worker("6.1_epochs", lambda: self.ts_mod.load_epochs(fp0, fpn))
 

@@ -1,4 +1,4 @@
-﻿from .common import *
+from .common import *
 from .models import PointCloudBundle
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
@@ -116,11 +116,115 @@ def _read_ply(fp: str) -> PointCloudBundle:
                   "has_intensity": False, "has_colors": col is not None},
     )
 
+def _sniff_delimiter(line: str) -> Optional[str]:
+    """Guess the column delimiter of a text point-cloud line.
+
+    Returns None for any-whitespace (numpy default), or an explicit char for
+    comma / semicolon / tab separated files. Picks whichever non-space
+    delimiter yields the most columns, else falls back to whitespace.
+    """
+    best = None
+    best_n = 1
+    for d in (",", ";", "\t"):
+        n = len(line.split(d))
+        if n > best_n:
+            best_n = n
+            best = d
+    return best
+
+
+def _read_txt(fp: str, max_points: int = MAX_POINTS_DEFAULT) -> PointCloudBundle:
+    """Read an ASCII point cloud (.txt/.xyz/.pts/.csv/.asc).
+
+    Auto-detects delimiter (whitespace/comma/semicolon/tab), an optional
+    non-numeric header line, and column layout by width: 3 -> XYZ; 6 -> XYZ +
+    (normals or RGB); 7+ -> XYZ + normals(3) + intensity (+ label, kept in
+    metadata). Subsamples by striding when the file exceeds max_points (same
+    policy as the LAS reader) so large FY387/STSD scans stay within memory.
+    """
+    path = Path(fp)
+    header_rows = 0
+    delim = None
+    with path.open("r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            t = line.strip()
+            if not t:
+                header_rows += 1
+                continue
+            if t.startswith(("#", "//")):
+                header_rows += 1
+                continue
+            delim = _sniff_delimiter(t)
+            first = t.split(delim) if delim else t.split()
+            try:
+                float(first[0]); float(first[1]); float(first[2])
+            except (ValueError, IndexError):
+                header_rows += 1
+            break
+
+    arr = np.loadtxt(str(path), delimiter=delim, skiprows=header_rows, ndmin=2)
+    if arr.ndim != 2 or arr.shape[1] < 3:
+        raise ValueError(f"{path.name}: need >= 3 numeric columns, got shape {arr.shape}.")
+    total = int(len(arr))
+    subsampled = False
+    step = 1
+    if total > max_points:
+        step = max(1, total // max_points)
+        arr = arr[::step]
+        subsampled = True
+
+    ncol = arr.shape[1]
+    pts = arr[:, :3].astype(np.float64)
+    intensity = None
+    colors = None
+    labels = None
+    if ncol == 6:
+        tail = arr[:, 3:6]
+        if float(np.nanmin(tail)) >= 0.0 and float(np.nanmax(tail)) > 1.5:
+            colors = tail.astype(np.float64)
+    elif ncol == 7:
+        intensity = arr[:, 6].astype(np.float64)
+    elif ncol >= 8:
+        intensity = arr[:, 6].astype(np.float64)
+        labels = arr[:, 7].astype(np.float64)
+
+    if (intensity is None or float(np.nanmax(intensity)) < 1e-6) and colors is not None:
+        lum = 0.299 * colors[:, 0] + 0.587 * colors[:, 1] + 0.114 * colors[:, 2]
+        if float(np.nanmax(lum)) > 1e-6:
+            intensity = lum
+
+    pts = validate_xyz(pts, path.name)
+    cloud = make_vertex_cloud(pts, intensity=intensity, colors_raw=colors)
+    meta = {
+        "format": path.suffix.lower(),
+        "columns": int(ncol),
+        "delimiter": "whitespace" if delim is None else repr(delim),
+        "header_rows": int(header_rows),
+        "point_count": int(len(pts)),
+        "original_count": total,
+        "subsampled": subsampled,
+        "subsample_step": step,
+        "bounds_min": pts.min(0).tolist(),
+        "bounds_max": pts.max(0).tolist(),
+        "has_intensity": intensity is not None,
+        "has_colors": colors is not None,
+        "has_labels": labels is not None,
+    }
+    bundle = PointCloudBundle(
+        points=pts, intensity=intensity, colors_raw=colors, path=fp, cloud=cloud,
+        metadata=meta,
+    )
+    if labels is not None:
+        bundle.metadata["labels"] = labels
+    return bundle
+
 class BaseLayer:
     def load_scan(self, fp: str, max_points: int = MAX_POINTS_DEFAULT) -> PointCloudBundle:
         sfx = Path(fp).suffix.lower()
         if sfx in {".las", ".laz"}: return _read_las(fp, max_points=max_points)
         if sfx == ".ply": return _read_ply(fp)
+        if sfx in {".txt", ".xyz", ".pts", ".csv", ".asc"}:
+            return _read_txt(fp, max_points=max_points)
         raise ValueError(f"Unsupported format: {sfx}")
 
     def get_point_count(self, fp: str) -> int:
