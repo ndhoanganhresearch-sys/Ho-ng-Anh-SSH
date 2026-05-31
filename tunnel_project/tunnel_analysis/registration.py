@@ -47,10 +47,10 @@ class RegistrationLayer:
 
         for i in range(1, len(context.scans)):
             src_pts = validate_xyz(context.scans[i].points)
-            # Step 1: anchor translation
-            t_offset = (self._anchor(tgt, context.scans[0].intensity) -
-                        self._anchor(src_pts, context.scans[i].intensity))
-            src_shifted = src_pts + t_offset
+            # Step 1: coarse align (GROR rotation+translation, anchor fallback)
+            src_shifted = self._coarse_align(src_pts, tgt,
+                src_intensity=context.scans[i].intensity,
+                tgt_intensity=context.scans[0].intensity)
             # Step 2: ICP fine registration
             src_reg, rmse = self._icp(src_shifted, tgt)
             merged.append(src_reg)
@@ -99,10 +99,11 @@ class RegistrationLayer:
         for i in range(1, len(context.scans)):
             src_pts = validate_xyz(context.scans[i].points)
             
-            # 1. Anchor translation (between current src and current_ref)
-            t_offset = (self._anchor(current_ref, context.scans[0].intensity) - 
-                        self._anchor(src_pts, context.scans[i].intensity))
-            src_shifted = src_pts + t_offset
+            # 1. Coarse align to the current chain reference (GROR rot+trans,
+            #    anchor fallback).
+            src_shifted = self._coarse_align(src_pts, current_ref,
+                src_intensity=context.scans[i].intensity,
+                tgt_intensity=context.scans[0].intensity)
             
             # 2. ICP fine registration
             src_reg, rmse = self._icp(src_shifted, current_ref)
@@ -116,6 +117,29 @@ class RegistrationLayer:
         return validate_xyz(merged_cloud), rmse_list
 
 
+    def _coarse_align(self, src: np.ndarray, tgt: np.ndarray,
+                      src_intensity=None, tgt_intensity=None) -> np.ndarray:
+        """Coarse-align src onto tgt, returning the shifted source points.
+
+        Tries GROR-style feature registration first (FPFH correspondences +
+        pairwise-distance graph + Umeyama), which recovers ROTATION as well as
+        translation. This fixes the failure mode of the old anchor-only init: a
+        single matched point gives translation only, so any yaw between stations
+        sent point-to-plane ICP into a local minimum. Falls back to the
+        intensity/median anchor translation when features are unavailable
+        (Open3D missing, too few correspondences, featureless clouds).
+        """
+        transform = None
+        try:
+            transform = self._gror_estimate_transform(src, tgt)
+        except Exception as e:
+            warnings.warn(f"GROR coarse alignment failed, using anchor shift: {e}")
+            transform = None
+        if transform is not None:
+            ones = np.ones((src.shape[0], 1))
+            return (transform @ np.hstack([src, ones]).T).T[:, :3]
+        shift = self._anchor(tgt, tgt_intensity) - self._anchor(src, src_intensity)
+        return src + shift
     def _anchor(self, pts: np.ndarray, intensity: Optional[np.ndarray]) -> np.ndarray:
         pts = validate_xyz(pts)
         if intensity is not None:
