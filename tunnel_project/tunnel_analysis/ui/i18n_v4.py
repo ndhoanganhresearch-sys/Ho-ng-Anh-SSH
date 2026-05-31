@@ -294,7 +294,7 @@ PHRASES = {
     "Completed in {e}": {"vi": "Hoàn thành trong {e}", "ko": "{e} 만에 완료"},
     "Auto clearance gauge set from measured radius: R={r:.2f} m": {"vi": "Tự đặt giới hạn tĩnh không theo bán kính đo được: R={r:.2f} m", "ko": "측정 반경 기반 자동 한계 설정: R={r:.2f} m"},
     "Auto-detected tunnel profile: {p}": {"vi": "Tự nhận dạng loại mặt cắt hầm: {p}", "ko": "터널 단면 자동 감지: {p}"},
-    "Blue=T (axis), Green=N (vertical/up), Orange=B (lateral).": {"vi": "Xanh dương=T (trục), Xanh lá=N (thẳng đứng/lên), Cam=B (ngang).", "ko": "파랑=T(축), 초록=N(수직/위), 주황=B(횡방향)."},
+    "Blue=T (axis), Green=N (lateral), Orange=B (vertical/up).": {"vi": "Xanh dương=T (trục), Xanh lá=N (ngang), Cam=B (thẳng đứng/lên).", "ko": "파랑=T(축), 초록=N(횡방향), 주황=B(수직/위)."},
     "Show noise": {"vi": "Hiện nhiễu", "ko": "노이즈 표시"},
     "Click on points in 3D viewport to mark as noise. Click again to deselect.": {"vi": "Bấm vào điểm trong khung nhìn 3D để đánh dấu nhiễu. Bấm lại để bỏ chọn.", "ko": "3D 뷰포트에서 점을 클릭하여 노이즈로 표시. 다시 클릭하면 선택 해제."},
     "Click on red noise points to restore them.": {"vi": "Bấm vào điểm nhiễu đỏ để khôi phục.", "ko": "빨간 노이즈 점을 클릭하여 복원하세요."},

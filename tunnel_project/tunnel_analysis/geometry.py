@@ -218,13 +218,20 @@ class GeometricLayer:
         for i in range(n):
             Ti = T[i]
             ref = X_global if abs(float(Ti[2])) > 0.9999 else Z_global
-            Ni = ref - float(ref @ Ti) * Ti           # vertical, in-section
-            nrm = float(np.linalg.norm(Ni))
+            # Vertical in-section direction (gravity 'up'), orthogonal to T.
+            vert = ref - float(ref @ Ti) * Ti
+            nrm = float(np.linalg.norm(vert))
             if nrm < 1e-9:
-                Ni = X_global - float(X_global @ Ti) * Ti
-                nrm = float(np.linalg.norm(Ni))
-            Ni = Ni / (nrm + 1e-12)
-            Bi = _unit(np.cross(Ni, Ti))
+                vert = X_global - float(X_global @ Ti) * Ti
+                nrm = float(np.linalg.norm(vert))
+            vert = vert / (nrm + 1e-12)
+            # Convention used by all consumers: section 2D x = d.N (lateral,
+            # horizontal), section 2D z = d.B (vertical). So B is the vertical
+            # (up) axis and N is the in-plane lateral axis. (Previously N was
+            # set vertical and B lateral, which rotated every cross-section 90
+            # deg and mislabelled crown/floor.)
+            Bi = vert                                  # vertical, up
+            Ni = _unit(np.cross(Bi, Ti))               # lateral, horizontal
             frames.append({"center": pts[i], "T": Ti, "N": Ni, "B": Bi})
         return frames
     @staticmethod

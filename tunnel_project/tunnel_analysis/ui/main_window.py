@@ -884,7 +884,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 # the step is visibly doing something (previously it only logged).
                 self._render_cl(np.asarray(cl, dtype=np.float64), result)
             self._log(f"Gravity-aligned section frames generated successfully: {len(result)} N-B frames.")
-            self._log(_tr("Blue=T (axis), Green=N (vertical/up), Orange=B (lateral).", self.current_language))
+            self._log(_tr("Blue=T (axis), Green=N (lateral), Orange=B (vertical/up).", self.current_language))
 
         elif key == "4.5b_intensity_seams":
             d = result
