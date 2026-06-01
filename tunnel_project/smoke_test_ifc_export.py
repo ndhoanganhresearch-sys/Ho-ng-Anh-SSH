@@ -107,7 +107,37 @@ def test_ifc_export_geometry_and_hierarchy():
         return result
 
 
+def test_ifc_components_by_label():
+    """When the scan carries per-point labels, IFC records exact per-class
+    point counts in a TunnelComponentsByLabel pset (ground truth, not the
+    heuristic counts)."""
+    if not _HAS_IFC:
+        return "skipped (ifcopenshell missing)"
+    import ifcopenshell
+    ctx = _ctx()
+    # attach synthetic per-point labels to the active scan
+    n = len(ctx.scans[0].points)
+    rng = np.random.default_rng(7)
+    labels = rng.integers(0, 3, size=n)
+    ctx.scans[0].metadata["labels"] = labels
+    import collections
+    truth = collections.Counter(labels.tolist())
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "labeled.ifc")
+        TunnelIFCExporter().export_ifc(ctx, out, project_name="Labeled")
+        f = ifcopenshell.open(out)
+        ps = [x for x in f.by_type("IfcPropertySet") if x.Name == "TunnelComponentsByLabel"]
+        assert len(ps) == 1, "TunnelComponentsByLabel pset missing"
+        props = {pp.Name: pp.NominalValue.wrappedValue for pp in ps[0].HasProperties}
+        for cid, cnt in truth.items():
+            key = f"Class_{int(cid)}"
+            assert props.get(key) == int(cnt), (key, props.get(key), cnt)
+        del f
+        return f"by-label classes={sorted(props)}"
+
+
 if __name__ == "__main__":
     print("test_ifc_export_geometry_and_hierarchy ->",
           test_ifc_export_geometry_and_hierarchy())
+    print("test_ifc_components_by_label ->", test_ifc_components_by_label())
     print("SMOKE TEST PASSED")

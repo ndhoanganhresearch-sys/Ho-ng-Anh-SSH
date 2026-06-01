@@ -267,4 +267,7 @@ def launch_dashboard(context: PipelineContext, port: int = 8050,
     if open_browser:
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
     print(f"Dashboard running at {url}")
+    # SECURITY: bind to loopback only. The dashboard has no authentication and
+    # runs Dash's development server, so it must NOT be exposed on 0.0.0.0 or a
+    # public interface. Keep debug=False (avoids the Werkzeug debugger RCE).
     app.run(host="127.0.0.1", port=port, debug=False)

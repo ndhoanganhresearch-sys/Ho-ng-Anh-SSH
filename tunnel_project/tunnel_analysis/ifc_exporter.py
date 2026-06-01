@@ -179,6 +179,25 @@ class TunnelIFCExporter:
                                            name="TunnelComponents")
             ifcopenshell.api.run("pset.edit_pset", ifc, pset=pset_c, properties=comp)
 
+        # When the scan carries per-point semantic labels (FY387 / STSD), also
+        # record the GROUND-TRUTH point count per class id. This is exact
+        # (unlike the heuristic auto_denoise counts above) but class-id meaning
+        # depends on the dataset legend, so it is stored as Class_<id> and kept
+        # in a separate pset to avoid implying a fixed naming.
+        try:
+            labels = context.working_labels() if hasattr(context, "working_labels") else None
+        except Exception:
+            labels = None
+        if labels is not None and len(labels):
+            lab = np.asarray(labels).astype(np.int64).ravel()
+            uniq, cnt = np.unique(lab, return_counts=True)
+            by_label = {f"Class_{int(u)}": int(c) for u, c in zip(uniq, cnt)}
+            if by_label:
+                pset_l = ifcopenshell.api.run("pset.add_pset", ifc,
+                                               product=project,
+                                               name="TunnelComponentsByLabel")
+                ifcopenshell.api.run("pset.edit_pset", ifc, pset=pset_l, properties=by_label)
+
         ifc.write(str(path))
         return str(path)
 
