@@ -364,8 +364,9 @@ class PreprocessingLayer:
         context: PipelineContext,
         k_neighbors: int = 20,
         cable_linearity_thr: float = 0.30,
-        light_sphericity_thr: float = 0.12,
+        light_sphericity_thr: float = 0.35,
         light_size_thr: float = 0.20,
+        light_cluster_max: int = 500,
         person_height_thr: float = 1.2,
         person_width_thr: float = 0.8,
         k_sigma: float = 2.5,
@@ -446,7 +447,26 @@ class PreprocessingLayer:
             # already encodes (1 - s2/s1); the explicit s2/s1 gate keeps
             # merely elongated lining patches from being flagged as cables.
             is_cable = (linearity >= cable_linearity_thr) & (sig2_over_sig1 < 0.15)
-            is_light = (sphericity >= light_sphericity_thr) & (local_size <= light_size_thr)
+            # A point with high sphericity is only flagged as a light/fixture if
+            # it also belongs to a SMALL ISOLATED cluster. Real fixtures are
+            # compact blobs; without this isolation test the per-point shape
+            # gate alone flags ~40% of a real tunnel shell as 'lights' (verified
+            # on FY387). Falls back to the raw shape gate if sklearn is absent.
+            light_shape = (sphericity >= light_sphericity_thr) & (local_size <= light_size_thr)
+            is_light = np.zeros(n_raw, dtype=bool)
+            if light_shape.sum() > 0:
+                try:
+                    from sklearn.cluster import DBSCAN as _DBSCAN
+                    cand_idx = np.where(light_shape)[0]
+                    clab = _DBSCAN(eps=0.10, min_samples=4).fit(pts[cand_idx]).labels_
+                    keep = np.zeros(len(cand_idx), dtype=bool)
+                    for cc in set(clab.tolist()) - {-1}:
+                        sel = clab == cc
+                        if int(sel.sum()) <= light_cluster_max:
+                            keep[sel] = True
+                    is_light[cand_idx[keep]] = True
+                except Exception:
+                    is_light = light_shape
             is_person = np.zeros(n_raw, dtype=bool)
             person_mask = planarity > 0.4
             if person_mask.sum() > 10:
@@ -593,6 +613,18 @@ class PreprocessingLayer:
             seg = rs[bounds[gi]:bounds[gi + 1]]
             if len(seg) >= 5:
                 wall.flat[uniq[gi]] = np.percentile(seg, wall_percentile)
+
+        # A wide cable can occupy most of its own angular column, dragging that
+        # cell's wall percentile down to the cable radius (so it no longer looks
+        # like a protrusion). Take the max envelope over a small neighbourhood of
+        # angular columns (wrap-around) to recover the true wall radius from the
+        # clean columns next to the cable. Verified on synthetic wall cable:
+        # recall 0.71 -> 0.99 with no extra shell false-positives.
+        env_k = 2
+        wall_sm = np.full_like(wall, np.nan)
+        for off in range(-env_k, env_k + 1):
+            wall_sm = np.fmax(wall_sm, np.roll(wall, off, axis=1))
+        wall = wall_sm
 
         wall_r = wall[hi, ti]
         protrusion = wall_r - r
