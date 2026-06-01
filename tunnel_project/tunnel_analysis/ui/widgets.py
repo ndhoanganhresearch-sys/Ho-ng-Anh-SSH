@@ -474,18 +474,32 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                    linewidths=0, rasterized=True, zorder=2)
         # PDF params overlay
         # ── δv Crown settlement arrow ──────────────────────────────────────
+        # Crown marker. With a T0 reference this is the TRUE crown settlement
+        # dv = crown_Tn - crown_T0 (downward arrow). Without T0 (single scan)
+        # there is no deformation to show, so label the absolute crown height
+        # instead of a fake "settlement". ASCII labels avoid the font/mojibake
+        # issue (the old Greek delta rendered as '6').
         if hasattr(sg, "H1") and np.isfinite(sg.H1):
             crown_z = float(np.percentile(z, 97))
             spring_z = float(np.percentile(z, 50))
-            dv_mm = (crown_z - spring_z) * 1e3
-            # Arrow at crown pointing down
-            ax.annotate("", xy=(0, crown_z), xytext=(0, crown_z + 0.3),
-                arrowprops=dict(arrowstyle="->", color="#DC2626", lw=2.0),
-                zorder=9)
-            ax.text(0.05, crown_z + 0.35, f"δv={dv_mm:.0f}mm",
-                color="#DC2626", fontsize=8, fontweight="bold",
-                bbox=dict(facecolor="white", edgecolor="#DC2626",
-                          boxstyle="round,pad=0.2", alpha=0.9), zorder=10)
+            has_t0 = (ref_sg is not None and ref_sg.pts_2d is not None
+                      and len(ref_sg.pts_2d) >= 4)
+            if has_t0:
+                crown_z0 = float(np.percentile(ref_sg.pts_2d[:, 1], 97))
+                dv_mm = (crown_z - crown_z0) * 1e3
+                ax.annotate("", xy=(0, crown_z), xytext=(0, crown_z + 0.3),
+                    arrowprops=dict(arrowstyle="->", color="#DC2626", lw=2.0),
+                    zorder=9)
+                ax.text(0.05, crown_z + 0.35, f"dv={dv_mm:.0f}mm",
+                    color="#DC2626", fontsize=8, fontweight="bold",
+                    bbox=dict(facecolor="white", edgecolor="#DC2626",
+                              boxstyle="round,pad=0.2", alpha=0.9), zorder=10)
+            else:
+                crown_h_mm = (crown_z - spring_z) * 1e3
+                ax.text(0.05, crown_z + 0.35, f"crown h={crown_h_mm:.0f}mm",
+                    color="#475569", fontsize=8, fontweight="bold",
+                    bbox=dict(facecolor="white", edgecolor="#94A3B8",
+                              boxstyle="round,pad=0.2", alpha=0.9), zorder=10)
 
         # ── δh Convergence arrows ───────────────────────────────────────────
         # Convergence (delta-h) is a deformation that only has meaning across
