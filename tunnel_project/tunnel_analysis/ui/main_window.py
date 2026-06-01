@@ -2717,7 +2717,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         ("Geometry", ["ovality_mean_pct", "ovality_max_pct",
                       "eccentricity_mean_mm", "eccentricity_max_mm", "eccentricity_min_mm",
                       "crown_B_mean_m", "total_height_mm", "width_Tn_m", "width_Tn_mean_m"]),
-        ("Context", ["reference", "n_sections"]),
+        ("Context", ["reference", "settlement_reference", "convergence_reference", "eccentricity_reference", "n_sections"]),
     ]
 
     def _grouped_params(self, params):

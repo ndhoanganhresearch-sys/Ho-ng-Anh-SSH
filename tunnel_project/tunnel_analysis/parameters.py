@@ -67,7 +67,7 @@ class ParameterExtractionLayer:
                 "crown_settlement_mm": (cr_n - sp_n) * 1e3,
                 "crown_settlement_max_mm": (cr_n - sp_n) * 1e3,
                 "total_height_mm": (cr_n - inv_n) * 1e3,
-                "reference": "single_scan_global",
+                "settlement_reference": "single_scan_global",
             }
 
         result = {
@@ -75,7 +75,7 @@ class ParameterExtractionLayer:
             "crown_settlement_max_mm": float(np.max(np.abs(dv_list))) if dv_list else float(np.max(crown_n_list)) * 1e3,
             "crown_B_mean_m":          float(np.mean(crown_n_list)),
             "n_sections":              len(crown_n_list),
-            "reference":               "T0_per_section" if dv_list else "single_scan_per_section",
+            "settlement_reference":    "T0_per_section" if dv_list else "single_scan_per_section",
         }
         return result
 
@@ -118,7 +118,7 @@ class ParameterExtractionLayer:
             return {
                 "lateral_convergence_mm": w_n * 1e3,
                 "width_Tn_m": w_n,
-                "reference": "single_scan_global",
+                "convergence_reference": "single_scan_global",
             }
 
         return {
@@ -126,7 +126,7 @@ class ParameterExtractionLayer:
             "lateral_convergence_max_mm": float(np.max(np.abs(dh_list))) if dh_list else 0.0,
             "width_Tn_mean_m":            float(np.mean(w_n_list)),
             "n_sections":                 len(w_n_list),
-            "reference":                  "T0_per_section" if dh_list else "single_scan_per_section",
+            "convergence_reference":      "T0_per_section" if dh_list else "single_scan_per_section",
         }
 
     def generate_heatmap(self, context: PipelineContext) -> Tuple[np.ndarray, np.ndarray]:
@@ -360,7 +360,7 @@ class ParameterExtractionLayer:
             "eccentricity_mean_mm": float(np.mean(ec)),
             "eccentricity_max_mm":  float(np.max(ec)),
             "eccentricity_min_mm":  float(np.min(ec)),
-            "reference": ref,
+            "eccentricity_reference": ref,
         }
 
     @staticmethod

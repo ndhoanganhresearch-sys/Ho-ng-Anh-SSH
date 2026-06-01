@@ -10,12 +10,38 @@ class TimeSeriesLayer:
         bl = BaseLayer(); return bl.load_scan(p0), bl.load_scan(pn)
 
     def plot_deformation(self, context: PipelineContext) -> np.ndarray:
+        """Crown-height trend (mm) sampled along the tunnel chainage.
+
+        When Frenet frames exist, sample the crown (max projection on the
+        vertical B axis) in each section so the trend follows the real tunnel
+        axis and stays valid for curved/non-axis-aligned tunnels. Falls back to
+        a PCA-axis binning of global Z only when no centerline is available
+        (the old version binned by the raw X coordinate, which is meaningless
+        unless the tunnel happens to run along X).
+        """
         pts = context.working_points
         if pts is None: raise RuntimeError("Load epochs first.")
         pts = validate_xyz(pts)
-        sc  = (pts[:,2] - np.median(pts[:,2]))*1e3
-        ord_= np.argsort(pts[:,0])
-        return np.array([float(np.nanmean(c)) for c in np.array_split(sc[ord_],120) if len(c)>0])
+        frames = context.frenet_frames
+        if frames:
+            from .parameters import ParameterExtractionLayer
+            eps = ParameterExtractionLayer._section_epsilon(context)
+            crowns = []
+            for fr in frames:
+                C, T, B = fr["center"], fr["T"], fr["B"]
+                sl = pts[np.abs((pts - C) @ T) < eps]
+                if len(sl) < 5:
+                    crowns.append(np.nan); continue
+                crowns.append(float(((sl - C) @ B).max()) * 1e3)
+            arr = np.array(crowns, dtype=np.float64)
+            if np.isfinite(arr).any():
+                return arr
+        # Fallback: project Z trend along the PCA dominant axis.
+        c, axis, _e1, _e2 = principal_axes(pts)
+        proj = (pts - c) @ axis
+        sc = (pts[:, 2] - np.median(pts[:, 2])) * 1e3
+        order = np.argsort(proj)
+        return np.array([float(np.nanmean(c2)) for c2 in np.array_split(sc[order], 120) if len(c2) > 0])
 
     def m3c2_distances(
         self,

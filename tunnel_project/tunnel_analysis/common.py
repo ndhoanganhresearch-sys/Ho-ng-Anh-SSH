@@ -290,6 +290,9 @@ PARAM_LABELS = {
     "polar_max_inward_mm":      "Polar deformation (inward)",
     "n_sections":               "Sections analysed",
     "reference":                "Reference",
+    "settlement_reference":     "Settlement reference",
+    "convergence_reference":    "Convergence reference",
+    "eccentricity_reference":   "Eccentricity reference",
 }
 
 # Map a metric key to its threshold band, collapsing mean/max/min variants.
@@ -347,7 +350,7 @@ def format_parameter(key, value):
     status = classify_parameter(key, value)
     if isinstance(value, str):
         text = value
-        if key == "reference" and value in _SINGLE_SCAN_REFS:
+        if key.endswith("reference") and value in _SINGLE_SCAN_REFS:
             text = value + " (absolute geometry, not T0 deformation)"
         return label, text, status
     try:
