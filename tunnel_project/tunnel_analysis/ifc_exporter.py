@@ -15,7 +15,8 @@ class TunnelIFCExporter:
                    project_name: str = "Tunnel Analysis",
                    engineer: str = "CBNU Smart Structure Lab",
                    schema: str = "IFC4",
-                   wall_thickness: float = 0.3) -> str:
+                   wall_thickness: float = 0.3,
+                   include_components: bool = False) -> str:
         try:
             import ifcopenshell
             import ifcopenshell.api
@@ -215,9 +216,74 @@ class TunnelIFCExporter:
                                                name="TunnelComponentsByLabel")
                 ifcopenshell.api.run("pset.edit_pset", ifc, pset=pset_l, properties=by_label)
 
+        # Optionally model the detected non-structural objects (cables, lights,
+        # people) as separate coloured proxies, clustered into discrete items.
+        if include_components:
+            self._export_components(ifc, body_ctx, storey, context)
+
         ifc.write(str(path))
         return str(path)
 
+    def _export_components(self, ifc, body_ctx, storey, context):
+        """Model detected non-structural objects (cable/light/person) as
+        coloured IfcBuildingElementProxy items. Each per-class point set is
+        clustered (DBSCAN) into discrete objects; every cluster becomes a box
+        proxy placed at the cluster centroid, sized to its extent, coloured by
+        class, and tagged with an IfcClassificationReference. Safe no-op when
+        there are no component points.
+        """
+        import numpy as _np
+        import ifcopenshell, ifcopenshell.api
+        comp = getattr(context, 'component_points', None) or {}
+        colours = {'cable': (0.90, 0.10, 0.10),
+                   'light': (0.98, 0.85, 0.10),
+                   'person': (0.10, 0.45, 0.95)}
+        try:
+            from sklearn.cluster import DBSCAN as _DBSCAN
+            have_db = True
+        except Exception:
+            have_db = False
+        n_made = 0
+        for cls, pts in comp.items():
+            arr = _np.asarray(pts, dtype=float) if pts is not None else _np.empty((0, 3))
+            if arr.ndim != 2 or len(arr) < 5:
+                continue
+            if have_db:
+                labels = _DBSCAN(eps=0.25, min_samples=5).fit(arr).labels_
+                groups = [arr[labels == c] for c in sorted(set(labels.tolist())) if c != -1]
+            else:
+                groups = [arr]
+            rgb = colours.get(cls, (0.6, 0.6, 0.6))
+            for gi, g in enumerate(groups):
+                if len(g) < 5:
+                    continue
+                ctr = g.mean(axis=0)
+                ext = g.max(axis=0) - g.min(axis=0)
+                dx = float(max(ext[0], 0.05)); dy = float(max(ext[1], 0.05)); dz = float(max(ext[2], 0.05))
+                loc = ifc.createIfcCartesianPoint((float(ctr[0]), float(ctr[1]), float(ctr[2]) - dz / 2.0))
+                a2p = ifc.createIfcAxis2Placement3D(loc, None, None)
+                placement = ifc.createIfcLocalPlacement(None, a2p)
+                origin2d = ifc.createIfcCartesianPoint((0.0, 0.0))
+                pos2d = ifc.createIfcAxis2Placement2D(origin2d, None)
+                prof = ifc.createIfcRectangleProfileDef('AREA', None, pos2d, dx, dy)
+                solid = ifc.createIfcExtrudedAreaSolid(prof, None, ifc.createIfcDirection((0.0, 0.0, 1.0)), dz)
+                shape = ifc.createIfcShapeRepresentation(body_ctx, 'Body', 'SweptSolid', [solid])
+                elem = ifcopenshell.api.run('root.create_entity', ifc,
+                                            ifc_class='IfcBuildingElementProxy',
+                                            name=f'{cls.capitalize()}_{gi + 1:03d}')
+                elem.ObjectPlacement = placement
+                elem.Representation = ifc.createIfcProductDefinitionShape(None, None, [shape])
+                self._apply_color(ifc, solid, rgb, name=f'{cls}Colour')
+                try:
+                    pset = ifcopenshell.api.run('pset.add_pset', ifc, product=elem, name='ComponentClass')
+                    ifcopenshell.api.run('pset.edit_pset', ifc, pset=pset,
+                                         properties={'Class': cls, 'PointCount': int(len(g))})
+                except Exception:
+                    pass
+                ifcopenshell.api.run('spatial.assign_container', ifc,
+                                     products=[elem], relating_structure=storey)
+                n_made += 1
+        return n_made
     @staticmethod
     def _apply_color(ifc, item, rgb, name="Color"):
         """Attach an RGB surface style to a geometry item (IFC4).

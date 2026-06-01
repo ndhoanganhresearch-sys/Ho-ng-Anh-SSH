@@ -40,7 +40,7 @@ CORE_STEP_CODES = {
     "4.1", "4.3b", "4.4",                             # centerline + section frames
     "5.1", "5.2", "5.3", "5.5", "5.6", "5.7",          # deformation parameters
     "6.1", "6.2", "6.3",                              # 4D time-series
-    "7.1", "7.1b", "7.2",                             # BIM export (IFC4 + IFC4X3) + AI assistant
+    "7.1", "7.1b", "7.1c", "7.2",                     # BIM export (IFC4 + IFC4X3 + components) + AI assistant
     "8.1", "8.2", "8.3", "8.4",                       # export reports + web dashboard
 }
 
@@ -580,6 +580,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             (7, "BIM and AI", "BIM/AI", [
                 ("7.1  Export IFC package", self._slot_7_1_ifc),
                 ("7.1b Export IFC4X3 (IfcAlignment)", self._slot_7_1b_ifc_alignment),
+                ("7.1c Export IFC + components (cables/lights)", self._slot_7_1c_ifc_components),
                 ("7.2  Query structural AI assistant", self._slot_7_2_query_ai),
             ]),
             (8, "Export and reporting", "Out.", [
@@ -871,6 +872,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self.context.normalized_points = pts
             noise_pts = np.asarray(stats.get("noise_pts", np.empty((0,3))), dtype=np.float64)
             self.context.denoise_stats = self._extract_denoise_counts(stats)
+            self.context.component_points = stats.get("component_points", {}) or {}
             self._render_filter_result(np.asarray(pts, dtype=np.float64), noise_pts,
                 "2.4 Semantic Noise Removal | kept=blue, removed=red")
             self.pt_label.setText(f"Points: {len(pts):,}")
@@ -896,6 +898,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             pts = np.asarray(pts, dtype=np.float64)
             self.context.normalized_points = pts
             self.context.denoise_stats = self._extract_denoise_counts(stats)
+            self.context.component_points = stats.get("component_points", {}) or {}
             noise_pts = np.asarray(stats.get("noise_pts", np.empty((0, 3))), dtype=np.float64)
             if self._auto_running:
                 self._render_pts(pts, "2.5 Auto Denoise - Clean lining (auto)", "#0EA5E9")
@@ -2077,6 +2080,19 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._start_worker("7.1_ifc", lambda: self.ifc_mod.export_ifc(
             self.context, path, project_name=proj, engineer="CBNU Smart Structure Lab",
             schema="IFC4X3_ADD2"))
+
+    def _slot_7_1c_ifc_components(self) -> None:
+        self._hdr("IFC Export + Components", "Export IFC including detected cables/lights/people as coloured proxies (run auto-denoise first).")
+        if not self.context.component_points:
+            self._log(_tr("Run auto-denoise (Step 2.5) first to detect components.", self.current_language)); return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save IFC Model with Components", "tunnel_model_components.ifc", "IFC Files (*.ifc)")
+        if not path: return
+        scan = self.context.active_scan
+        proj = scan.path if scan and scan.path else "Tunnel Analysis"
+        self._start_worker("7.1_ifc", lambda: self.ifc_mod.export_ifc(
+            self.context, path, project_name=proj, engineer="CBNU Smart Structure Lab",
+            include_components=True))
 
     def _slot_7_2_query_ai(self) -> None:
         self._hdr("AI Engineering Assistant (RAG)", "Query local LLM with safety standards knowledge base.")

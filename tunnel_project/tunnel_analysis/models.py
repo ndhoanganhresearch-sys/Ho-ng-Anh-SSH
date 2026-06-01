@@ -59,6 +59,10 @@ class PipelineContext:
     # wall-cable). Stored so downstream (IFC export, reports) can record what
     # non-structural elements were detected; auto_denoise only logged them.
     denoise_stats:      Dict[str, int]           = field(default_factory=dict)
+    # Per-class detected non-structural point sets from auto_denoise
+    # ("cable"/"light"/"person" -> Nx3 array), used by optional IFC component
+    # export. Empty until a denoise pass stores them.
+    component_points:   Dict[str, object]        = field(default_factory=dict)
 
     @property
     def active_scan(self) -> Optional[PointCloudBundle]:

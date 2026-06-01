@@ -601,6 +601,14 @@ class PreprocessingLayer:
             "n_radial": int(radial_noise.sum()),
             "n_wall_cable": int(wall_noise.sum()),
             "noise_pts": pts[noise_mask].copy(),
+            # Per-class point sets so downstream (IFC export) can model the
+            # detected non-structural objects, not just count them. Wall cables
+            # are grouped with cables.
+            "component_points": {
+                "cable": pts[is_cable | wall_noise].copy(),
+                "light": pts[is_light].copy(),
+                "person": pts[is_person].copy(),
+            },
         }
     @staticmethod
     def _detect_wall_protrusion(

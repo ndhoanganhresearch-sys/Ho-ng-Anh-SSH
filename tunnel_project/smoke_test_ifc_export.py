@@ -156,9 +156,34 @@ def test_ifc4x3_alignment():
         return f"IFC4X3 alignment OK, extruded={n_solid}"
 
 
+def test_ifc_components_export():
+    """include_components=True models detected cables/lights as coloured
+    proxies clustered into discrete items."""
+    if not _HAS_IFC:
+        return "skipped (ifcopenshell missing)"
+    import ifcopenshell
+    ctx = _ctx()
+    rng = np.random.default_rng(3)
+    cable = np.column_stack([np.full(200, -2.4), np.linspace(2, 18, 200), np.full(200, 2.0)]) + rng.normal(0, 0.01, (200, 3))
+    lights = np.vstack([rng.normal(0, 0.1, (30, 3)) + np.array([0, c, 4.8]) for c in (4, 10, 16)])
+    ctx.component_points = {"cable": cable, "light": lights, "person": np.empty((0, 3))}
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "comp.ifc")
+        TunnelIFCExporter().export_ifc(ctx, out, include_components=True)
+        f = ifcopenshell.open(out)
+        names = [e.Name or "" for e in f.by_type("IfcBuildingElementProxy")]
+        cables = [n for n in names if n.startswith("Cable")]
+        lights_p = [n for n in names if n.startswith("Light")]
+        assert len(cables) >= 1, names
+        assert len(lights_p) >= 1, names
+        del f
+        return f"components: {len(cables)} cable, {len(lights_p)} light proxies"
+
+
 if __name__ == "__main__":
     print("test_ifc_export_geometry_and_hierarchy ->",
           test_ifc_export_geometry_and_hierarchy())
     print("test_ifc_components_by_label ->", test_ifc_components_by_label())
     print("test_ifc4x3_alignment ->", test_ifc4x3_alignment())
+    print("test_ifc_components_export ->", test_ifc_components_export())
     print("SMOKE TEST PASSED")

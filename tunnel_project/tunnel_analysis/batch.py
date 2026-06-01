@@ -57,6 +57,7 @@ def run_pipeline(
     write_excel: bool = False,
     write_ifc: bool = False,
     ifc_schema: str = "IFC4",
+    ifc_components: bool = False,
     status_cb=None,
 ) -> Dict[str, object]:
     """Run the full analysis on one file and write CSV (and optional Excel).
@@ -102,6 +103,7 @@ def run_pipeline(
         # Persist component counts so the IFC export records detected
         # cables/lights/etc (TunnelComponents pset), matching the GUI flow.
         ctx.denoise_stats = _denoise_counts(stats)
+        ctx.component_points = stats.get("component_points", {}) or {}
         _log(status_cb, f"  denoise: {stats.get('n_clean')}/{stats.get('n_raw')} kept "
               f"(cable={stats.get('n_cable', 0)}, light={stats.get('n_light', 0)}, "
               f"person={stats.get('n_person', 0)}, wall_cable={stats.get('n_wall_cable', 0)})")
@@ -157,7 +159,7 @@ def run_pipeline(
         ifc_path = os.path.join(out_dir, f"{stem}_model.ifc")
         try:
             from .ifc_exporter import TunnelIFCExporter
-            TunnelIFCExporter().export_ifc(ctx, ifc_path, project_name=stem, schema=ifc_schema)
+            TunnelIFCExporter().export_ifc(ctx, ifc_path, project_name=stem, schema=ifc_schema, include_components=ifc_components)
             _log(status_cb, f"Wrote {ifc_path}")
         except Exception as exc:
             _log(status_cb, f"IFC export skipped: {exc}")
@@ -219,6 +221,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--excel", action="store_true", help="also write an Excel report")
     ap.add_argument("--ifc", action="store_true", help="also write an IFC4 BIM model")
     ap.add_argument("--ifc-schema", default="IFC4", choices=["IFC4", "IFC4X3_ADD2"], help="IFC schema; IFC4X3_ADD2 exports the centerline as IfcAlignment")
+    ap.add_argument("--ifc-components", action="store_true", help="also export detected cables/lights/people as coloured IFC proxies")
     args = ap.parse_args(argv)
 
     if not os.path.isfile(args.input):
@@ -237,6 +240,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         write_excel=args.excel,
         write_ifc=args.ifc,
         ifc_schema=args.ifc_schema,
+        ifc_components=args.ifc_components,
         status_cb=lambda m: print(f"[batch] {m}"),
     )
     _print_summary(result)
