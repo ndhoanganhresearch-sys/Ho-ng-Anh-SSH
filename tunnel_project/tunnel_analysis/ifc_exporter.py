@@ -225,12 +225,11 @@ class TunnelIFCExporter:
         return str(path)
 
     def _export_components(self, ifc, body_ctx, storey, context):
-        """Model detected non-structural objects (cable/light/person) as
-        coloured IfcBuildingElementProxy items. Each per-class point set is
-        clustered (DBSCAN) into discrete objects; every cluster becomes a box
-        proxy placed at the cluster centroid, sized to its extent, coloured by
-        class, and tagged with an IfcClassificationReference. Safe no-op when
-        there are no component points.
+        """Model detected non-structural objects as shape-appropriate IFC
+        proxies: cables as thin swept-disk TUBES following the cluster's own
+        axis (they are long and thin, not boxes), lights/people as small boxes.
+        Clusters whose bounding box is implausibly large for the class are
+        dropped (usually shell points misclassified). Safe no-op with no data.
         """
         import numpy as _np
         import ifcopenshell, ifcopenshell.api
@@ -238,6 +237,9 @@ class TunnelIFCExporter:
         colours = {'cable': (0.90, 0.10, 0.10),
                    'light': (0.98, 0.85, 0.10),
                    'person': (0.10, 0.45, 0.95)}
+        # Max bounding-box diagonal (m) a single object of each class may span;
+        # bigger clusters are misclassified lining and are skipped.
+        max_diag = {'cable': 60.0, 'light': 1.5, 'person': 2.5}
         try:
             from sklearn.cluster import DBSCAN as _DBSCAN
             have_db = True
@@ -249,31 +251,34 @@ class TunnelIFCExporter:
             if arr.ndim != 2 or len(arr) < 5:
                 continue
             if have_db:
-                labels = _DBSCAN(eps=0.25, min_samples=5).fit(arr).labels_
+                eps = 0.4 if cls == 'cable' else 0.25
+                labels = _DBSCAN(eps=eps, min_samples=5).fit(arr).labels_
                 groups = [arr[labels == c] for c in sorted(set(labels.tolist())) if c != -1]
             else:
                 groups = [arr]
             rgb = colours.get(cls, (0.6, 0.6, 0.6))
+            diag_cap = max_diag.get(cls, 3.0)
             for gi, g in enumerate(groups):
                 if len(g) < 5:
                     continue
-                ctr = g.mean(axis=0)
                 ext = g.max(axis=0) - g.min(axis=0)
-                dx = float(max(ext[0], 0.05)); dy = float(max(ext[1], 0.05)); dz = float(max(ext[2], 0.05))
-                loc = ifc.createIfcCartesianPoint((float(ctr[0]), float(ctr[1]), float(ctr[2]) - dz / 2.0))
-                a2p = ifc.createIfcAxis2Placement3D(loc, None, None)
-                placement = ifc.createIfcLocalPlacement(None, a2p)
-                origin2d = ifc.createIfcCartesianPoint((0.0, 0.0))
-                pos2d = ifc.createIfcAxis2Placement2D(origin2d, None)
-                prof = ifc.createIfcRectangleProfileDef('AREA', None, pos2d, dx, dy)
-                solid = ifc.createIfcExtrudedAreaSolid(prof, None, ifc.createIfcDirection((0.0, 0.0, 1.0)), dz)
-                shape = ifc.createIfcShapeRepresentation(body_ctx, 'Body', 'SweptSolid', [solid])
+                if float(_np.linalg.norm(ext)) > diag_cap:
+                    continue  # implausibly large for this class -> skip
+                if cls == 'cable':
+                    shape = self._cable_tube_shape(ifc, body_ctx, g)
+                    placement = None
+                else:
+                    placement, shape = self._box_shape(ifc, body_ctx, g)
+                if shape is None:
+                    continue
                 elem = ifcopenshell.api.run('root.create_entity', ifc,
                                             ifc_class='IfcBuildingElementProxy',
                                             name=f'{cls.capitalize()}_{gi + 1:03d}')
-                elem.ObjectPlacement = placement
+                if placement is not None:
+                    elem.ObjectPlacement = placement
                 elem.Representation = ifc.createIfcProductDefinitionShape(None, None, [shape])
-                self._apply_color(ifc, solid, rgb, name=f'{cls}Colour')
+                if shape.Items:
+                    self._apply_color(ifc, shape.Items[0], rgb, name=f'{cls}Colour')
                 try:
                     pset = ifcopenshell.api.run('pset.add_pset', ifc, product=elem, name='ComponentClass')
                     ifcopenshell.api.run('pset.edit_pset', ifc, pset=pset,
@@ -284,6 +289,62 @@ class TunnelIFCExporter:
                                      products=[elem], relating_structure=storey)
                 n_made += 1
         return n_made
+
+    @staticmethod
+    def _cable_tube_shape(ifc, body_ctx, g):
+        """Swept-disk tube along the cluster axis (PCA dominant direction),
+        ordered by projection so the directrix is monotonic. Radius from the
+        transverse spread. Returns a ShapeRepresentation or None.
+        """
+        import numpy as _np
+        if len(g) < 5:
+            return None
+        c = g.mean(axis=0)
+        ev, vec = _np.linalg.eigh(_np.cov((g - c).T))
+        axis = vec[:, int(_np.argmax(ev))]
+        t = (g - c) @ axis
+        order = _np.argsort(t)
+        gs = g[order]; ts = t[order]
+        # transverse radius = median distance from the axis, floored
+        d = gs - c
+        perp = d - _np.outer(d @ axis, axis)
+        r = float(_np.median(_np.linalg.norm(perp, axis=1)))
+        r = float(min(max(r, 0.02), 0.30))
+        # thin out directrix to a handful of waypoints to keep it monotonic/clean
+        n_way = int(min(12, max(2, len(gs) // 20)))
+        idx = _np.linspace(0, len(gs) - 1, n_way).astype(int)
+        way = gs[idx]
+        # ensure distinct consecutive points
+        pts3d = [way[0]]
+        for q in way[1:]:
+            if _np.linalg.norm(q - pts3d[-1]) > 1e-3:
+                pts3d.append(q)
+        if len(pts3d) < 2:
+            return None
+        directrix = ifc.createIfcPolyline([
+            ifc.createIfcCartesianPoint((float(q[0]), float(q[1]), float(q[2]))) for q in pts3d])
+        try:
+            disk = ifc.createIfcSweptDiskSolid(directrix, r, None, None, None)
+        except Exception:
+            return None
+        return ifc.createIfcShapeRepresentation(body_ctx, 'Body', 'AdvancedSweptSolid', [disk])
+
+    @staticmethod
+    def _box_shape(ifc, body_ctx, g):
+        """Axis-aligned box solid at the cluster centroid (lights/people)."""
+        import numpy as _np
+        ctr = g.mean(axis=0)
+        ext = g.max(axis=0) - g.min(axis=0)
+        dx = float(max(ext[0], 0.05)); dy = float(max(ext[1], 0.05)); dz = float(max(ext[2], 0.05))
+        loc = ifc.createIfcCartesianPoint((float(ctr[0]), float(ctr[1]), float(ctr[2]) - dz / 2.0))
+        a2p = ifc.createIfcAxis2Placement3D(loc, None, None)
+        placement = ifc.createIfcLocalPlacement(None, a2p)
+        origin2d = ifc.createIfcCartesianPoint((0.0, 0.0))
+        pos2d = ifc.createIfcAxis2Placement2D(origin2d, None)
+        prof = ifc.createIfcRectangleProfileDef('AREA', None, pos2d, dx, dy)
+        solid = ifc.createIfcExtrudedAreaSolid(prof, None, ifc.createIfcDirection((0.0, 0.0, 1.0)), dz)
+        shape = ifc.createIfcShapeRepresentation(body_ctx, 'Body', 'SweptSolid', [solid])
+        return placement, shape
     @staticmethod
     def _apply_color(ifc, item, rgb, name="Color"):
         """Attach an RGB surface style to a geometry item (IFC4).

@@ -176,8 +176,11 @@ def test_ifc_components_export():
         lights_p = [n for n in names if n.startswith("Light")]
         assert len(cables) >= 1, names
         assert len(lights_p) >= 1, names
+        # Cable must be a swept-disk TUBE, not a box. The bore is also a
+        # swept disk, so require at least 2 (bore + >=1 cable).
+        assert len(f.by_type("IfcSweptDiskSolid")) >= 2, "cable not a tube"
         del f
-        return f"components: {len(cables)} cable, {len(lights_p)} light proxies"
+        return f"components: {len(cables)} cable tube(s), {len(lights_p)} light box(es)"
 
 
 if __name__ == "__main__":
