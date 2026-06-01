@@ -68,9 +68,41 @@ class TunnelIFCExporter:
             ifcopenshell.api.run("spatial.assign_container", ifc,
                                   products=[cl_entity], relating_structure=storey)
 
-        # Sections as IfcBuildingElementProxy with placement + ring geometry
+            # Whole-bore solid: a swept-disk tube of the median measured radius
+            # following the centerline polyline, so the model carries a single
+            # continuous 3D body for the tunnel (Circle profiles only; box bores
+            # are represented by their per-section solid slices below).
+            try:
+                radii = [float(sc.radius_fit) for sc in context.sections
+                         if np.isfinite(sc.radius_fit) and sc.radius_fit > 0]
+                is_circle = str(getattr(context, "tunnel_profile", "Circle")).lower().startswith("circle")
+                if is_circle and len(radii) >= 1 and len(cl) >= 3:
+                    bore_R = float(np.median(radii))
+                    directrix = ifc.createIfcPolyline(pts_3d)
+                    disk = ifc.createIfcSweptDiskSolid(directrix, bore_R, None, None, None)
+                    bore = ifcopenshell.api.run("root.create_entity", ifc,
+                                                ifc_class="IfcBuildingElementProxy",
+                                                name="Tunnel Bore")
+                    bshape = ifc.createIfcShapeRepresentation(body_ctx, "Body", "AdvancedSweptSolid", [disk])
+                    bore.Representation = ifc.createIfcProductDefinitionShape(None, None, [bshape])
+                    ifcopenshell.api.run("spatial.assign_container", ifc,
+                                          products=[bore], relating_structure=storey)
+            except Exception as e:
+                warnings.warn(f"Tunnel bore swept solid skipped: {e}")
+
+        # Sections as IfcBuildingElementProxy with placement + solid geometry
         frames = context.frenet_frames or []
         profile = getattr(context, "tunnel_profile", "Circle")
+        # Slice thickness = median chainage spacing so adjacent solid slices
+        # roughly tile the bore without overlapping; fall back to 0.3 m.
+        chainages = [float(sc.chainage) for sc in context.sections
+                     if sc.center_3d is not None and np.isfinite(sc.chainage)]
+        slice_thk = 0.3
+        if len(chainages) >= 2:
+            diffs = np.diff(np.sort(np.asarray(chainages, dtype=float)))
+            diffs = diffs[diffs > 1e-6]
+            if len(diffs):
+                slice_thk = float(np.clip(np.median(diffs) * 0.9, 0.05, 2.0))
         for i, sec in enumerate(context.sections):
             if sec.center_3d is None:
                 continue
@@ -83,7 +115,7 @@ class TunnelIFCExporter:
             # the local section plane so the proxy is visible/located in a BIM
             # viewer instead of collapsing to the origin without geometry.
             fr = frames[i] if i < len(frames) else None
-            placement, shape = self._section_placement_shape(ifc, body_ctx, sec, fr, profile)
+            placement, shape = self._section_placement_shape(ifc, body_ctx, sec, fr, profile, thickness=slice_thk)
             if placement is not None:
                 elem.ObjectPlacement = placement
             if shape is not None:
@@ -121,9 +153,16 @@ class TunnelIFCExporter:
         return str(path)
 
     @staticmethod
-    def _section_placement_shape(ifc, body_ctx, sec, fr, profile):
-        """Build (IfcLocalPlacement, IfcShapeRepresentation) for a section."""
+    def _section_placement_shape(ifc, body_ctx, sec, fr, profile, thickness=0.3):
+        """Build (IfcLocalPlacement, IfcShapeRepresentation) for a section.
+
+        Produces a SOLID slice (IfcExtrudedAreaSolid) of the measured profile,
+        extruded by ``thickness`` along the local axis so the section is a
+        visible 3D body in a BIM viewer, not just an outline. Falls back to a
+        Curve3D ring polyline when no profile dimensions are available.
+        """
         import numpy as _np
+        import math as _math
         C = _np.asarray(sec.center_3d, dtype=float)
         if fr is not None and all(k in fr for k in ("T", "N", "B")):
             T = _np.asarray(fr["T"], dtype=float)
@@ -131,25 +170,42 @@ class TunnelIFCExporter:
         else:
             T = _np.array([0.0, 1.0, 0.0]); N = _np.array([1.0, 0.0, 0.0])
         def _unit3(v):
-            n = float(_np.linalg.norm(v));
+            n = float(_np.linalg.norm(v))
             return v / n if n > 1e-9 else v
         T = _unit3(T); N = _unit3(N)
-        loc = ifc.createIfcCartesianPoint((float(C[0]), float(C[1]), float(C[2])))
+        # Centre the slice on the section so the extrusion straddles it.
+        half = float(thickness) / 2.0
+        base = C - half * T
+        loc = ifc.createIfcCartesianPoint((float(base[0]), float(base[1]), float(base[2])))
         axis = ifc.createIfcDirection((float(T[0]), float(T[1]), float(T[2])))
         refd = ifc.createIfcDirection((float(N[0]), float(N[1]), float(N[2])))
         a2p = ifc.createIfcAxis2Placement3D(loc, axis, refd)
         placement = ifc.createIfcLocalPlacement(None, a2p)
-        # Ring in the LOCAL section plane (local XY = N-B), closed polyline.
-        import math as _math
-        pts = None
-        if str(profile).lower().startswith("circle") and _np.isfinite(sec.radius_fit) and sec.radius_fit > 0:
+
+        # 2D profile in the local section plane (local XY), extruded +Z (=T).
+        origin2d = ifc.createIfcCartesianPoint((0.0, 0.0))
+        pos2d = ifc.createIfcAxis2Placement2D(origin2d, None)
+        prof = None
+        is_circle = str(profile).lower().startswith("circle")
+        if is_circle and _np.isfinite(sec.radius_fit) and sec.radius_fit > 0:
+            prof = ifc.createIfcCircleProfileDef("AREA", None, pos2d, float(sec.radius_fit))
+        elif _np.isfinite(sec.W1) and _np.isfinite(sec.H1) and sec.W1 > 0 and sec.H1 > 0:
+            prof = ifc.createIfcRectangleProfileDef("AREA", None, pos2d, float(sec.W1), float(sec.H1))
+        if prof is not None:
+            extrude_dir = ifc.createIfcDirection((0.0, 0.0, 1.0))
+            solid = ifc.createIfcExtrudedAreaSolid(prof, None, extrude_dir, float(thickness))
+            shape = ifc.createIfcShapeRepresentation(body_ctx, "Body", "SweptSolid", [solid])
+            return placement, shape
+
+        # Fallback: outline ring as a Curve3D polyline (no profile dims).
+        center_loc = ifc.createIfcCartesianPoint((float(C[0]), float(C[1]), float(C[2])))
+        a2p_c = ifc.createIfcAxis2Placement3D(center_loc, axis, refd)
+        placement = ifc.createIfcLocalPlacement(None, a2p_c)
+        if is_circle and _np.isfinite(sec.radius_fit) and sec.radius_fit > 0:
             R = float(sec.radius_fit)
             ang = _np.linspace(0.0, 2.0 * _math.pi, 49)
             pts = [(R * _math.cos(t), R * _math.sin(t), 0.0) for t in ang]
-        elif _np.isfinite(sec.W1) and _np.isfinite(sec.H1) and sec.W1 > 0 and sec.H1 > 0:
-            w = float(sec.W1) / 2.0; h = float(sec.H1) / 2.0
-            pts = [(-w, -h, 0.0), (w, -h, 0.0), (w, h, 0.0), (-w, h, 0.0), (-w, -h, 0.0)]
-        if pts is None:
+        else:
             return placement, None
         poly = ifc.createIfcPolyline([ifc.createIfcCartesianPoint(pt) for pt in pts])
         shape = ifc.createIfcShapeRepresentation(body_ctx, "Body", "Curve3D", [poly])

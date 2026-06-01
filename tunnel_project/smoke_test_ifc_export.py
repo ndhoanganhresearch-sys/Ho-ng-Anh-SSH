@@ -61,8 +61,12 @@ def test_ifc_export_geometry_and_hierarchy():
         for t in ("IfcProject", "IfcSite", "IfcBuilding", "IfcBuildingStorey"):
             assert len(f.by_type(t)) == 1, (t, len(f.by_type(t)))
         assert len(f.by_type("IfcAnnotation")) == 1, "centerline annotation missing"
-        proxies = f.by_type("IfcBuildingElementProxy")
+        all_proxies = f.by_type("IfcBuildingElementProxy")
+        # One proxy per section plus the single whole-bore proxy.
+        proxies = [e for e in all_proxies if e.Name and e.Name.startswith("Section_")]
+        bores = [e for e in all_proxies if e.Name == "Tunnel Bore"]
         assert len(proxies) == len(ctx.sections), (len(proxies), len(ctx.sections))
+        assert len(bores) == 1, f"expected 1 Tunnel Bore proxy, got {len(bores)}"
         n_rep = sum(1 for e in proxies if e.Representation is not None)
         n_pl = sum(1 for e in proxies if e.ObjectPlacement is not None)
         assert n_rep == len(proxies), f"only {n_rep}/{len(proxies)} proxies have geometry"
@@ -70,8 +74,22 @@ def test_ifc_export_geometry_and_hierarchy():
         # property sets carried through
         psets = f.by_type("IfcPropertySet")
         assert any(p.Name == "TunnelSectionProperties" for p in psets), "section pset missing"
-        result = (f"{len(proxies)} proxies, all placed+geom; "
-                  f"polylines={len(f.by_type('IfcPolyline'))}")
+        # Solid geometry: each section is an extruded-area solid; the whole
+        # bore is a single swept-disk solid (Circle profile).
+        n_extruded = len(f.by_type("IfcExtrudedAreaSolid"))
+        n_disk = len(f.by_type("IfcSweptDiskSolid"))
+        assert n_extruded >= len(ctx.sections) - 2, f"too few solid slices: {n_extruded}"
+        assert n_disk >= 1, "tunnel bore swept-disk solid missing"
+        # Every proxy shape must actually build via the geometry kernel.
+        import ifcopenshell.geom as geom
+        settings = geom.settings()
+        built = 0
+        for e in f.by_type("IfcBuildingElementProxy"):
+            if e.Representation is None:
+                continue
+            geom.create_shape(settings, e); built += 1
+        result = (f"{len(proxies)} section proxies; extruded={n_extruded}, "
+                  f"swept_disk={n_disk}, shapes_built={built}")
         del f
         return result
 
