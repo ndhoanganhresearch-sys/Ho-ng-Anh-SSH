@@ -14,7 +14,8 @@ class TunnelIFCExporter:
     def export_ifc(self, context: PipelineContext, out_path: str,
                    project_name: str = "Tunnel Analysis",
                    engineer: str = "CBNU Smart Structure Lab",
-                   schema: str = "IFC4") -> str:
+                   schema: str = "IFC4",
+                   wall_thickness: float = 0.3) -> str:
         try:
             import ifcopenshell
             import ifcopenshell.api
@@ -33,7 +34,11 @@ class TunnelIFCExporter:
         # Project
         project = ifcopenshell.api.run("root.create_entity", ifc,
                                         ifc_class="IfcProject", name=project_name)
-        ifcopenshell.api.run("unit.assign_unit", ifc)
+        # Coordinates are written in METRES, so assign an explicit metre length
+        # unit. ifcopenshell's default assign_unit() uses MILLIMETRE, which made
+        # viewers shrink the model 1000x (radius 6.7 m read as 6.7 mm).
+        _m_unit = ifcopenshell.api.run("unit.add_si_unit", ifc, unit_type="LENGTHUNIT")
+        ifcopenshell.api.run("unit.assign_unit", ifc, units=[_m_unit])
         ctx3d = ifcopenshell.api.run("context.add_context", ifc, context_type="Model")
         body_ctx = ifcopenshell.api.run("context.add_context", ifc,
                                          context_type="Model",
@@ -86,7 +91,12 @@ class TunnelIFCExporter:
                 if is_circle and len(radii) >= 1 and len(cl) >= 3:
                     bore_R = float(np.median(radii))
                     directrix = ifc.createIfcPolyline(pts_3d)
-                    disk = ifc.createIfcSweptDiskSolid(directrix, bore_R, None, None, None)
+                    # Hollow tube: inner radius = bore_R - wall_thickness so the
+                    # tunnel is a shell, not a solid cylinder. Guard against a
+                    # non-positive inner radius on thin/odd bores.
+                    inner_R = max(0.0, bore_R - float(wall_thickness))
+                    inner_arg = inner_R if inner_R > 1e-6 else None
+                    disk = ifc.createIfcSweptDiskSolid(directrix, bore_R, inner_arg, None, None)
                     bore = ifcopenshell.api.run("root.create_entity", ifc,
                                                 ifc_class="IfcBuildingElementProxy",
                                                 name="Tunnel Bore")
@@ -123,7 +133,7 @@ class TunnelIFCExporter:
             # the local section plane so the proxy is visible/located in a BIM
             # viewer instead of collapsing to the origin without geometry.
             fr = frames[i] if i < len(frames) else None
-            placement, shape = self._section_placement_shape(ifc, body_ctx, sec, fr, profile, thickness=slice_thk)
+            placement, shape = self._section_placement_shape(ifc, body_ctx, sec, fr, profile, thickness=slice_thk, wall_thickness=wall_thickness)
             if placement is not None:
                 elem.ObjectPlacement = placement
             if shape is not None:
@@ -226,7 +236,7 @@ class TunnelIFCExporter:
         except Exception as e:
             warnings.warn(f"Surface style skipped: {e}")
     @staticmethod
-    def _section_placement_shape(ifc, body_ctx, sec, fr, profile, thickness=0.3):
+    def _section_placement_shape(ifc, body_ctx, sec, fr, profile, thickness=0.3, wall_thickness=0.3):
         """Build (IfcLocalPlacement, IfcShapeRepresentation) for a section.
 
         Produces a SOLID slice (IfcExtrudedAreaSolid) of the measured profile,
@@ -261,7 +271,12 @@ class TunnelIFCExporter:
         prof = None
         is_circle = str(profile).lower().startswith("circle")
         if is_circle and _np.isfinite(sec.radius_fit) and sec.radius_fit > 0:
-            prof = ifc.createIfcCircleProfileDef("AREA", None, pos2d, float(sec.radius_fit))
+            # Hollow ring (CircleHollowProfileDef) so the extruded slice is a
+            # tunnel-wall shell, not a solid disc. WallThickness clamped so it
+            # never exceeds the radius.
+            R = float(sec.radius_fit)
+            wt = float(min(wall_thickness, R * 0.9))
+            prof = ifc.createIfcCircleHollowProfileDef("AREA", None, pos2d, R, wt)
         elif _np.isfinite(sec.W1) and _np.isfinite(sec.H1) and sec.W1 > 0 and sec.H1 > 0:
             prof = ifc.createIfcRectangleProfileDef("AREA", None, pos2d, float(sec.W1), float(sec.H1))
         if prof is not None:
