@@ -2563,11 +2563,14 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.plotter.clear(); self.plotter.set_background("#F8FAFC")
         self._noise_actor = None
         if len(kept_pts):
-            kept = make_vertex_cloud(kept_pts)
+            kept_d, _ = self._decimate_for_display(kept_pts)
+            kept = make_vertex_cloud(kept_d)
             self.plotter.add_mesh(kept, color="#0EA5E9", style="points", point_size=2.4,
                                   render_points_as_spheres=False, reset_camera=True)
         if len(removed_pts):
-            removed = make_vertex_cloud(removed_pts)
+            # Spheres are expensive; decimate the red overlay too when huge.
+            removed_d, _ = self._decimate_for_display(removed_pts)
+            removed = make_vertex_cloud(removed_d)
             self._noise_actor = self.plotter.add_mesh(
                 removed, color="#DC2626", style="points", point_size=5.0,
                 render_points_as_spheres=True, reset_camera=False, name="noise_pts")
