@@ -55,6 +55,10 @@ class PipelineContext:
     design_center:      Optional[np.ndarray]     = None   # design axis center (C_design for eccentricity)
     design_radius:      Optional[float]          = None   # design radius (for polar deformation)
     tunnel_profile:     str                      = "Circle"
+    # Component classification counts from auto_denoise (cable/light/person/
+    # wall-cable). Stored so downstream (IFC export, reports) can record what
+    # non-structural elements were detected; auto_denoise only logged them.
+    denoise_stats:      Dict[str, int]           = field(default_factory=dict)
 
     @property
     def active_scan(self) -> Optional[PointCloudBundle]:

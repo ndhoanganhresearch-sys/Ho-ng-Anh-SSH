@@ -44,6 +44,8 @@ def _ctx(profile_box=False, R=2.75, length=20.0, seed=0):
     ctx.sections = par.compute_all_sections(ctx, vl_box_w=5.0, vl_box_h=5.0, vl_cir_r=2.7)
     ctx.parameters.update(par.calc_ovality(ctx))
     ctx.parameters.update(par.calc_eccentricity(ctx))
+    ctx.denoise_stats = {"n_cable": 12, "n_light": 4, "n_person": 1,
+                         "n_wall_cable": 3, "n_radial": 50, "n_removed": 900}
     return ctx
 
 
@@ -80,6 +82,17 @@ def test_ifc_export_geometry_and_hierarchy():
         n_disk = len(f.by_type("IfcSweptDiskSolid"))
         assert n_extruded >= len(ctx.sections) - 2, f"too few solid slices: {n_extruded}"
         assert n_disk >= 1, "tunnel bore swept-disk solid missing"
+        # Coloured components: every solid carries a surface style.
+        n_style = len(f.by_type("IfcStyledItem"))
+        n_surf = len(f.by_type("IfcSurfaceStyle"))
+        assert n_style >= n_extruded, f"too few styled items: {n_style}"
+        assert n_surf >= 1, "no surface styles"
+        # Detected-component counts recorded on the project.
+        comp = [x for x in f.by_type("IfcPropertySet") if x.Name == "TunnelComponents"]
+        assert len(comp) == 1, "TunnelComponents pset missing"
+        cprops = {pp.Name: pp.NominalValue.wrappedValue for pp in comp[0].HasProperties}
+        assert cprops.get("CableSegments") == 12, cprops
+        assert cprops.get("LightFixtures") == 4, cprops
         # Every proxy shape must actually build via the geometry kernel.
         import ifcopenshell.geom as geom
         settings = geom.settings()
@@ -89,7 +102,7 @@ def test_ifc_export_geometry_and_hierarchy():
                 continue
             geom.create_shape(settings, e); built += 1
         result = (f"{len(proxies)} section proxies; extruded={n_extruded}, "
-                  f"swept_disk={n_disk}, shapes_built={built}")
+                  f"swept_disk={n_disk}, styled={n_style}, shapes_built={built}")
         del f
         return result
 

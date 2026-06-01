@@ -852,6 +852,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             pts, stats = result
             self.context.normalized_points = pts
             noise_pts = np.asarray(stats.get("noise_pts", np.empty((0,3))), dtype=np.float64)
+            self.context.denoise_stats = self._extract_denoise_counts(stats)
             self._render_filter_result(np.asarray(pts, dtype=np.float64), noise_pts,
                 "2.4 Semantic Noise Removal | kept=blue, removed=red")
             self.pt_label.setText(f"Points: {len(pts):,}")
@@ -876,6 +877,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             pts, stats = result
             pts = np.asarray(pts, dtype=np.float64)
             self.context.normalized_points = pts
+            self.context.denoise_stats = self._extract_denoise_counts(stats)
             noise_pts = np.asarray(stats.get("noise_pts", np.empty((0, 3))), dtype=np.float64)
             if self._auto_running:
                 self._render_pts(pts, "2.5 Auto Denoise - Clean lining (auto)", "#0EA5E9")
@@ -2771,6 +2773,20 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                     si.setBackground(status_fill[status])
                 tbl.setItem(r, 3, si)
         tbl.resizeColumnsToContents()
+    @staticmethod
+    def _extract_denoise_counts(stats):
+        """Pull integer component counts from an auto_denoise/semantic stats
+        dict (cable/light/person/wall-cable/radial + totals), dropping the bulky
+        noise_pts array, so they can be stored on the context and exported.
+        """
+        keys = ("n_raw", "n_clean", "n_removed", "n_cable", "n_light",
+                "n_person", "n_wall_cable", "n_radial")
+        out = {}
+        for k in keys:
+            v = stats.get(k)
+            if isinstance(v, (int, float)):
+                out[k] = int(v)
+        return out
     def _show_params(self, params: Dict[str, float]) -> None:
         # Text log: grouped, unit-aware, with status flags (handles strings).
         self.results_text.appendPlainText("--- Parameters Extracted ---")

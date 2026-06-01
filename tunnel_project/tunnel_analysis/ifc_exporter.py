@@ -85,6 +85,7 @@ class TunnelIFCExporter:
                                                 name="Tunnel Bore")
                     bshape = ifc.createIfcShapeRepresentation(body_ctx, "Body", "AdvancedSweptSolid", [disk])
                     bore.Representation = ifc.createIfcProductDefinitionShape(None, None, [bshape])
+                    self._apply_color(ifc, disk, (0.62, 0.66, 0.71), name="BoreSurface")
                     ifcopenshell.api.run("spatial.assign_container", ifc,
                                           products=[bore], relating_structure=storey)
             except Exception as e:
@@ -120,6 +121,16 @@ class TunnelIFCExporter:
                 elem.ObjectPlacement = placement
             if shape is not None:
                 elem.Representation = ifc.createIfcProductDefinitionShape(None, None, [shape])
+                # Colour the slice by assessment: red = clearance violation,
+                # amber = high ovality (>= 1%), green = OK.
+                if sec.clearance_violation:
+                    rgb = (0.86, 0.15, 0.15)
+                elif np.isfinite(sec.ovality) and sec.ovality >= 1.0:
+                    rgb = (0.85, 0.47, 0.04)
+                else:
+                    rgb = (0.02, 0.59, 0.41)
+                if shape.Items:
+                    self._apply_color(ifc, shape.Items[0], rgb, name="SectionStatus")
             # Property set
             pset = ifcopenshell.api.run("pset.add_pset", ifc,
                                          product=elem,
@@ -149,9 +160,45 @@ class TunnelIFCExporter:
             if clean:
                 ifcopenshell.api.run("pset.edit_pset", ifc, pset=pset_g, properties=clean)
 
+        # Detected non-structural components from auto_denoise (cable/light/
+        # person/wall-cable counts). Recorded on the project so the IFC keeps
+        # a record of what was identified and removed during cleaning.
+        ds = getattr(context, "denoise_stats", None) or {}
+        comp = {
+            "CableSegments":    ds.get("n_cable"),
+            "WallCableSegments": ds.get("n_wall_cable"),
+            "LightFixtures":    ds.get("n_light"),
+            "PersonsVehicles":  ds.get("n_person"),
+            "RadialOutliers":   ds.get("n_radial"),
+            "PointsRemoved":    ds.get("n_removed"),
+        }
+        comp = {k: int(v) for k, v in comp.items() if isinstance(v, (int, float))}
+        if comp:
+            pset_c = ifcopenshell.api.run("pset.add_pset", ifc,
+                                           product=project,
+                                           name="TunnelComponents")
+            ifcopenshell.api.run("pset.edit_pset", ifc, pset=pset_c, properties=comp)
+
         ifc.write(str(path))
         return str(path)
 
+    @staticmethod
+    def _apply_color(ifc, item, rgb, name="Color"):
+        """Attach an RGB surface style to a geometry item (IFC4).
+
+        rgb is a 3-tuple in 0..1. Builds IfcSurfaceStyleRendering ->
+        IfcSurfaceStyle -> IfcStyledItem so BIM viewers shade the element by
+        its assessment colour (gray bore, green/amber/red sections).
+        """
+        try:
+            r, g, b = (float(rgb[0]), float(rgb[1]), float(rgb[2]))
+            col = ifc.createIfcColourRgb(name, r, g, b)
+            rendering = ifc.createIfcSurfaceStyleRendering(
+                col, 0.0, None, None, None, None, None, None, "FLAT")
+            style = ifc.createIfcSurfaceStyle(name, "BOTH", [rendering])
+            ifc.createIfcStyledItem(item, [style], None)
+        except Exception as e:
+            warnings.warn(f"Surface style skipped: {e}")
     @staticmethod
     def _section_placement_shape(ifc, body_ctx, sec, fr, profile, thickness=0.3):
         """Build (IfcLocalPlacement, IfcShapeRepresentation) for a section.
