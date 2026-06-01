@@ -33,6 +33,14 @@ def _log(cb, msg):
     if cb is not None:
         cb(msg)
 
+def _denoise_counts(stats):
+    """Integer component counts from an auto_denoise stats dict, dropping the
+    bulky noise_pts array, for storage on the context / IFC export."""
+    keys = ("n_raw", "n_clean", "n_removed", "n_cable", "n_light",
+            "n_person", "n_wall_cable", "n_radial")
+    return {k: int(stats[k]) for k in keys
+            if isinstance(stats.get(k), (int, float))}
+
 
 def run_pipeline(
     input_path: str,
@@ -46,6 +54,7 @@ def run_pipeline(
     vl_box_h: float = 5.0,
     vl_cir_r: float = 2.7,
     write_excel: bool = False,
+    write_ifc: bool = False,
     status_cb=None,
 ) -> Dict[str, object]:
     """Run the full analysis on one file and write CSV (and optional Excel).
@@ -81,7 +90,12 @@ def run_pipeline(
         _log(status_cb, "Auto-denoising (cables/lights/people/wall cables)")
         clean, stats = pre.auto_denoise(ctx)
         ctx.normalized_points = clean
-        _log(status_cb, f"  denoise: {stats.get('n_clean')}/{stats.get('n_raw')} kept")
+        # Persist component counts so the IFC export records detected
+        # cables/lights/etc (TunnelComponents pset), matching the GUI flow.
+        ctx.denoise_stats = _denoise_counts(stats)
+        _log(status_cb, f"  denoise: {stats.get('n_clean')}/{stats.get('n_raw')} kept "
+              f"(cable={stats.get('n_cable', 0)}, light={stats.get('n_light', 0)}, "
+              f"person={stats.get('n_person', 0)}, wall_cable={stats.get('n_wall_cable', 0)})")
 
     # Resolve section count from spacing if requested.
     if spacing_m and spacing_m > 1e-6:
@@ -129,10 +143,22 @@ def run_pipeline(
             _log(status_cb, f"Excel export skipped: {exc}")
             xlsx_path = None
 
+    ifc_path = None
+    if write_ifc:
+        ifc_path = os.path.join(out_dir, f"{stem}_model.ifc")
+        try:
+            from .ifc_exporter import TunnelIFCExporter
+            TunnelIFCExporter().export_ifc(ctx, ifc_path, project_name=stem)
+            _log(status_cb, f"Wrote {ifc_path}")
+        except Exception as exc:
+            _log(status_cb, f"IFC export skipped: {exc}")
+            ifc_path = None
+
     return {
         "input": input_path,
         "csv": csv_path,
         "excel": xlsx_path,
+        "ifc": ifc_path,
         "n_sections": len(ctx.sections),
         "profile": ctx.tunnel_profile,
         "parameters": params,
@@ -160,6 +186,8 @@ def _print_summary(result: Dict[str, object]) -> None:
     print(f"CSV     : {result['csv']}")
     if result.get("excel"):
         print(f"Excel   : {result['excel']}")
+    if result.get("ifc"):
+        print(f"IFC     : {result['ifc']}")
     print("Parameters:")
     for k, v in result["parameters"].items():
         label, text, status = format_parameter(k, v)
@@ -179,6 +207,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--no-denoise", action="store_true", help="skip auto-denoise")
     ap.add_argument("--label-lining", action="store_true", help="isolate lining by per-point label")
     ap.add_argument("--excel", action="store_true", help="also write an Excel report")
+    ap.add_argument("--ifc", action="store_true", help="also write an IFC4 BIM model")
     args = ap.parse_args(argv)
 
     if not os.path.isfile(args.input):
@@ -194,6 +223,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         denoise=not args.no_denoise,
         label_lining=args.label_lining,
         write_excel=args.excel,
+        write_ifc=args.ifc,
         status_cb=lambda m: print(f"[batch] {m}"),
     )
     _print_summary(result)
