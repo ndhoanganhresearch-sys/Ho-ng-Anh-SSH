@@ -41,6 +41,7 @@ CORE_STEP_CODES = {
     "5.1", "5.2", "5.3", "5.5", "5.6", "5.7",          # deformation parameters
     "6.1", "6.2", "6.3",                              # 4D time-series
     "7.1", "7.2",                                    # BIM export + AI assistant
+    "8.1", "8.2", "8.3", "8.4",                       # export reports + web dashboard
 }
 
 # Output tabs hidden in core mode, matched by their English source title.
@@ -579,6 +580,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             (7, "BIM and AI", "BIM/AI", [
                 ("7.1  Export IFC package", self._slot_7_1_ifc),
                 ("7.2  Query structural AI assistant", self._slot_7_2_query_ai),
+            ]),
+            (8, "Export and reporting", "Out.", [
+                ("8.1  Export section CSV", self._slot_8_1_csv),
+                ("8.2  Export Excel report", self._slot_8_2_excel),
+                ("8.3  Export PDF report", self._slot_8_3_pdf),
+                ("8.4  Open web dashboard", self._slot_8_4_web),
             ]),
         ]
         for step, title_s, tag, buttons in SECTIONS:
