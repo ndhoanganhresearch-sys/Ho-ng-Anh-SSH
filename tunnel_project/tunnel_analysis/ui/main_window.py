@@ -614,7 +614,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             if item.widget(): item.widget().deleteLater()
         if pv is None: self._vp_msg("PyVista is not installed."); return
         try:
-            self.plotter = QtInteractor(self.vp_frame); self.plotter.set_background("#F8FAFC")
+            # auto_update=False disables pyvistaqt's background render timer
+            # (default 5 fps). On large clouds / weak GPUs that timer keeps
+            # re-issuing render_window.Render() and pins the GPU, making the
+            # app appear to hang (the repeated KeyboardInterrupt seen in
+            # render). We render on-demand after each _render_* call instead.
+            self.plotter = QtInteractor(self.vp_frame, auto_update=False); self.plotter.set_background("#F8FAFC")
             self.vp_layout.addWidget(self.plotter, 1); self.plotter.add_axes(color="#111827")
             self.plotter.show_bounds(color="#94A3B8", grid="front", location="outer", font_size=8)
             self.plotter.render()
