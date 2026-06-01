@@ -183,10 +183,49 @@ def test_ifc_components_export():
         return f"components: {len(cables)} cable tube(s), {len(lights_p)} light box(es)"
 
 
+def test_ifc_boundary_polygon_profile():
+    """Sections export a measured-boundary polygon profile (hollow) for any
+    cross-section shape, sized correctly and buildable."""
+    if not _HAS_IFC:
+        return "skipped (ifcopenshell missing)"
+    import ifcopenshell, ifcopenshell.geom as geom
+    ctx = _ctx()
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "poly.ifc")
+        TunnelIFCExporter().export_ifc(ctx, out)
+        f = ifcopenshell.open(out)
+        n_poly = len(f.by_type("IfcArbitraryProfileDefWithVoids"))
+        assert n_poly >= len(ctx.sections) - 3, f"too few boundary profiles: {n_poly}"
+        st = geom.settings(); built = 0
+        for e in f.by_type("IfcBuildingElementProxy"):
+            if e.Representation is None:
+                continue
+            geom.create_shape(st, e); built += 1
+        del f
+        return f"boundary-voids profiles={n_poly}, shapes_built={built}"
+
+def test_boundary_polygon_helper():
+    """_boundary_polygon traces outer+inner rings from a synthetic circle."""
+    th = np.linspace(0, 2 * np.pi, 200, endpoint=False)
+    R = 2.75
+    pts2d = np.column_stack([R * np.cos(th), R * np.sin(th)])
+    rings = TunnelIFCExporter._boundary_polygon(pts2d, 0.3)
+    assert rings is not None, "no rings traced"
+    outer, inner = rings
+    assert len(outer) >= 8 and inner is not None and len(inner) >= 8
+    ro = np.hypot(*np.asarray(outer).T).mean()
+    ri = np.hypot(*np.asarray(inner).T).mean()
+    assert abs(ro - R) < 0.1, ro
+    assert ri < ro, (ri, ro)
+    return f"outer R~{ro:.2f}, inner R~{ri:.2f}"
+
+
 if __name__ == "__main__":
     print("test_ifc_export_geometry_and_hierarchy ->",
           test_ifc_export_geometry_and_hierarchy())
     print("test_ifc_components_by_label ->", test_ifc_components_by_label())
     print("test_ifc4x3_alignment ->", test_ifc4x3_alignment())
     print("test_ifc_components_export ->", test_ifc_components_export())
+    print("test_ifc_boundary_polygon_profile ->", test_ifc_boundary_polygon_profile())
+    print("test_boundary_polygon_helper ->", test_boundary_polygon_helper())
     print("SMOKE TEST PASSED")

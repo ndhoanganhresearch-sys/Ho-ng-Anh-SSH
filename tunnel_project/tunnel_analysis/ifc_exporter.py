@@ -363,6 +363,51 @@ class TunnelIFCExporter:
         except Exception as e:
             warnings.warn(f"Surface style skipped: {e}")
     @staticmethod
+    def _boundary_polygon(pts_2d, wall_thickness, n_bins=72):
+        """Trace the measured cross-section boundary as (outer, inner) polygons.
+
+        Bins the section points by angle about their centroid and takes the
+        farthest point per bin as the outer wall, giving a polygon that follows
+        the true shape (circle / horseshoe / box) with no shape assumption. The
+        inner (void) ring is the outer pulled inward by wall_thickness toward
+        the centroid. Returns (outer_xy, inner_xy_or_None) in the local N-B
+        plane, or None when there are too few points / bins to form a polygon.
+        """
+        import numpy as _np
+        if pts_2d is None:
+            return None
+        P = _np.asarray(pts_2d, dtype=float)
+        if P.ndim != 2 or P.shape[1] != 2 or len(P) < 24:
+            return None
+        ctr = P.mean(axis=0)
+        d = P - ctr
+        ang = _np.arctan2(d[:, 1], d[:, 0])
+        rad = _np.hypot(d[:, 0], d[:, 1])
+        bins = _np.clip(((ang + _np.pi) / (2 * _np.pi) * n_bins).astype(int), 0, n_bins - 1)
+        outer = []
+        for b in range(n_bins):
+            m = bins == b
+            if not m.any():
+                continue
+            # farthest point in this angular wedge = outer wall sample
+            j = _np.where(m)[0][int(_np.argmax(rad[m]))]
+            outer.append((float(P[j, 0]), float(P[j, 1])))
+        if len(outer) < 8:
+            return None
+        outer_arr = _np.asarray(outer)
+        # Inner ring: shrink each outer vertex toward the centroid by the wall
+        # thickness (clamped so the void stays well inside the outer ring).
+        ov = outer_arr - ctr
+        r = _np.hypot(ov[:, 0], ov[:, 1])
+        rmin = float(r.min())
+        wt = float(min(wall_thickness, rmin * 0.6))
+        inner = None
+        if wt > 0.02:
+            scale = _np.clip((r - wt) / _np.where(r > 1e-9, r, 1.0), 0.0, 1.0)
+            inner_arr = ctr + ov * scale[:, None]
+            inner = [(float(x), float(y)) for x, y in inner_arr]
+        return [(float(x), float(y)) for x, y in outer_arr], inner
+    @staticmethod
     def _section_placement_shape(ifc, body_ctx, sec, fr, profile, thickness=0.3, wall_thickness=0.3):
         """Build (IfcLocalPlacement, IfcShapeRepresentation) for a section.
 
@@ -392,19 +437,40 @@ class TunnelIFCExporter:
         a2p = ifc.createIfcAxis2Placement3D(loc, axis, refd)
         placement = ifc.createIfcLocalPlacement(None, a2p)
 
-        # 2D profile in the local section plane (local XY), extruded +Z (=T).
+        # 2D profile in the local section plane (local XY = N,B), extruded +Z (=T).
         origin2d = ifc.createIfcCartesianPoint((0.0, 0.0))
         pos2d = ifc.createIfcAxis2Placement2D(origin2d, None)
         prof = None
         is_circle = str(profile).lower().startswith("circle")
-        if is_circle and _np.isfinite(sec.radius_fit) and sec.radius_fit > 0:
-            # Hollow ring (CircleHollowProfileDef) so the extruded slice is a
-            # tunnel-wall shell, not a solid disc. WallThickness clamped so it
-            # never exceeds the radius.
+        # Preferred: hollow polygon traced from the MEASURED boundary. Works for
+        # any cross-section (circular, horseshoe, box) without guessing a shape,
+        # and reflects real ovality/flat floor instead of an idealised circle.
+        rings = TunnelIFCExporter._boundary_polygon(getattr(sec, "pts_2d", None),
+                                                    float(wall_thickness))
+        if rings is not None:
+            outer, inner = rings
+            op = ifc.createIfcPolyline(
+                [ifc.createIfcCartesianPoint(pt) for pt in outer] +
+                [ifc.createIfcCartesianPoint(outer[0])])
+            voids = []
+            if inner is not None and len(inner) >= 3:
+                ip = ifc.createIfcPolyline(
+                    [ifc.createIfcCartesianPoint(pt) for pt in inner] +
+                    [ifc.createIfcCartesianPoint(inner[0])])
+                voids = [ip]
+            try:
+                if voids:
+                    prof = ifc.createIfcArbitraryProfileDefWithVoids("AREA", None, op, voids)
+                else:
+                    prof = ifc.createIfcArbitraryClosedProfileDef("AREA", None, op)
+            except Exception:
+                prof = None
+        if prof is None and is_circle and _np.isfinite(sec.radius_fit) and sec.radius_fit > 0:
+            # Fallback: idealised hollow circle when the boundary trace fails.
             R = float(sec.radius_fit)
             wt = float(min(wall_thickness, R * 0.9))
             prof = ifc.createIfcCircleHollowProfileDef("AREA", None, pos2d, R, wt)
-        elif _np.isfinite(sec.W1) and _np.isfinite(sec.H1) and sec.W1 > 0 and sec.H1 > 0:
+        elif prof is None and _np.isfinite(sec.W1) and _np.isfinite(sec.H1) and sec.W1 > 0 and sec.H1 > 0:
             prof = ifc.createIfcRectangleProfileDef("AREA", None, pos2d, float(sec.W1), float(sec.H1))
         if prof is not None:
             extrude_dir = ifc.createIfcDirection((0.0, 0.0, 1.0))
