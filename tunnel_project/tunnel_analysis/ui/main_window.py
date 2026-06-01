@@ -40,7 +40,7 @@ CORE_STEP_CODES = {
     "4.1", "4.3b", "4.4",                             # centerline + section frames
     "5.1", "5.2", "5.3", "5.5", "5.6", "5.7",          # deformation parameters
     "6.1", "6.2", "6.3",                              # 4D time-series
-    "7.1", "7.2",                                    # BIM export + AI assistant
+    "7.1", "7.1b", "7.2",                             # BIM export (IFC4 + IFC4X3) + AI assistant
     "8.1", "8.2", "8.3", "8.4",                       # export reports + web dashboard
 }
 
@@ -579,6 +579,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             ]),
             (7, "BIM and AI", "BIM/AI", [
                 ("7.1  Export IFC package", self._slot_7_1_ifc),
+                ("7.1b Export IFC4X3 (IfcAlignment)", self._slot_7_1b_ifc_alignment),
                 ("7.2  Query structural AI assistant", self._slot_7_2_query_ai),
             ]),
             (8, "Export and reporting", "Out.", [
@@ -2065,6 +2066,17 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         proj = scan.path if scan and scan.path else "Tunnel Analysis"
         self._start_worker("7.1_ifc", lambda: self.ifc_mod.export_ifc(
             self.context, path, project_name=proj, engineer="CBNU Smart Structure Lab"))
+
+    def _slot_7_1b_ifc_alignment(self) -> None:
+        self._hdr("IFC4X3 Export (IfcAlignment)", "Export with the centerline as an IfcAlignment (infrastructure linear-referencing standard).")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save IFC4X3 Model", "tunnel_model_4x3.ifc", "IFC Files (*.ifc)")
+        if not path: return
+        scan = self.context.active_scan
+        proj = scan.path if scan and scan.path else "Tunnel Analysis"
+        self._start_worker("7.1_ifc", lambda: self.ifc_mod.export_ifc(
+            self.context, path, project_name=proj, engineer="CBNU Smart Structure Lab",
+            schema="IFC4X3_ADD2"))
 
     def _slot_7_2_query_ai(self) -> None:
         self._hdr("AI Engineering Assistant (RAG)", "Query local LLM with safety standards knowledge base.")

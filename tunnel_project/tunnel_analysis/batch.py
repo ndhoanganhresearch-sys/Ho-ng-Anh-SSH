@@ -56,6 +56,7 @@ def run_pipeline(
     vl_cir_r: float = 2.7,
     write_excel: bool = False,
     write_ifc: bool = False,
+    ifc_schema: str = "IFC4",
     status_cb=None,
 ) -> Dict[str, object]:
     """Run the full analysis on one file and write CSV (and optional Excel).
@@ -156,7 +157,7 @@ def run_pipeline(
         ifc_path = os.path.join(out_dir, f"{stem}_model.ifc")
         try:
             from .ifc_exporter import TunnelIFCExporter
-            TunnelIFCExporter().export_ifc(ctx, ifc_path, project_name=stem)
+            TunnelIFCExporter().export_ifc(ctx, ifc_path, project_name=stem, schema=ifc_schema)
             _log(status_cb, f"Wrote {ifc_path}")
         except Exception as exc:
             _log(status_cb, f"IFC export skipped: {exc}")
@@ -217,6 +218,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--label-lining", action="store_true", help="isolate lining by per-point label")
     ap.add_argument("--excel", action="store_true", help="also write an Excel report")
     ap.add_argument("--ifc", action="store_true", help="also write an IFC4 BIM model")
+    ap.add_argument("--ifc-schema", default="IFC4", choices=["IFC4", "IFC4X3_ADD2"], help="IFC schema; IFC4X3_ADD2 exports the centerline as IfcAlignment")
     args = ap.parse_args(argv)
 
     if not os.path.isfile(args.input):
@@ -234,6 +236,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         label_lining=args.label_lining,
         write_excel=args.excel,
         write_ifc=args.ifc,
+        ifc_schema=args.ifc_schema,
         status_cb=lambda m: print(f"[batch] {m}"),
     )
     _print_summary(result)

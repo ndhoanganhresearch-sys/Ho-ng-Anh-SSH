@@ -136,8 +136,29 @@ def test_ifc_components_by_label():
         return f"by-label classes={sorted(props)}"
 
 
+def test_ifc4x3_alignment():
+    """IFC4X3 schema exports the centerline as an IfcAlignment (infra
+    standard); IFC4 keeps IfcAnnotation. Geometry still builds."""
+    if not _HAS_IFC:
+        return "skipped (ifcopenshell missing)"
+    import ifcopenshell
+    ctx = _ctx()
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "align.ifc")
+        TunnelIFCExporter().export_ifc(ctx, out, project_name="Align", schema="IFC4X3_ADD2")
+        f = ifcopenshell.open(out)
+        assert f.schema.startswith("IFC4X3"), f.schema
+        assert len(f.by_type("IfcAlignment")) == 1, "centerline not exported as IfcAlignment"
+        assert len(f.by_type("IfcAnnotation")) == 0, "unexpected IfcAnnotation in 4X3"
+        n_solid = len(f.by_type("IfcExtrudedAreaSolid"))
+        assert n_solid >= len(ctx.sections) - 2, n_solid
+        del f
+        return f"IFC4X3 alignment OK, extruded={n_solid}"
+
+
 if __name__ == "__main__":
     print("test_ifc_export_geometry_and_hierarchy ->",
           test_ifc_export_geometry_and_hierarchy())
     print("test_ifc_components_by_label ->", test_ifc_components_by_label())
+    print("test_ifc4x3_alignment ->", test_ifc4x3_alignment())
     print("SMOKE TEST PASSED")

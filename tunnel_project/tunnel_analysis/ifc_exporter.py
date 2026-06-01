@@ -13,7 +13,8 @@ class TunnelIFCExporter:
 
     def export_ifc(self, context: PipelineContext, out_path: str,
                    project_name: str = "Tunnel Analysis",
-                   engineer: str = "CBNU Smart Structure Lab") -> str:
+                   engineer: str = "CBNU Smart Structure Lab",
+                   schema: str = "IFC4") -> str:
         try:
             import ifcopenshell
             import ifcopenshell.api
@@ -23,7 +24,11 @@ class TunnelIFCExporter:
         path = Path(out_path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        ifc = ifcopenshell.file(schema="IFC4")
+        # IFC4 keeps maximum viewer compatibility; IFC4X3* adds IfcAlignment
+        # for the centerline (infrastructure-standard linear referencing).
+        schema = str(schema or "IFC4").upper()
+        is_4x3 = schema.startswith("IFC4X3")
+        ifc = ifcopenshell.file(schema=schema)
 
         # Project
         project = ifcopenshell.api.run("root.create_entity", ifc,
@@ -52,18 +57,20 @@ class TunnelIFCExporter:
         ifcopenshell.api.run("aggregate.assign_object", ifc,
                               products=[storey], relating_object=building)
 
-        # Centerline as IfcAnnotation
+        # Centerline: IfcAlignment (IFC4X3 infrastructure standard) or
+        # IfcAnnotation (IFC4 fallback). Both carry the same Curve3D polyline.
         cl = context.centerline
         if cl is not None and len(cl) >= 2:
-            cl_entity = ifcopenshell.api.run("root.create_entity", ifc,
-                                              ifc_class="IfcAnnotation",
-                                              name="Tunnel Centerline")
             pts_3d = [ifc.createIfcCartesianPoint(
                 (float(p[0]), float(p[1]), float(p[2]))) for p in cl]
             polyline = ifc.createIfcPolyline(pts_3d)
             shape = ifc.createIfcShapeRepresentation(
                 body_ctx, "Axis", "Curve3D", [polyline])
             prod_def = ifc.createIfcProductDefinitionShape(None, None, [shape])
+            cl_class = "IfcAlignment" if is_4x3 else "IfcAnnotation"
+            cl_entity = ifcopenshell.api.run("root.create_entity", ifc,
+                                              ifc_class=cl_class,
+                                              name="Tunnel Centerline")
             cl_entity.Representation = prod_def
             ifcopenshell.api.run("spatial.assign_container", ifc,
                                   products=[cl_entity], relating_structure=storey)
