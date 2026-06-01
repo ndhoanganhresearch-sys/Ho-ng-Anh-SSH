@@ -47,6 +47,7 @@ def run_pipeline(
     out_dir: Optional[str] = None,
     section_count: int = 80,
     spacing_m: Optional[float] = None,
+    range_crop_m: float = 0.0,
     voxel_size: float = 0.0,
     denoise: bool = True,
     label_lining: bool = False,
@@ -73,6 +74,13 @@ def run_pipeline(
     ctx = PipelineContext()
     ctx.scans.append(bundle)
     ctx.active_index = 0
+
+    # Optional range crop first (MATLAB-style: drop far scanner noise cheaply).
+    if range_crop_m and range_crop_m > 0:
+        _log(status_cb, f"Range crop at {range_crop_m} m (sensor)")
+        kept, rstats = pre.range_crop(ctx, max_range_m=float(range_crop_m), mode="sensor")
+        ctx.normalized_points = kept
+        _log(status_cb, f"  range crop: {rstats.get('n_clean')}/{rstats.get('n_raw')} kept")
 
     # Optional voxel downsample (keeps memory bounded on big scans).
     if voxel_size and voxel_size > 0:
@@ -203,6 +211,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("-o", "--out-dir", default=None, help="output directory")
     ap.add_argument("--sections", type=int, default=80, help="number of cross-sections")
     ap.add_argument("--spacing", type=float, default=None, help="section spacing (m); overrides --sections")
+    ap.add_argument("--range-crop", type=float, default=0.0, help="drop points farther than this many metres from the scan origin; 0 = off")
     ap.add_argument("--voxel", type=float, default=0.0, help="voxel size (m); 0 = off")
     ap.add_argument("--no-denoise", action="store_true", help="skip auto-denoise")
     ap.add_argument("--label-lining", action="store_true", help="isolate lining by per-point label")
@@ -219,6 +228,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         out_dir=args.out_dir,
         section_count=args.sections,
         spacing_m=args.spacing,
+        range_crop_m=args.range_crop,
         voxel_size=args.voxel,
         denoise=not args.no_denoise,
         label_lining=args.label_lining,

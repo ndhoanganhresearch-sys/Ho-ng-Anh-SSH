@@ -537,6 +537,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 ("1.7  Registration error heatmap", self._slot_1_7_reg_error),
             ]),
             (2, "Preprocessing and noise filtering", "Pre.", [
+                ("2.0  Range crop (drop far points)", self._slot_2_0_range_crop),
                 ("2.1  Voxel downsampling", self._slot_2_1_voxel),
                 ("2.5  Clean noise (auto: cables, lights, people, wall cables)", self._slot_2_5_auto_denoise),
                 ("2.2  Statistical outlier removal", self._slot_2_2_sor),
@@ -817,6 +818,15 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self._log(f"Merged {len(self.context.scans)} stations: {len(pts):,} total points")
             for i, rmse in enumerate(rmse_list):
                 self._log(f"  Station {i+1}: RMSE = {rmse:.3f} mm")
+        elif key == "2.0_range_crop":
+            pts, stats = result
+            pts = np.asarray(pts, dtype=np.float64); self.context.normalized_points = pts
+            self._render_pts(pts, "2.0 Range Crop", "#0EA5E9")
+            self.sb_pts.setText(f"Points: {len(pts):,}")
+            self._log(f"Range crop ({stats.get('mode')}, {stats.get('max_range_m')} m): "
+                      f"kept {stats.get('n_clean'):,}/{stats.get('n_raw'):,}, "
+                      f"removed {stats.get('n_removed'):,} (max dist {stats.get('max_distance_seen',0):.1f} m).")
+
         elif key == "2.1_voxel":
             pts, centroid = result; self.context.normalized_points = pts
             raw_n = len(self.context.active_scan.points) if self.context.active_scan else len(pts)
@@ -1254,6 +1264,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self.plotter.clear(); self.plotter.set_background("#F8FAFC"); self.plotter.add_axes(color="#111827")
             self.plotter.show_bounds(color="#94A3B8", grid="front", location="outer", font_size=8); self.plotter.render()
         self._log(_tr("3D viewport initialized and refreshed.", self.current_language))
+
+    def _slot_2_0_range_crop(self) -> None:
+        self._hdr("Range Crop", "Drop points farther than the range limit from the scan origin (MATLAB-style pre-filter).")
+        self._start_worker("2.0_range_crop",
+            lambda: self.pre_mod.range_crop(self.context, max_range_m=20.0, mode="sensor"))
 
     def _slot_2_1_voxel(self) -> None:
         self._hdr("Voxel Downsampling", "Homogenize point density using a voxel grid while preserving tunnel geometry.")
