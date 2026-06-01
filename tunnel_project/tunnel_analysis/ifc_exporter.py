@@ -68,7 +68,9 @@ class TunnelIFCExporter:
             ifcopenshell.api.run("spatial.assign_container", ifc,
                                   products=[cl_entity], relating_structure=storey)
 
-        # Sections as IfcBuildingElementProxy
+        # Sections as IfcBuildingElementProxy with placement + ring geometry
+        frames = context.frenet_frames or []
+        profile = getattr(context, "tunnel_profile", "Circle")
         for i, sec in enumerate(context.sections):
             if sec.center_3d is None:
                 continue
@@ -76,6 +78,16 @@ class TunnelIFCExporter:
             elem = ifcopenshell.api.run("root.create_entity", ifc,
                                          ifc_class="IfcBuildingElementProxy",
                                          name=name)
+            # Place the section in space using its Frenet frame (T=local Z
+            # along the tunnel axis, N=local X) and draw the measured ring in
+            # the local section plane so the proxy is visible/located in a BIM
+            # viewer instead of collapsing to the origin without geometry.
+            fr = frames[i] if i < len(frames) else None
+            placement, shape = self._section_placement_shape(ifc, body_ctx, sec, fr, profile)
+            if placement is not None:
+                elem.ObjectPlacement = placement
+            if shape is not None:
+                elem.Representation = ifc.createIfcProductDefinitionShape(None, None, [shape])
             # Property set
             pset = ifcopenshell.api.run("pset.add_pset", ifc,
                                          product=elem,
@@ -107,3 +119,38 @@ class TunnelIFCExporter:
 
         ifc.write(str(path))
         return str(path)
+
+    @staticmethod
+    def _section_placement_shape(ifc, body_ctx, sec, fr, profile):
+        """Build (IfcLocalPlacement, IfcShapeRepresentation) for a section."""
+        import numpy as _np
+        C = _np.asarray(sec.center_3d, dtype=float)
+        if fr is not None and all(k in fr for k in ("T", "N", "B")):
+            T = _np.asarray(fr["T"], dtype=float)
+            N = _np.asarray(fr["N"], dtype=float)
+        else:
+            T = _np.array([0.0, 1.0, 0.0]); N = _np.array([1.0, 0.0, 0.0])
+        def _unit3(v):
+            n = float(_np.linalg.norm(v));
+            return v / n if n > 1e-9 else v
+        T = _unit3(T); N = _unit3(N)
+        loc = ifc.createIfcCartesianPoint((float(C[0]), float(C[1]), float(C[2])))
+        axis = ifc.createIfcDirection((float(T[0]), float(T[1]), float(T[2])))
+        refd = ifc.createIfcDirection((float(N[0]), float(N[1]), float(N[2])))
+        a2p = ifc.createIfcAxis2Placement3D(loc, axis, refd)
+        placement = ifc.createIfcLocalPlacement(None, a2p)
+        # Ring in the LOCAL section plane (local XY = N-B), closed polyline.
+        import math as _math
+        pts = None
+        if str(profile).lower().startswith("circle") and _np.isfinite(sec.radius_fit) and sec.radius_fit > 0:
+            R = float(sec.radius_fit)
+            ang = _np.linspace(0.0, 2.0 * _math.pi, 49)
+            pts = [(R * _math.cos(t), R * _math.sin(t), 0.0) for t in ang]
+        elif _np.isfinite(sec.W1) and _np.isfinite(sec.H1) and sec.W1 > 0 and sec.H1 > 0:
+            w = float(sec.W1) / 2.0; h = float(sec.H1) / 2.0
+            pts = [(-w, -h, 0.0), (w, -h, 0.0), (w, h, 0.0), (-w, h, 0.0), (-w, -h, 0.0)]
+        if pts is None:
+            return placement, None
+        poly = ifc.createIfcPolyline([ifc.createIfcCartesianPoint(pt) for pt in pts])
+        shape = ifc.createIfcShapeRepresentation(body_ctx, "Body", "Curve3D", [poly])
+        return placement, shape

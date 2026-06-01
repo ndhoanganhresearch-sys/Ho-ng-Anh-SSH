@@ -23,6 +23,7 @@ import sys
 # Tests that require optional heavy deps; skipped (not failed) when unavailable.
 OPTIONAL_DEPS = {
     "smoke_test_advanced_integrations.py": ["py4dgeo", "small_gicp"],
+    "smoke_test_ifc_export.py": ["ifcopenshell"],
     "smoke_test_gror_registration.py": ["open3d"],
     "smoke_test_registration_engine.py": ["open3d"],
 }
