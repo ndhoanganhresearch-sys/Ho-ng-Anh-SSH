@@ -5,6 +5,55 @@ from .models import PipelineContext
 # ------------------------------------------------------------------------------
 
 class PreprocessingLayer:
+    def range_crop(
+        self, context: PipelineContext, max_range_m: float = 20.0,
+        mode: str = "sensor",
+    ) -> Tuple[np.ndarray, Dict]:
+        """Drop points farther than max_range_m, MATLAB-GUI style (PDF 3.2).
+
+        Scanner range falls off with distance, so far points are sparse and
+        noisy. The reference MATLAB tool crops with
+        ``distances = sqrt(sum(xyz.^2,2)); idx = distances <= 20`` before any
+        statistical denoise. This mirrors that as a cheap first pass.
+
+        mode:
+          - "sensor": Euclidean distance from the scan origin (0,0,0), matching
+            the MATLAB crop (raw scans are in the scanner frame).
+          - "centroid": distance from the cloud centroid (for already-centred
+            clouds where the sensor origin is not meaningful).
+          - "axis": radial distance from the PCA dominant axis (keeps a tube
+            of radius max_range_m around the tunnel axis).
+        Returns (kept_xyz, stats). Operates on working_points so it composes
+        with voxel/SOR.
+        """
+        pts = context.working_points
+        if pts is None:
+            raise RuntimeError("range_crop: no working_points.")
+        pts = validate_xyz(pts)
+        n_raw = len(pts)
+        if not (max_range_m and max_range_m > 0):
+            return pts, {"n_raw": n_raw, "n_clean": n_raw, "n_removed": 0,
+                         "mode": mode, "max_range_m": float(max_range_m)}
+        if mode == "centroid":
+            d = np.linalg.norm(pts - pts.mean(axis=0), axis=1)
+        elif mode == "axis":
+            c, axis, _e1, _e2 = principal_axes(pts)
+            diff = pts - c
+            d = np.linalg.norm(diff - (diff @ axis)[:, None] * axis, axis=1)
+        else:  # sensor
+            d = np.linalg.norm(pts, axis=1)
+        keep = d <= float(max_range_m)
+        kept = validate_xyz(pts[keep], "range_crop")
+        context.normalized_points = kept
+        return kept, {
+            "n_raw": n_raw,
+            "n_clean": int(keep.sum()),
+            "n_removed": int(n_raw - int(keep.sum())),
+            "mode": mode,
+            "max_range_m": float(max_range_m),
+            "max_distance_seen": float(d.max()),
+        }
+
     def voxel_downsample(
         self, context: PipelineContext, voxel_size: float = 0.05
     ) -> Tuple[np.ndarray, np.ndarray]:
