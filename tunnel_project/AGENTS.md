@@ -13,6 +13,7 @@ This project is a Python tunnel point-cloud analysis tool. It includes a PyQt/Py
 - For clean-noise work, compare against the current best baseline before promoting a new implementation.
 - For UI changes, verify section/plot widgets fit the window and that step controls stay in their intended workflow order.
 - Keep Headroom optional in Windows Python; full native Headroom compression currently runs through WSL `.venv-headroom`.
+- Keep PaddleOCR optional; use it for reports, standards, labels, tables, and inspection images, not for point-cloud deformation math.
 
 ## Preferred Verification
 

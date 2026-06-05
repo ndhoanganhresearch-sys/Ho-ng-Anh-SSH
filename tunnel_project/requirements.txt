@@ -41,3 +41,8 @@ requests==2.32.5
 #   pip install "headroom-ai[mcp,proxy,code]==0.23.0"
 # Windows builds may be blocked by local Application Control, so the adapter
 # falls back safely when headroom._core is unavailable.
+
+# Optional OCR / document parsing for reports, standards, and inspection images (ocr_adapter.py).
+# Install basic OCR first; add extras such as paddleocr[doc-parser] only when needed.
+# PaddleOCR 3.6.0 + PaddlePaddle 3.3.x hit a Windows CPU oneDNN issue in testing:
+#   pip install paddleocr==3.4.0 paddlepaddle==3.2.1

@@ -33,6 +33,15 @@ Expected WSL result should show real compression, for example token savings and 
 - Run STSD/labeled validation when available.
 - Compare against the best measured baseline in `BENCHMARK_WORKFLOW.md` format.
 
+
+## OCR / Document Parsing Change
+
+```powershell
+..\.venv\Scripts\python.exe -m py_compile tunnel_analysis\ocr_adapter.py
+..\.venv\Scripts\python.exe smoke_test_ocr_adapter.py
+```
+
+If PaddleOCR is installed, test with a small image/PDF fixture before wiring OCR output into RAG.
 ## UI Change
 
 - Launch the app if feasible.
