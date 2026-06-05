@@ -4,11 +4,12 @@ Per PDF section 3.7: vector DB + local LLM + safety standards knowledge base.
 """
 from .common import *
 from .models import PipelineContext
+from .headroom_adapter import optimize_prompt
 from pathlib import Path
 import json
 
 
-# ── Korean/International tunnel safety standards knowledge base ────────────
+# ???? Korean/International tunnel safety standards knowledge base ????????????????????????
 SAFETY_STANDARDS = [
     # Crown settlement
     "Crown settlement threshold: caution >10mm, critical >25mm. "
@@ -141,8 +142,9 @@ class TunnelRAGAssistant:
             except Exception as e:
                 rag_context = f"(RAG retrieval failed: {e})"
 
-        # Build full prompt
-        system_prompt = f"""You are a licensed structural engineer specialising in tunnel SHM.
+        # Build prompt context separately from the engineer query so Headroom
+        # can compress long measurement/RAG context while protecting the query.
+        system_context = f"""You are a licensed structural engineer specialising in tunnel SHM.
 Answer based on the measurement data and safety standards provided.
 Be concise, quantitative, and actionable.
 
@@ -152,21 +154,19 @@ Be concise, quantitative, and actionable.
 === RELEVANT SAFETY STANDARDS ===
 {rag_context if rag_context else "(Safety standards not available - answer from general knowledge)"}
 
-=== ENGINEER QUERY ===
-{prompt}
-
 Provide:
 1. Assessment of current tunnel condition
 2. Parameters exceeding thresholds (if any)
 3. Recommended actions with priority
 4. Locations requiring immediate attention"""
+        optimized = optimize_prompt(system_context, prompt, model=self.OLLAMA_MODEL)
 
         # Query Ollama
         try:
             import requests
             payload = {
                 "model": self.OLLAMA_MODEL,
-                "prompt": system_prompt,
+                "prompt": optimized.prompt,
                 "stream": False,
                 "options": {"temperature": 0.15, "num_predict": 1500}
             }
@@ -180,7 +180,7 @@ Provide:
             n  = data.get("eval_count", "?")
             es = data.get("eval_duration", 0) / 1e9
             rag_note = f"RAG: {n_results} standards retrieved" if self._ready else "RAG: not initialized"
-            return f"{text}\n\n{'─'*52}\nModel: {m} | Tokens: {n} | Eval: {es:.1f}s | {rag_note}"
+            return f"{text}\n\n{'-'*52}\nModel: {m} | Tokens: {n} | Eval: {es:.1f}s | {rag_note} | {optimized.note}"
         except Exception as e:
             return (f"[CONNECTION ERROR] {e}\n\n"
                     f"Start Ollama: ollama serve\n"

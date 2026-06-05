@@ -1,0 +1,4 @@
+.venv-headroom/
+.headroom_wsl/
+__pycache__/
+*.py[cod]

@@ -1,4 +1,4 @@
-# SSL Smart Tunnel Monitoring System (4D-LiDAR) — pinned dependencies
+# SSL Smart Tunnel Monitoring System (4D-LiDAR) - pinned dependencies
 # Python 3.12. Install: pip install -r requirements.txt
 
 # Core numerics
@@ -36,3 +36,8 @@ scikit-learn==1.8.0
 
 # Local AI assistant / dashboards (rag_ai.py, digital_twin.py)
 requests==2.32.5
+# Optional context compression for AI prompts (headroom_adapter.py).
+# Full Headroom native compression is installed in WSL via .venv-headroom:
+#   pip install "headroom-ai[mcp,proxy,code]==0.23.0"
+# Windows builds may be blocked by local Application Control, so the adapter
+# falls back safely when headroom._core is unavailable.

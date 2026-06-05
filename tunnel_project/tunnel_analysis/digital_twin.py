@@ -1,5 +1,6 @@
 from .common import *
 from .models import PipelineContext
+from .headroom_adapter import optimize_prompt
 # ------------------------------------------------------------------------------
 # DigitalTwinAILayer
 # ------------------------------------------------------------------------------
@@ -22,8 +23,9 @@ class DigitalTwinAILayer:
         try: import requests
         except ImportError: return "[ERROR] pip install requests"
         sys_p = self._sys(context)
+        optimized = optimize_prompt(sys_p, prompt, model=self.OLLAMA_MODEL)
         payload = {"model":self.OLLAMA_MODEL,
-                   "prompt":f"{sys_p}\n\nEngineer query: {prompt}",
+                   "prompt": optimized.prompt,
                    "stream":False,"options":{"temperature":0.2,"num_predict":1024}}
         try:
             r = requests.post(self.OLLAMA_URL, json=payload, timeout=self._TIMEOUT)
@@ -37,7 +39,7 @@ class DigitalTwinAILayer:
         if not text: return "[EMPTY]\n" + json.dumps(data,indent=2)[:400]
         m=data.get("model", "unknown"); n=data.get("eval_count", "unknown")
         es=data.get("eval_duration",0)/1e9; ls=data.get("load_duration",0)/1e9
-        return f"{text}\n\n{'-'*52}\nModel:{m}|Tokens:{n}|Eval:{es:.1f}s|Load:{ls:.1f}s"
+        return f"{text}\n\n{'-'*52}\nModel:{m}|Tokens:{n}|Eval:{es:.1f}s|Load:{ls:.1f}s|{optimized.note}"
 
     def _sys(self, context: PipelineContext) -> str:
         p = context.parameters
