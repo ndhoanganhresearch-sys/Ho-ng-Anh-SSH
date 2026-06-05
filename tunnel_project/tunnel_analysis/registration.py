@@ -98,12 +98,16 @@ class RegistrationLayer:
 
         for i in range(1, len(context.scans)):
             src_pts = validate_xyz(context.scans[i].points)
-            
+
             # 1. Coarse align to the current chain reference (GROR rot+trans,
             #    anchor fallback).
+            # NOTE: tgt_intensity must match current_ref, which is the
+            # registered version of scans[i-1] — NOT scans[0]. The rigid
+            # transform preserves point order, so scans[i-1].intensity
+            # indexes into current_ref correctly.
             src_shifted = self._coarse_align(src_pts, current_ref,
                 src_intensity=context.scans[i].intensity,
-                tgt_intensity=context.scans[0].intensity)
+                tgt_intensity=context.scans[i - 1].intensity)
             
             # 2. ICP fine registration
             src_reg, rmse = self._icp(src_shifted, current_ref)

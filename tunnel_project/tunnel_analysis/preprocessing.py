@@ -44,7 +44,13 @@ class PreprocessingLayer:
             d = np.linalg.norm(pts, axis=1)
         keep = d <= float(max_range_m)
         kept = validate_xyz(pts[keep], "range_crop")
-        context.normalized_points = kept
+        # working_points is a computed property (registered > normalized > raw).
+        # Update whichever backing field it currently draws from so downstream
+        # steps always see the cropped cloud regardless of pipeline order.
+        if context.registered_points is not None:
+            context.registered_points = kept
+        else:
+            context.normalized_points = kept
         return kept, {
             "n_raw": n_raw,
             "n_clean": int(keep.sum()),
@@ -413,7 +419,7 @@ class PreprocessingLayer:
         context: PipelineContext,
         k_neighbors: int = 20,
         cable_linearity_thr: float = 0.30,
-        light_sphericity_thr: float = 0.35,
+        light_sphericity_thr: float = 0.12,
         light_size_thr: float = 0.20,
         light_cluster_max: int = 500,
         person_height_thr: float = 1.2,
@@ -496,26 +502,11 @@ class PreprocessingLayer:
             # already encodes (1 - s2/s1); the explicit s2/s1 gate keeps
             # merely elongated lining patches from being flagged as cables.
             is_cable = (linearity >= cable_linearity_thr) & (sig2_over_sig1 < 0.15)
-            # A point with high sphericity is only flagged as a light/fixture if
-            # it also belongs to a SMALL ISOLATED cluster. Real fixtures are
-            # compact blobs; without this isolation test the per-point shape
-            # gate alone flags ~40% of a real tunnel shell as 'lights' (verified
-            # on FY387). Falls back to the raw shape gate if sklearn is absent.
-            light_shape = (sphericity >= light_sphericity_thr) & (local_size <= light_size_thr)
-            is_light = np.zeros(n_raw, dtype=bool)
-            if light_shape.sum() > 0:
-                try:
-                    from sklearn.cluster import DBSCAN as _DBSCAN
-                    cand_idx = np.where(light_shape)[0]
-                    clab = _DBSCAN(eps=0.10, min_samples=4).fit(pts[cand_idx]).labels_
-                    keep = np.zeros(len(cand_idx), dtype=bool)
-                    for cc in set(clab.tolist()) - {-1}:
-                        sel = clab == cc
-                        if int(sel.sum()) <= light_cluster_max:
-                            keep[sel] = True
-                    is_light[cand_idx[keep]] = True
-                except Exception:
-                    is_light = light_shape
+            # Use the highest-F1 clean-noise benchmark behaviour (commit
+            # 0909e7d): the raw shape gate is intentionally aggressive. It can
+            # remove some lining points, but it catches far more non-structural
+            # clutter than the later conservative cluster-isolation gate.
+            is_light = (sphericity >= light_sphericity_thr) & (local_size <= light_size_thr)
             is_person = np.zeros(n_raw, dtype=bool)
             person_mask = planarity > 0.4
             if person_mask.sum() > 10:
@@ -590,7 +581,10 @@ class PreprocessingLayer:
 
         noise_mask = sem_noise | radial_noise | wall_noise
         clean_pts = validate_xyz(pts[~noise_mask])
-        context.normalized_points = clean_pts
+        if context.registered_points is not None:
+            context.registered_points = clean_pts
+        else:
+            context.normalized_points = clean_pts
         return clean_pts, {
             "n_raw": n_raw,
             "n_clean": int((~noise_mask).sum()),
@@ -619,7 +613,6 @@ class PreprocessingLayer:
         n_theta: int = 180,
         wall_percentile: float = 90.0,
         min_axial_runs: int = 3,
-        max_angular_cols: int = 6,
     ) -> np.ndarray:
         """Detect wall-mounted cables/conduits by inward protrusion + axial run.
 
@@ -672,18 +665,6 @@ class PreprocessingLayer:
             if len(seg) >= 5:
                 wall.flat[uniq[gi]] = np.percentile(seg, wall_percentile)
 
-        # A wide cable can occupy most of its own angular column, dragging that
-        # cell's wall percentile down to the cable radius (so it no longer looks
-        # like a protrusion). Take the max envelope over a small neighbourhood of
-        # angular columns (wrap-around) to recover the true wall radius from the
-        # clean columns next to the cable. Verified on synthetic wall cable:
-        # recall 0.71 -> 0.99 with no extra shell false-positives.
-        env_k = 2
-        wall_sm = np.full_like(wall, np.nan)
-        for off in range(-env_k, env_k + 1):
-            wall_sm = np.fmax(wall_sm, np.roll(wall, off, axis=1))
-        wall = wall_sm
-
         wall_r = wall[hi, ti]
         protrusion = wall_r - r
         prot = np.isfinite(protrusion) & (protrusion > protrusion_thr)
@@ -695,33 +676,13 @@ class PreprocessingLayer:
         prot_hi = hi[prot]
         prot_loc = np.where(prot)[0]
         if len(prot_loc):
-            # Angular columns with enough axial continuity (cables run along h).
-            cont_cols = [int(tc) for tc in np.unique(prot_ti)
-                         if np.unique(prot_hi[prot_ti == tc]).size >= min_axial_runs]
-            # Angular-width cap: a cable spans only a few CONTIGUOUS angular
-            # columns, whereas lining roughness / ovality lights up columns all
-            # around the ring. Group the continuous columns (with wrap-around)
-            # and keep only narrow groups. On real FY387 this cut lining lost
-            # from ~17%% to ~1%% while keeping synthetic cable recall ~99%%.
-            good = set()
-            if cont_cols:
-                gc = sorted(cont_cols)
-                groups = [[gc[0]]]
-                for x in gc[1:]:
-                    if x - groups[-1][-1] <= 1:
-                        groups[-1].append(x)
-                    else:
-                        groups.append([x])
-                # Merge wrap-around (first and last angular column adjacent).
-                if len(groups) > 1 and gc[0] == 0 and gc[-1] == n_theta - 1:
-                    groups[0] = groups[-1] + groups[0]
-                    groups.pop()
-                for g in groups:
-                    if len(g) <= max_angular_cols:
-                        good.update(g)
-            for tcol in good:
+            # Highest-F1 benchmark behaviour from commit 0909e7d: keep any
+            # angular column with enough axial continuity. Later angular-width
+            # caps preserved lining but drove wall-cable recall to zero.
+            for tcol in np.unique(prot_ti):
                 in_col = prot_ti == tcol
-                keep_local[prot_loc[in_col]] = True
+                if np.unique(prot_hi[in_col]).size >= min_axial_runs:
+                    keep_local[prot_loc[in_col]] = True
 
         mask[idx_all[keep_local]] = True
         return mask
@@ -760,7 +721,10 @@ class PreprocessingLayer:
         pts = validate_xyz(pts)
         n_raw = len(pts)
         if n_raw < 50:
-            context.normalized_points = pts
+            if context.registered_points is not None:
+                context.registered_points = pts
+            else:
+                context.normalized_points = pts
             return pts, {"n_raw": n_raw, "n_clean": n_raw, "n_removed": 0,
                          "method": "skip-too-small"}
 
@@ -835,7 +799,10 @@ class PreprocessingLayer:
                 n_removed_density += int(drop.sum())
 
         clean = validate_xyz(pts[keep])
-        context.normalized_points = clean
+        if context.registered_points is not None:
+            context.registered_points = clean
+        else:
+            context.normalized_points = clean
         return clean, {
             "n_raw": n_raw,
             "n_clean": int(keep.sum()),

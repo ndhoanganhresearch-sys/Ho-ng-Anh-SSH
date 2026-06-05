@@ -1,6 +1,79 @@
 from ..common import *
 from ..models import SectionGeometry
 
+SECTION_DELTA_CAUTION_MM = 10.0
+SECTION_DELTA_CRITICAL_MM = 25.0
+
+
+def section_warning_status(sg: SectionGeometry, ref_sg: SectionGeometry = None):
+    """Classify risk. With T0 available, compare Tn against T0 baseline."""
+    issues = []
+    status = "OK"
+
+    def add(level: str, label: str, value: float, unit: str) -> None:
+        nonlocal status
+        if level == "CRITICAL" or status == "OK":
+            status = level
+        elif level == "CAUTION" and status != "CRITICAL":
+            status = level
+        issues.append((level, label, value, unit))
+
+    if sg.clearance_violation:
+        val = sg.min_clearance_dist * 1e3 if np.isfinite(sg.min_clearance_dist) else float("nan")
+        add("CRITICAL", "clearance", val, "mm")
+
+    if ref_sg is not None:
+        for label, attr in (("dW", "W1"), ("dH", "H1"), ("dR", "radius_fit")):
+            a = getattr(sg, attr, float("nan"))
+            b = getattr(ref_sg, attr, float("nan"))
+            if np.isfinite(a) and np.isfinite(b):
+                delta_mm = (a - b) * 1e3
+                if abs(delta_mm) >= SECTION_DELTA_CRITICAL_MM:
+                    add("CRITICAL", label, delta_mm, "mm")
+                elif abs(delta_mm) >= SECTION_DELTA_CAUTION_MM:
+                    add("CAUTION", label, delta_mm, "mm")
+        if np.isfinite(sg.ovality) and np.isfinite(ref_sg.ovality):
+            d_oval = sg.ovality - ref_sg.ovality
+            if abs(d_oval) >= 1.0:
+                add("CRITICAL", "dOval", d_oval, "%")
+            elif abs(d_oval) >= 0.5:
+                add("CAUTION", "dOval", d_oval, "%")
+        if np.isfinite(sg.eccentricity) and np.isfinite(ref_sg.eccentricity):
+            d_ecc = sg.eccentricity - ref_sg.eccentricity
+            if abs(d_ecc) >= 25.0:
+                add("CRITICAL", "dEcc", d_ecc, "mm")
+            elif abs(d_ecc) >= 10.0:
+                add("CAUTION", "dEcc", d_ecc, "mm")
+    else:
+        if np.isfinite(sg.ovality):
+            if abs(sg.ovality) >= 1.0:
+                add("CRITICAL", "ovality", sg.ovality, "%")
+            elif abs(sg.ovality) >= 0.5:
+                add("CAUTION", "ovality", sg.ovality, "%")
+        if np.isfinite(sg.eccentricity):
+            if abs(sg.eccentricity) >= 25.0:
+                add("CRITICAL", "eccentricity", sg.eccentricity, "mm")
+            elif abs(sg.eccentricity) >= 10.0:
+                add("CAUTION", "eccentricity", sg.eccentricity, "mm")
+    return status, issues
+
+
+def section_warning_text(issues, limit: int = 3) -> str:
+    if not issues:
+        return "OK"
+    parts = []
+    for level, label, value, unit in issues[:limit]:
+        if np.isfinite(value):
+            if unit == "%":
+                parts.append(f"{label}={value:.2f}%")
+            else:
+                parts.append(f"{label}={value:+.1f}{unit}")
+        else:
+            parts.append(label)
+    if len(issues) > limit:
+        parts.append(f"+{len(issues) - limit} more")
+    return ", ".join(parts)
+
 class CollapsibleSection(QtWidgets.QWidget):
     def __init__(self, title: str, step: int, tag: str, parent=None):
         super().__init__(parent)
@@ -181,18 +254,19 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         self._ref_sections: List[SectionGeometry] = []
         ctrl.addWidget(self._chk_overlay); ctrl.addWidget(self._btn_anim); ctrl.addStretch()
         lay.addLayout(ctrl)
-        self._info_label = QtWidgets.QLabel("Run Step 5.7 to display section parameters.")
+        self._info_label = QtWidgets.QLabel("Run Step 6.3 to display section parameters.")
         self._info_label.setWordWrap(True)
         self._info_label.setStyleSheet(
             "color:#475569; font-family:monospace; font-size:9pt; "
             "padding:4px 6px; background:#F8FAFC; border-top:1px solid #E2E8F0;")
         self._info_label.setMinimumHeight(24)
-        self._info_label.setMaximumHeight(48)
+        self._info_label.setMaximumHeight(78)
         lay.addWidget(self._info_label, 0)
         self._draw_empty()
 
     def set_ref_sections(self, sections) -> None:
         self._ref_sections = sections
+        self._refresh()
 
     def _toggle_animation(self, checked: bool) -> None:
         if checked:
@@ -223,9 +297,12 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         if sg is None:
             if not self._sections: return
             sg = self._sections[self._idx]
+        ref_sg = getattr(self, "_current_ref_sg", None)
+        warn_status, warn_issues = section_warning_status(sg, ref_sg)
         import numpy as _np
         dlg = QtWidgets.QDialog(self.parent() if self.parent() else self)
-        dlg.setWindowTitle("Section Info  |  Ch. " + f"{sg.chainage:.3f} m")
+        title_prefix = "Section Info  |  T0 vs Tn" if ref_sg is not None else "Section Info"
+        dlg.setWindowTitle(title_prefix + "  |  Ch. " + f"{sg.chainage:.3f} m")
         dlg.setMinimumWidth(380)
         lay = QtWidgets.QVBoxLayout(dlg)
         lay.setSpacing(0); lay.setContentsMargins(0,0,0,0)
@@ -277,6 +354,33 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
              f"{sg.wall_angle_R:.2f} deg" if _np.isfinite(sg.wall_angle_R) else "N/A",
              "Angle between right wall and floor (90 deg = perfectly vertical wall)"),
         ]
+        if ref_sg is not None:
+            rows += [
+                ("T0 W1  Clear Width",
+                 f"{ref_sg.W1:.4f} m" if _np.isfinite(ref_sg.W1) else "N/A",
+                 "Baseline T0 horizontal clearance width"),
+                ("T0 H1  Clear Height",
+                 f"{ref_sg.H1:.4f} m" if _np.isfinite(ref_sg.H1) else "N/A",
+                 "Baseline T0 vertical clearance height"),
+                ("T0 R   Fitted Radius",
+                 f"{ref_sg.radius_fit:.4f} m" if _np.isfinite(ref_sg.radius_fit) else "N/A",
+                 "Baseline T0 fitted section radius"),
+                ("Delta W1  Tn-T0",
+                 f"{(sg.W1 - ref_sg.W1) * 1e3:+.2f} mm" if _np.isfinite(sg.W1) and _np.isfinite(ref_sg.W1) else "N/A",
+                 "Change in clear width between Tn and T0"),
+                ("Delta H1  Tn-T0",
+                 f"{(sg.H1 - ref_sg.H1) * 1e3:+.2f} mm" if _np.isfinite(sg.H1) and _np.isfinite(ref_sg.H1) else "N/A",
+                 "Change in clear height between Tn and T0"),
+                ("Delta R   Tn-T0",
+                 f"{(sg.radius_fit - ref_sg.radius_fit) * 1e3:+.2f} mm" if _np.isfinite(sg.radius_fit) and _np.isfinite(ref_sg.radius_fit) else "N/A",
+                 "Change in fitted radius between Tn and T0"),
+                ("Delta Ovality  Tn-T0",
+                 f"{(sg.ovality - ref_sg.ovality):+.4f} %" if _np.isfinite(sg.ovality) and _np.isfinite(ref_sg.ovality) else "N/A",
+                 "Change in ovality between Tn and T0"),
+                ("Delta Eccentricity  Tn-T0",
+                 f"{(sg.eccentricity - ref_sg.eccentricity):+.2f} mm" if _np.isfinite(sg.eccentricity) and _np.isfinite(ref_sg.eccentricity) else "N/A",
+                 "Change in eccentricity between Tn and T0"),
+            ]
         for i,(lbl,val,tip) in enumerate(rows):
             # Label with tooltip
             l = QtWidgets.QLabel(lbl)
@@ -311,11 +415,11 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
             gl.addWidget(info_lbl, i, 2)
         lay.addWidget(grid)
         sf = QtWidgets.QFrame()
-        bg = "#FEE2E2" if sg.clearance_violation else "#D1FAE5"
-        bc = "#DC2626" if sg.clearance_violation else "#047857"
+        bg = "#FEE2E2" if warn_status == "CRITICAL" else ("#FEF3C7" if warn_status == "CAUTION" else "#D1FAE5")
+        bc = "#DC2626" if warn_status == "CRITICAL" else ("#D97706" if warn_status == "CAUTION" else "#047857")
         sf.setStyleSheet(f"QFrame{{background:{bg};border-top:2px solid {bc};padding:8px;}}")
         sl = QtWidgets.QHBoxLayout(sf); sl.setContentsMargins(16,8,16,8)
-        st = "CLEARANCE VIOLATION" if sg.clearance_violation else "OK - Within Limits"
+        st = f"{warn_status} - {section_warning_text(warn_issues)}" if warn_status != "OK" else "OK - Within Limits"
         slbl = QtWidgets.QLabel(st)
         slbl.setStyleSheet(f"color:{bc};font-size:12pt;font-weight:bold;background:transparent;")
         sl.addWidget(slbl); lay.addWidget(sf)
@@ -385,7 +489,7 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
     def _draw_empty(self) -> None:
         if not _MPL_OK: return
         ax = self._ax; ax.clear(); ax.set_facecolor(_BG)
-        ax.text(0.5, 0.5, "Run Step 5.7: Plot 2D Technical Section\nto display tunnel cross-sections and engineering dimensions.",
+        ax.text(0.5, 0.5, "Run Step 6.3: Plot 2D Technical Section\nto display tunnel cross-sections and engineering dimensions.",
                 ha="center", va="center", color=_FG, fontsize=11, transform=ax.transAxes)
         for s in ax.spines.values(): s.set_color(_GRID)
         ax.tick_params(colors=_FG); self._canvas.draw_idle()
@@ -402,10 +506,13 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
             self._lbl_slider_val.setText(f"{sg.chainage:.2f}m")
         self.section_changed.emit(self._idx)
         if sg.pts_2d is None or len(sg.pts_2d) < 4: self._draw_empty(); return
+        ref_sg_info = None
+        if self._ref_sections and self._idx < len(self._ref_sections):
+            ref_sg_info = self._ref_sections[self._idx]
+        self._current_ref_sg = ref_sg_info
         ref_sg = None
         if hasattr(self, "_chk_overlay") and self._chk_overlay.isChecked():
-            if self._ref_sections and self._idx < len(self._ref_sections):
-                ref_sg = self._ref_sections[self._idx]
+            ref_sg = ref_sg_info
         self._draw_section(sg, ref_sg=ref_sg)
 
     def _draw_section(self, sg: SectionGeometry, ref_sg=None, alpha: float = 1.0) -> None:
@@ -413,6 +520,8 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         from scipy.spatial import ConvexHull
         ax = self._ax
         ax.clear()
+        warn_ref_sg = ref_sg if ref_sg is not None else getattr(self, "_current_ref_sg", None)
+        warn_status, warn_issues = section_warning_status(sg, warn_ref_sg)
 
         # ── Background & grid ──────────────────────────────────────────────
         ax.set_facecolor("#FFFFFF")
@@ -713,6 +822,15 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                     bbox=dict(facecolor="#FFF1F1", edgecolor="#DC2626",
                               boxstyle="round,pad=0.4", alpha=0.95), zorder=10)
 
+        if warn_status != "OK":
+            banner_color = "#DC2626" if warn_status == "CRITICAL" else "#D97706"
+            banner_bg = "#FFF1F1" if warn_status == "CRITICAL" else "#FFFBEB"
+            ax.text(0.01, 1.015, f"{warn_status}: {section_warning_text(warn_issues, limit=2)}",
+                    transform=ax.transAxes, ha="left", va="bottom", clip_on=False,
+                    color=banner_color, fontsize=8.2, fontweight="bold",
+                    bbox=dict(facecolor=banner_bg, edgecolor=banner_color,
+                              boxstyle="round,pad=0.25", alpha=0.95), zorder=10)
+
         # ── Limits & aspect ────────────────────────────────────────────────
         if self._profile == "Circle":
             vl_x0, vl_x1 = -self._vl_cir_r, self._vl_cir_r
@@ -721,10 +839,12 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
             vl_x0, vl_x1 = -self._vl_box_w, self._vl_box_w
             vl_z0, vl_z1 = 0.0, self._vl_box_h
         pad = max(0.5, 0.08 * max(x_span, z_span))
-        plot_x0 = min(float(np.min(x)), vl_x0, dim_x_left  - dim_gap) - pad
-        plot_x1 = max(float(np.max(x)), vl_x1, dim_x_right + dim_gap) + pad
-        plot_z0 = min(float(np.min(z)), vl_z0, dim_y_bottom - dim_gap) - pad
-        plot_z1 = max(float(np.max(z)), vl_z1, dim_y_top   + dim_gap) + pad
+        x_lo = float(np.percentile(x, 0.5)); x_hi = float(np.percentile(x, 99.5))
+        z_lo = float(np.percentile(z, 0.5)); z_hi = float(np.percentile(z, 99.5))
+        plot_x0 = min(x_lo, vl_x0, dim_x_left  - dim_gap) - pad
+        plot_x1 = max(x_hi, vl_x1, dim_x_right + dim_gap) + pad
+        plot_z0 = min(z_lo, vl_z0, dim_y_bottom - dim_gap) - pad
+        plot_z1 = max(z_hi, vl_z1, dim_y_top   + dim_gap) + pad
         cap = 18.0
         plot_x0 = max(plot_x0,-cap); plot_x1 = min(plot_x1, cap)
         plot_z0 = max(plot_z0,-cap); plot_z1 = min(plot_z1, cap)
@@ -779,7 +899,42 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                 f"padding:4px 8px; background:#F8FAFC; border-top:1px solid #CBD5E1;")
             self._info_label.setText("   |   ".join(parts))
 
-        self._fig.tight_layout(pad=0.8)
+            parts = [f"Ch:{sg.chainage:.2f}m", "Tn"]
+            if np.isfinite(sg.W1): parts.append(f"W1={sg.W1:.3f}m")
+            if np.isfinite(sg.H1): parts.append(f"H1={sg.H1:.3f}m")
+            if np.isfinite(sg.ovality): parts.append(f"Oval={sg.ovality:.2f}%")
+            if np.isfinite(sg.eccentricity): parts.append(f"e={sg.eccentricity:.1f}mm")
+            if np.isfinite(sg.min_clearance_dist): parts.append(f"Clr={sg.min_clearance_dist:.3f}m")
+            if self._profile == "Circle" and np.isfinite(sg.radius_fit): parts.append(f"R={sg.radius_fit:.3f}m")
+            ref_info = getattr(self, "_current_ref_sg", None)
+            if ref_info is not None:
+                ref_parts = ["T0"]
+                if np.isfinite(ref_info.W1): ref_parts.append(f"W1={ref_info.W1:.3f}m")
+                if np.isfinite(ref_info.H1): ref_parts.append(f"H1={ref_info.H1:.3f}m")
+                if self._profile == "Circle" and np.isfinite(ref_info.radius_fit): ref_parts.append(f"R={ref_info.radius_fit:.3f}m")
+                delta_parts = []
+                if np.isfinite(sg.W1) and np.isfinite(ref_info.W1):
+                    delta_parts.append(f"dW={(sg.W1 - ref_info.W1) * 1e3:+.1f}mm")
+                if np.isfinite(sg.H1) and np.isfinite(ref_info.H1):
+                    delta_parts.append(f"dH={(sg.H1 - ref_info.H1) * 1e3:+.1f}mm")
+                if np.isfinite(sg.radius_fit) and np.isfinite(ref_info.radius_fit):
+                    delta_parts.append(f"dR={(sg.radius_fit - ref_info.radius_fit) * 1e3:+.1f}mm")
+                if np.isfinite(sg.ovality) and np.isfinite(ref_info.ovality):
+                    delta_parts.append(f"dOval={sg.ovality - ref_info.ovality:+.2f}%")
+                if np.isfinite(sg.eccentricity) and np.isfinite(ref_info.eccentricity):
+                    delta_parts.append(f"dEcc={sg.eccentricity - ref_info.eccentricity:+.1f}mm")
+                parts.append(" | ".join(ref_parts))
+                if delta_parts:
+                    parts.append("Delta " + " ".join(delta_parts))
+            if warn_status != "OK":
+                parts.append(f"{warn_status} {section_warning_text(warn_issues)}")
+            self._info_label.setText("   |   ".join(parts))
+            color = "#DC2626" if warn_status == "CRITICAL" else ("#D97706" if warn_status == "CAUTION" else "#0F172A")
+            self._info_label.setStyleSheet(
+                f"color:{color}; font-family:monospace; font-size:9pt; "
+                f"padding:4px 8px; background:#F8FAFC; border-top:1px solid #CBD5E1;")
+
+        self._fig.tight_layout(pad=0.55)
         self._canvas.draw_idle()
 
 

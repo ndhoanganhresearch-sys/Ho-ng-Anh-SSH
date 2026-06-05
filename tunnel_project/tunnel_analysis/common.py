@@ -82,6 +82,7 @@ try:
         from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
     _MPL_OK = True
 except ImportError:
+    matplotlib = None  # type: ignore[assignment]  # in __all__; must be assigned on failure
     plt = None  # type: ignore[assignment]
     mpatches = None  # type: ignore[assignment]
     FigureCanvas = None  # type: ignore[assignment]
@@ -382,5 +383,3 @@ __all__ = [
     "_unit", "principal_axes", "validate_xyz", "_normalize_rgb", "make_vertex_cloud", "fit_ellipse_fitzgibbon",
     "format_parameter", "classify_parameter", "PARAM_THRESHOLDS", "PARAM_LABELS",
 ]
-
-

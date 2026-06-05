@@ -14,7 +14,8 @@ from ..pdf_reporter import TunnelPDFReporter
 from ..ifc_exporter import TunnelIFCExporter
 from ..target_detector import TargetDetector, Target
 from ..rag_ai import TunnelRAGAssistant
-from .widgets import CollapsibleSection, MatplotlibSectionWidget, PolarDeformationPlotWidget, LinePlotWidget
+from .widgets import (CollapsibleSection, MatplotlibSectionWidget, PolarDeformationPlotWidget,
+                      LinePlotWidget, section_warning_status, section_warning_text)
 from .i18n_v4 import tr as _tr
 from translations import get_available_languages
 from language_switcher import LanguageSwitcher
@@ -34,14 +35,13 @@ DISPLAY_MAX_POINTS = 600_000
 # Sidebar sub-actions kept in core mode, keyed by the step code at the start
 # of each button label (e.g. "4.3b"). Edit this set to fine-tune the scope.
 CORE_STEP_CODES = {
-    "1.1", "1.2", "1.3", "1.4",                       # acquire + merge stations
+    "1.1", "1.2", "1.3", "1.4", "1.8",                # acquire + merge stations / epochs
     "2.1", "2.5",                                     # preprocessing (2.5 = all-in-one denoise)
     "3.1", "3.2", "3.3",                              # registration + RMSE
     "4.1", "4.3b", "4.4",                             # centerline + section frames
-    "5.1", "5.2", "5.3", "5.5", "5.6", "5.7",          # deformation parameters
+    "5.1", "5.2", "5.3", "5.5", "5.6", "5.8",          # deformation parameters
     "6.1", "6.2", "6.3",                              # 4D time-series
     "7.1", "7.1b", "7.1c", "7.2",                     # BIM export (IFC4 + IFC4X3 + components) + AI assistant
-    "8.1", "8.2", "8.3", "8.4",                       # export reports + web dashboard
 }
 
 # Output tabs hidden in core mode, matched by their English source title.
@@ -377,7 +377,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._station_visibility = {}  # idx -> bool
 
         self.ts_plot = LinePlotWidget()
-        self.right_tabs.addTab(self.ts_plot, "Time-Series Plot")
+        self._ts_tab_idx = self.right_tabs.addTab(self.ts_plot, "Time-Series Plot")
 
         self.section_widget = MatplotlibSectionWidget()
         self.right_tabs.addTab(self.section_widget, "2D Cross-Section")
@@ -533,6 +533,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 ("1.2  Initialize 3D viewport", self._slot_1_2_viewport),
                 ("1.3  Add scan station (+)", self._slot_1_3_add_scan),
                 ("1.4  Register & merge all stations", self._slot_1_4_merge),
+                ("1.8  Load T0 and Tn epochs", self._slot_1_8_epochs),
                 ("1.5  Rough alignment (manual)", self._slot_1_5_rough),
                 ("1.6  Chain register & merge", self._slot_1_6_chain),
                 ("1.7  Registration error heatmap", self._slot_1_7_reg_error),
@@ -569,13 +570,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 ("5.4  Polar radial deformation dr", self._slot_5_4_polar),
                 ("5.5  Ovality epsilon", self._slot_5_5_ovality),
                 ("5.6  Section eccentricity e", self._slot_5_6_eccentricity),
-                ("5.7  Plot 2D Technical Section", self._slot_5_7_sections),
-                ("5.8  Clearance 3D violation map", self._slot_5_8_clearance_3d),
+                ("5.8  Deformation / clearance 3D warning map", self._slot_5_8_clearance_3d),
             ]),
             (6, "Time-series analysis", "T-S", [
-                ("6.1  Load T0 and Tn epochs", self._slot_6_1_epochs),
-                ("6.2  Plot deformation trend", self._slot_6_2_plot),
-                ("6.3  M3C2 deformation map T0→Tn", self._slot_6_3_m3c2),
+                ("6.1  Plot deformation trend T0→Tn", self._slot_6_2_plot),
+                ("6.2  M3C2 deformation map T0→Tn", self._slot_6_3_m3c2),
+                ("6.3  Plot 2D Technical Section T0/Tn", self._slot_5_7_sections),
             ]),
             (7, "BIM and AI", "BIM/AI", [
                 ("7.1  Export IFC package", self._slot_7_1_ifc),
@@ -1014,10 +1014,14 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self._log(f"Polar radial deformation map generated: max outward={mx:+.2f} mm, max inward={mn:+.2f} mm")
 
         elif key == "5.8_clearance_3d":
-            pts, colors, n_viol = result
-            # Keep ALL violation points (the important highlight); decimate only
+            pts, status_mask, counts = result
+            n_caution = int(counts.get("caution_points", 0))
+            n_critical = int(counts.get("critical_points", 0))
+            n_sections_warn = int(counts.get("warning_sections", 0))
+            # Keep ALL warning points (the important highlight); decimate only
             # the gray base cloud for display.
-            viol_pts_full = pts[colors] if len(colors) else np.empty((0, 3))
+            caution_pts_full = pts[status_mask == 1] if len(status_mask) else np.empty((0, 3))
+            critical_pts_full = pts[status_mask == 2] if len(status_mask) else np.empty((0, 3))
             base_pts, _ = self._decimate_for_display(pts)
             mesh = make_vertex_cloud(base_pts)
             if self.plotter is not None:
@@ -1025,31 +1029,37 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 self.plotter.add_mesh(mesh, scalars=None, style="points",
                     point_size=2.5, render_points_as_spheres=False,
                     reset_camera=True, color="#94A3B8")
-                # Highlight violation points in red
-                if len(viol_pts_full):
-                    viol_pts = viol_pts_full
-                    if len(viol_pts):
-                        viol_mesh = make_vertex_cloud(viol_pts)
-                        self.plotter.add_mesh(viol_mesh, color="#DC2626",
-                            style="points", point_size=6.0,
-                            render_points_as_spheres=True,
-                            reset_camera=False, name="clearance_viol")
+                if len(caution_pts_full):
+                    caution_mesh = make_vertex_cloud(caution_pts_full)
+                    self.plotter.add_mesh(caution_mesh, color="#D97706",
+                        style="points", point_size=5.0,
+                        render_points_as_spheres=True,
+                        reset_camera=False, name="deformation_caution")
+                if len(critical_pts_full):
+                    critical_mesh = make_vertex_cloud(critical_pts_full)
+                    self.plotter.add_mesh(critical_mesh, color="#DC2626",
+                        style="points", point_size=7.0,
+                        render_points_as_spheres=True,
+                        reset_camera=False, name="deformation_critical")
                 self.plotter.add_text(
-                    f"Clearance Violations: {n_viol} points",
+                    f"Deformation warnings: {n_sections_warn} sections | critical={n_critical} pts | caution={n_caution} pts",
                     position="upper_left", font_size=11,
-                    color="#DC2626" if n_viol > 0 else "#047857",
+                    color="#DC2626" if n_critical > 0 else ("#D97706" if n_caution > 0 else "#047857"),
                     name="ttl")
                 self.plotter.add_axes(color="#111827")
                 self.plotter.reset_camera(); self.plotter.render()
-            self._log(f"Clearance 3D map: {n_viol} violation points detected")
-            if n_viol > 0:
+            self._log(f"Deformation/clearance 3D map: warnings={n_sections_warn}, critical_points={n_critical}, caution_points={n_caution}")
+            if n_critical > 0 or n_caution > 0:
                 from PySide6.QtWidgets import QMessageBox
                 _lang = self.current_language
-                QMessageBox.warning(self, _tr("Clearance Violation", _lang),
-                    _tr("{n} points violate vehicle clearance envelope!", _lang).format(n=n_viol) + chr(10) +
-                    _tr("Red points shown on 3D viewport.", _lang))
+                QMessageBox.warning(self, _tr("Deformation Warning", _lang),
+                    f"{n_sections_warn} warning section(s) detected." + chr(10) +
+                    f"Critical points: {n_critical:,}" + chr(10) +
+                    f"Caution points: {n_caution:,}" + chr(10) +
+                    "Red = critical deformation/clearance, amber = caution.")
         elif key == "5.7_sections":
             sections: List[SectionGeometry] = result; self.context.sections = sections
+            self._section_ref_sections = []
             self.section_widget.set_sections(sections, profile=self.context.tunnel_profile, vl_box_w=self._sp_vl_w.value(), vl_box_h=self._sp_vl_h.value(), vl_cir_r=self._sp_vl_r.value())
             try: self.section_widget.section_changed.disconnect()
             except Exception: pass
@@ -1068,6 +1078,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                         vl_box_w=self._sp_vl_w.value(),
                         vl_box_h=self._sp_vl_h.value(),
                         vl_cir_r=self._sp_vl_r.value())
+                    self._section_ref_sections = ref_secs
                     self.section_widget.set_ref_sections(ref_secs)
                     self._log(_tr("T0 reference sections loaded for overlay.", self.current_language))
                 except Exception as e:
@@ -1081,16 +1092,40 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 h1s = [s.H1 for s in valid if np.isfinite(s.H1)]
                 if w1s: self._log(f"  Average clear section width W1: {np.mean(w1s):.3f} m")
                 if h1s: self._log(f"  Average clear section height H1: {np.mean(h1s):.3f} m")
+                ref_secs = getattr(self, "_section_ref_sections", []) or []
+                warned = []
+                section_statuses = self._classify_section_warning_series(valid, ref_secs)
+                for sec, (status, issues) in zip(valid, section_statuses):
+                    if status != "OK":
+                        warned.append((status, sec.chainage, section_warning_text(issues)))
+                if warned:
+                    n_crit = sum(1 for status, _, _ in warned if status == "CRITICAL")
+                    n_caut = sum(1 for status, _, _ in warned if status == "CAUTION")
+                    self._log(f"  DEFORMATION WARNINGS: critical={n_crit}, caution={n_caut}")
+                    for status, ch, text in warned[:10]:
+                        self._log(f"    [{status}] Ch {ch:.2f}m: {text}")
             self._log("------------------------------------------------")
 
-        elif key == "6.1_epochs":
-            t0, tn = result; self.context.scans = [t0, tn]; self.context.active_index = 1
-            self._log(_tr("Time-series point-cloud epochs loaded successfully.", self.current_language))
+        elif key in ("1.8_epochs", "6.1_epochs"):
+            t0, tn = result
+            self._activate_epochs(t0, tn)
+            self._log(_tr("T0/Tn epochs loaded. T0 is reference; Tn is active for Steps 2-5.", self.current_language))
 
         elif key == "6.2_plot":
-            series = np.asarray(result, dtype=np.float64); self.context.time_series_plot = series
-            self.ts_plot.set_values(series, "Deformation Trend Chart Across Chainage Line (mm)")
-            self.right_tabs.setCurrentIndex(2)
+            if isinstance(result, dict) and "median_mm" in result:
+                self.context.time_series_result = result
+                series = np.asarray(result["median_mm"], dtype=np.float64)
+                self.context.time_series_plot = series
+                labels = result.get("labels", [])
+                method = result.get("method", "time-series")
+                self.ts_plot.set_values(series, f"T0→Tn deformation trend [{method}] median displacement (mm)")
+                p95 = np.asarray(result.get("p95_abs_mm", []), dtype=np.float64)
+                if len(series):
+                    self._log(f"Time-series trend [{method}]: epochs={list(labels)} median_mm={np.round(series, 2).tolist()} p95_abs_mm={np.round(p95, 2).tolist()}")
+            else:
+                series = np.asarray(result, dtype=np.float64); self.context.time_series_plot = series
+                self.ts_plot.set_values(series, "Crown-height trend across chainage (mm)")
+            self.right_tabs.setCurrentIndex(self._ts_tab_idx)
 
         elif key == "6.3_m3c2":
             res = result
@@ -1153,6 +1188,45 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         max_pts = self._ask_max_points(fp)
         if max_pts is None: return
         self._start_worker("1.1_import", lambda: self.base_mod.load_scan(fp, max_points=max_pts))
+
+    def _slot_1_8_epochs(self) -> None:
+        self._hdr("Load T0/Tn Epochs", "Load reference T0 and monitoring Tn at the start of the pipeline.")
+        fp0, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load reference epoch T0", "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
+        if not fp0: return
+        fpn, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load monitoring epoch Tn", "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
+        if not fpn: return
+        self._start_worker("1.8_epochs", lambda: self.ts_mod.load_epochs(fp0, fpn))
+
+    def _activate_epochs(self, t0: PointCloudBundle, tn: PointCloudBundle) -> None:
+        t0.metadata = dict(t0.metadata or {})
+        tn.metadata = dict(tn.metadata or {})
+        t0.metadata["epoch_role"] = "T0 reference"
+        tn.metadata["epoch_role"] = "Tn active"
+        self.context.scans = [t0, tn]
+        self.context.active_index = 1
+        self.context.normalized_points = tn.points
+        self.context.registered_points = None
+        self.context.centerline = None
+        self.context.centerline_smooth = None
+        self.context.frenet_frames = []
+        self.context.parameters.clear()
+        self.context.heatmap_scalars = None
+        self.context.time_series_plot = None
+        self.context.m3c2_result = None
+        if hasattr(self.context, "time_series_result"):
+            self.context.time_series_result = None
+        self.context.polar_map = None
+        self.context.polar_angles = None
+        self.context.polar_centers = None
+        self.context.sections = []
+        self.context.denoise_stats.clear()
+        self.context.component_points.clear()
+        self._render_bundle(tn, "Tn Active Epoch (T0 reference loaded)")
+        self._update_meta(tn)
+        self.pt_label.setText(f"Points: {len(tn.points):,}")
+        self.sb_pts.setText(f"Points: {len(tn.points):,}")
+        self._refresh_station_list()
+        self._render_station_markers()
 
     def _ask_max_points(self, fp: str):
         """Check file size and ask user for subsampling if needed."""
@@ -1873,28 +1947,110 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._start_worker("5.6_eccentricity", lambda: self.par_mod.calc_eccentricity(self.context))
 
     def _slot_5_8_clearance_3d(self) -> None:
-        self._hdr("Clearance 3D Violation Map (PDF 3.6)",
-                  "Highlight points violating vehicle clearance envelope on 3D viewport.")
+        self._hdr("Deformation / Clearance 3D Warning Map",
+                  "Highlight sections with deformation or clearance warnings on the 3D viewport.")
         if not self.context.sections:
-            self._log(_tr("Run Step 5.7 first.", self.current_language)); return
+            self._log(_tr("Run Step 6.3 first.", self.current_language)); return
+        sections = list(self.context.sections)
+        ref_sections = list(getattr(self, "_section_ref_sections", []) or [])
+        section_statuses = self._classify_section_warning_series(sections, ref_sections)
         def _task():
             import numpy as _np
             pts = self.context.working_points
             if pts is None: raise RuntimeError("No point cloud.")
             pts = validate_xyz(pts)
-            # Get clearance violations from sections
-            viol_centers = [s.center_3d for s in self.context.sections
-                            if s.clearance_violation and s.center_3d is not None]
-            if not viol_centers:
-                return pts, _np.zeros(len(pts), dtype=bool), 0
-            # Mark points near violation section centers
+            warning_centers = []
+            warning_levels = []
+            for sec, (status, _issues) in zip(sections, section_statuses):
+                if status != "OK" and sec.center_3d is not None:
+                    warning_centers.append(sec.center_3d)
+                    warning_levels.append(2 if status == "CRITICAL" else 1)
+            status_mask = _np.zeros(len(pts), dtype=_np.uint8)
+            if not warning_centers:
+                return pts, status_mask, {"warning_sections": 0, "critical_points": 0, "caution_points": 0}
+            # Mark points near warning section centers
             from scipy.spatial import cKDTree as _kd
-            viol_arr = _np.array(viol_centers)
-            tree = _kd(viol_arr)
-            d, _ = tree.query(pts, k=1, workers=-1)
-            viol_mask = d < 0.5
-            return pts, viol_mask, int(viol_mask.sum())
+            warn_arr = _np.asarray(warning_centers, dtype=_np.float64)
+            levels = _np.asarray(warning_levels, dtype=_np.uint8)
+            tree = _kd(warn_arr)
+            d, idx = tree.query(pts, k=1, workers=-1)
+            near = d < 0.5
+            status_mask[near] = levels[idx[near]]
+            return pts, status_mask, {
+                "warning_sections": int(len(warning_centers)),
+                "critical_points": int(_np.count_nonzero(status_mask == 2)),
+                "caution_points": int(_np.count_nonzero(status_mask == 1)),
+            }
         self._start_worker("5.8_clearance_3d", _task)
+
+    def _classify_section_warning_series(self, sections, ref_sections=None):
+        """Find local deformation anomalies instead of flagging the whole tunnel."""
+        ref_sections = ref_sections or []
+        n = len(sections)
+        statuses = [["OK", []] for _ in sections]
+
+        def add(i, level, label, value, unit):
+            cur = statuses[i][0]
+            if level == "CRITICAL" or cur == "OK":
+                statuses[i][0] = level
+            elif level == "CAUTION" and cur != "CRITICAL":
+                statuses[i][0] = level
+            statuses[i][1].append((level, label, value, unit))
+
+        def local_flags(values, caution_abs, critical_abs, floor, label, unit):
+            arr = np.asarray(values, dtype=np.float64)
+            mag = np.abs(arr)
+            finite = np.isfinite(mag)
+            if not finite.any():
+                return
+            vals = mag[finite]
+            med = float(np.nanmedian(vals))
+            mad = float(np.nanmedian(np.abs(vals - med)))
+            robust_sigma = 1.4826 * mad
+            local_thr = med + max(3.0 * robust_sigma, floor)
+            # If variation is tiny, avoid painting the whole tunnel for a global
+            # bias in centerline/fit. Only distinct local peaks pass this gate.
+            for i, v in enumerate(mag):
+                if not np.isfinite(v):
+                    continue
+                is_local = n < 6 or v >= local_thr
+                if v >= critical_abs and is_local:
+                    add(i, "CRITICAL", label, arr[i], unit)
+                elif v >= caution_abs and is_local:
+                    add(i, "CAUTION", label, arr[i], unit)
+
+        for i, sec in enumerate(sections):
+            if sec.clearance_violation:
+                val = sec.min_clearance_dist * 1e3 if np.isfinite(sec.min_clearance_dist) else float("nan")
+                add(i, "CRITICAL", "clearance", val, "mm")
+
+        if ref_sections:
+            for label, attr in (("dW", "W1"), ("dH", "H1"), ("dR", "radius_fit")):
+                deltas = []
+                for i, sec in enumerate(sections):
+                    ref = ref_sections[i] if i < len(ref_sections) else None
+                    a = getattr(sec, attr, float("nan"))
+                    b = getattr(ref, attr, float("nan")) if ref is not None else float("nan")
+                    deltas.append((a - b) * 1e3 if np.isfinite(a) and np.isfinite(b) else float("nan"))
+                local_flags(deltas, 10.0, 25.0, 10.0, label, "mm")
+            d_oval = []
+            d_ecc = []
+            for i, sec in enumerate(sections):
+                ref = ref_sections[i] if i < len(ref_sections) else None
+                if ref is not None and np.isfinite(sec.ovality) and np.isfinite(ref.ovality):
+                    d_oval.append(sec.ovality - ref.ovality)
+                else:
+                    d_oval.append(float("nan"))
+                if ref is not None and np.isfinite(sec.eccentricity) and np.isfinite(ref.eccentricity):
+                    d_ecc.append(sec.eccentricity - ref.eccentricity)
+                else:
+                    d_ecc.append(float("nan"))
+            local_flags(d_oval, 0.5, 1.0, 0.35, "dOval", "%")
+            local_flags(d_ecc, 10.0, 25.0, 15.0, "dEcc", "mm")
+        else:
+            local_flags([s.ovality for s in sections], 0.5, 1.0, 0.35, "ovality", "%")
+            local_flags([s.eccentricity for s in sections], 10.0, 25.0, 15.0, "eccentricity", "mm")
+        return [(status, issues) for status, issues in statuses]
 
     def _on_res_mode_changed(self, index):
         """Toggle the count vs spacing inputs for the resolution mode."""
@@ -1995,7 +2151,14 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _slot_6_2_plot(self) -> None:
         self._hdr("Deformation Trend Chart", "Plot deformation trend metrics along the chainage line.")
-        self._start_worker("6.2_plot", lambda: self.ts_mod.plot_deformation(self.context))
+        if len(self.context.scans) < 2:
+            self._log(_tr("Load at least 2 scans (T0 and Tn) first.", self.current_language)); return
+        import os as _os
+        tn_pts = self.context.working_points if self.context.working_points is not None else self.context.scans[1].points
+        epochs = [np.asarray(self.context.scans[0].points, dtype=np.float64), np.asarray(tn_pts, dtype=np.float64)]
+        labels = [_os.path.splitext(_os.path.basename(self.context.scans[1].path or "Tn"))[0]]
+        self._start_worker("6.2_plot", lambda: self.ts_mod.spatiotemporal_series(
+            epochs, labels=labels, cyl_radius=0.5, normal_radius=0.6))
 
     def _slot_6_3_m3c2(self) -> None:
         self._hdr("M3C2 Deformation Map T0\u2192Tn",
@@ -2003,7 +2166,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if len(self.context.scans) < 2:
             self._log(_tr("Load at least 2 scans (T0 and Tn) first.", self.current_language)); return
         epoch0 = self.context.scans[0].points
-        epoch1 = self.context.scans[1].points
+        epoch1 = self.context.working_points if self.context.working_points is not None else self.context.scans[1].points
         self._start_worker("6.3_m3c2",
             lambda: self.ts_mod.m3c2_distances(epoch0, epoch1, cyl_radius=0.5, normal_radius=0.6))
 
@@ -2127,7 +2290,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             import pathlib
             color = self._station_colors[i % len(self._station_colors)]
             fname = pathlib.Path(sc.path).name if sc.path else ("scan_" + str(i+1))
-            label = "S" + str(i+1) + "  " + fname
+            role = str((sc.metadata or {}).get("epoch_role", ""))
+            prefix = role if role else "S" + str(i+1)
+            label = prefix + "  " + fname
             item = QtWidgets.QTreeWidgetItem(scans_grp, [label])
             item.setCheckState(0, QtCore.Qt.Checked)
             item.setData(0, QtCore.Qt.UserRole, i)
@@ -2135,8 +2300,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             pix.fill(QtGui.QColor(color))
             item.setIcon(0, QtGui.QIcon(pix))
             item.setFont(0, QtGui.QFont("Segoe UI", 9))
-            tip = "Station " + str(i+1)
-            if i == 0: tip = tip + " (Reference)"
+            tip = role if role else "Station " + str(i+1)
+            if i == 0 and not role: tip = tip + " (Reference)"
             tip = tip + chr(10) + str(len(sc.points)) + " points"
             if sc.path: tip = tip + chr(10) + str(sc.path)
             item.setToolTip(0, tip)

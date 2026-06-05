@@ -191,7 +191,7 @@ def _fig_trend(chainages, values, ylabel, color, thr_c, thr_r):
 def _data_table(sec_data):
     from dash import html
     if not sec_data:
-        return html.P("No section data available. Run Step 5.7 first.",
+        return html.P("No section data available. Run Step 6.3 first.",
                       style={"color": "#64748B"})
     headers = list(sec_data[0].keys())
     rows = []
