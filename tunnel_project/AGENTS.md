@@ -14,6 +14,7 @@ This project is a Python tunnel point-cloud analysis tool. It includes a PyQt/Py
 - For UI changes, verify section/plot widgets fit the window and that step controls stay in their intended workflow order.
 - Keep Headroom optional in Windows Python; full native Headroom compression currently runs through WSL `.venv-headroom`.
 - Keep PaddleOCR optional; use it for reports, standards, labels, tables, and inspection images, not for point-cloud deformation math.
+- Blender MCP is configured at the workspace `.mcp.json` with the `blender` server. Use it for 3D scene inspection, tunnel visualization, rendering, and Blender-side scripting when the active agent session exposes the MCP tools.
 - For paper or research work, follow `RESEARCH_WORKFLOW.md`, `MATERIAL_PASSPORT.md`, and `PAPER_REVIEW_CHECKLIST.md` before making publication-style claims.
 
 ## Preferred Verification
@@ -32,6 +33,8 @@ For WSL Headroom verification:
 wsl --cd "C:\Users\ssl\Desktop\Code Python\data python cusor\tunnel_project" .venv-headroom/bin/python smoke_test_headroom_adapter.py
 powershell -NoProfile -Command "(Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8787/livez -TimeoutSec 10).Content"
 ```
+
+For Blender MCP verification, confirm Blender is running with its MCP bridge listening on `localhost:9876`, then start or restart the agent session so `.mcp.json` is loaded. The configured Windows command is `blender-mcp.exe` under the Python 3.12 user scripts directory.
 
 ## Review Focus
 
