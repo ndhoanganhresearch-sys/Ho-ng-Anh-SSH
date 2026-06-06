@@ -14,6 +14,7 @@ This project is a Python tunnel point-cloud analysis tool. It includes a PyQt/Py
 - For UI changes, verify section/plot widgets fit the window and that step controls stay in their intended workflow order.
 - Keep Headroom optional in Windows Python; full native Headroom compression currently runs through WSL `.venv-headroom`.
 - Keep PaddleOCR optional; use it for reports, standards, labels, tables, and inspection images, not for point-cloud deformation math.
+- For paper or research work, follow `RESEARCH_WORKFLOW.md`, `MATERIAL_PASSPORT.md`, and `PAPER_REVIEW_CHECKLIST.md` before making publication-style claims.
 
 ## Preferred Verification
 
@@ -39,6 +40,7 @@ powershell -NoProfile -Command "(Invoke-WebRequest -UseBasicParsing http://127.0
 - Deformation thresholds, unit conversion, section indexing, and 2D/3D mapping.
 - Benchmark regressions in clean noise, registration, centerline, and T0/Tn comparison.
 - Large point-cloud memory behavior on a 32 GB workstation.
+- Research claims that lack material-passport evidence, benchmark schema, or reproducibility notes.
 
 ## Selected ECC Influence
 
