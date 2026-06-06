@@ -281,6 +281,8 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         self._btn_reset.setToolTip(translate("Reset zoom (R)"))
         self._btn_info.setText("\u24d8 " + translate("Info"))
         self._btn_info.setToolTip(translate("Show section parameters"))
+        if self._lbl_ch.text() in ("Ch: --", translate("Ch: --")):
+            self._lbl_ch.setText(translate("Ch: --"))
         self._lbl_slider_ch.setText(translate("Ch:"))
         self._chk_overlay.setText(translate("Show T0 overlay"))
         self._chk_overlay.setToolTip(translate("Overlay reference epoch T0 on current section"))

@@ -139,7 +139,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Tunnel Analysis v4.0 (r1) - CBNU Smart Structure Lab")
+        self._window_title_src = "Tunnel Analysis v4.0 (r1) - CBNU Smart Structure Lab"
+        self.setWindowTitle(self._window_title_src)
         self.resize(1720, 1000)
         self.setAcceptDrops(True)   # drag & drop point-cloud files from Explorer
 
@@ -261,17 +262,17 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         st_tb.setStyleSheet("QFrame{background:#0F4C81;padding:4px;}")
         st_tb_lay = QtWidgets.QHBoxLayout(st_tb)
         st_tb_lay.setContentsMargins(8, 4, 8, 4); st_tb_lay.setSpacing(4)
-        st_title = QtWidgets.QLabel("Structure")
-        st_title.setStyleSheet("color:white;font-weight:bold;font-size:10pt;background:transparent;")
-        btn_add_st = QtWidgets.QPushButton("+")
-        btn_add_st.setToolTip("Add scan station")
-        btn_add_st.setFixedSize(24, 24)
-        btn_add_st.setStyleSheet(
+        self._station_title_lbl = QtWidgets.QLabel("Structure")
+        self._station_title_lbl.setStyleSheet("color:white;font-weight:bold;font-size:10pt;background:transparent;")
+        self._btn_add_station = QtWidgets.QPushButton("+")
+        self._btn_add_station.setToolTip("Add scan station")
+        self._btn_add_station.setFixedSize(24, 24)
+        self._btn_add_station.setStyleSheet(
             "QPushButton{background:#1D4ED8;color:white;border-radius:4px;font-weight:bold;border:none;}"
             "QPushButton:hover{background:#2563EB;}")
-        btn_add_st.clicked.connect(self._slot_1_3_add_scan)
-        st_tb_lay.addWidget(st_title, 1)
-        st_tb_lay.addWidget(btn_add_st)
+        self._btn_add_station.clicked.connect(self._slot_1_3_add_scan)
+        st_tb_lay.addWidget(self._station_title_lbl, 1)
+        st_tb_lay.addWidget(self._btn_add_station)
         st_lay.addWidget(st_tb)
 
         # Tree widget
@@ -305,14 +306,14 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         st_bot.setStyleSheet("QFrame{background:#F1F5F9;border-top:1px solid #E2E8F0;padding:2px;}")
         st_bot_lay = QtWidgets.QHBoxLayout(st_bot)
         st_bot_lay.setContentsMargins(6, 2, 6, 2); st_bot_lay.setSpacing(4)
-        btn_clear = QtWidgets.QPushButton("Clear All")
-        btn_clear.setStyleSheet(
+        self._btn_clear_stations = QtWidgets.QPushButton("Clear All")
+        self._btn_clear_stations.setStyleSheet(
             "QPushButton{background:#FEE2E2;color:#DC2626;border:1px solid #FCA5A5;"
             "border-radius:4px;padding:3px 8px;font-weight:600;font-size:8.5pt;}"
             "QPushButton:hover{background:#FECACA;}")
-        btn_clear.clicked.connect(self._clear_all_stations)
+        self._btn_clear_stations.clicked.connect(self._clear_all_stations)
         st_bot_lay.addStretch()
-        st_bot_lay.addWidget(btn_clear)
+        st_bot_lay.addWidget(self._btn_clear_stations)
         st_lay.addWidget(st_bot)
 
         self.right_tabs.addTab(self._station_panel, "Stations")
@@ -327,37 +328,37 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         tgt_tb.setStyleSheet("QFrame{background:#065F46;padding:4px;}")
         tgt_tb_lay = QtWidgets.QHBoxLayout(tgt_tb)
         tgt_tb_lay.setContentsMargins(8, 4, 8, 4); tgt_tb_lay.setSpacing(4)
-        tgt_title = QtWidgets.QLabel("Target Manager")
-        tgt_title.setStyleSheet("color:white;font-weight:bold;font-size:10pt;background:transparent;")
-        btn_detect = QtWidgets.QPushButton("Auto Detect")
-        btn_detect.setStyleSheet(
+        self._target_title_lbl = QtWidgets.QLabel("Target Manager")
+        self._target_title_lbl.setStyleSheet("color:white;font-weight:bold;font-size:10pt;background:transparent;")
+        self._btn_target_detect = QtWidgets.QPushButton("Auto Detect")
+        self._btn_target_detect.setStyleSheet(
             "QPushButton{background:#047857;color:white;border-radius:4px;"
             "padding:3px 10px;font-weight:700;border:none;font-size:9pt;}"
             "QPushButton:hover{background:#059669;}")
-        btn_manual = QtWidgets.QPushButton("+ Manual")
-        btn_manual.setStyleSheet(
+        self._btn_target_manual = QtWidgets.QPushButton("+ Manual")
+        self._btn_target_manual.setStyleSheet(
             "QPushButton{background:#1D4ED8;color:white;border-radius:4px;"
             "padding:3px 10px;font-weight:700;border:none;font-size:9pt;}"
             "QPushButton:hover{background:#2563EB;}")
-        btn_match = QtWidgets.QPushButton("Auto Match")
-        btn_match.setStyleSheet(
+        self._btn_target_match = QtWidgets.QPushButton("Auto Match")
+        self._btn_target_match.setStyleSheet(
             "QPushButton{background:#7C3AED;color:white;border-radius:4px;"
             "padding:3px 10px;font-weight:700;border:none;font-size:9pt;}"
             "QPushButton:hover{background:#6D28D9;}")
-        btn_reg = QtWidgets.QPushButton("Register")
-        btn_reg.setStyleSheet(
+        self._btn_target_register = QtWidgets.QPushButton("Register")
+        self._btn_target_register.setStyleSheet(
             "QPushButton{background:#DC2626;color:white;border-radius:4px;"
             "padding:3px 10px;font-weight:700;border:none;font-size:9pt;}"
             "QPushButton:hover{background:#B91C1C;}")
-        btn_detect.clicked.connect(self._slot_target_detect)
-        btn_manual.clicked.connect(self._slot_target_manual)
-        btn_match.clicked.connect(self._slot_target_match)
-        btn_reg.clicked.connect(self._slot_target_register)
-        tgt_tb_lay.addWidget(tgt_title, 1)
-        tgt_tb_lay.addWidget(btn_detect)
-        tgt_tb_lay.addWidget(btn_manual)
-        tgt_tb_lay.addWidget(btn_match)
-        tgt_tb_lay.addWidget(btn_reg)
+        self._btn_target_detect.clicked.connect(self._slot_target_detect)
+        self._btn_target_manual.clicked.connect(self._slot_target_manual)
+        self._btn_target_match.clicked.connect(self._slot_target_match)
+        self._btn_target_register.clicked.connect(self._slot_target_register)
+        tgt_tb_lay.addWidget(self._target_title_lbl, 1)
+        tgt_tb_lay.addWidget(self._btn_target_detect)
+        tgt_tb_lay.addWidget(self._btn_target_manual)
+        tgt_tb_lay.addWidget(self._btn_target_match)
+        tgt_tb_lay.addWidget(self._btn_target_register)
         tgt_lay.addWidget(tgt_tb)
 
         # Target table
@@ -3204,6 +3205,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         """Apply the active language to the main static UI (English fallback)."""
         lang = self.current_language
         step_word = _tr("Step", lang)
+        self.setWindowTitle(_tr(self._window_title_src, lang))
 
         # Sidebar header
         self._title_lbl.setText(_tr("TUNNEL ANALYSIS", lang))
@@ -3223,6 +3225,19 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._sp_spacing.setToolTip(_tr("Target axial distance between cross-sections. The section count is derived from the measured tunnel length.", lang))
         self._auto_btn.setText(_tr("AUTO PIPELINE  (1-click full analysis)", lang))
         self._reset_btn.setText(_tr("Reset Pipeline", lang))
+
+        if hasattr(self, "_station_title_lbl"):
+            self._station_title_lbl.setText(_tr("Structure", lang))
+            self._btn_add_station.setToolTip(_tr("Add scan station", lang))
+            self._btn_clear_stations.setText(_tr("Clear All", lang))
+        if hasattr(self, "_target_title_lbl"):
+            self._target_title_lbl.setText(_tr("Target Manager", lang))
+            self._btn_target_detect.setText(_tr("Auto Detect", lang))
+            self._btn_target_manual.setText("+ " + _tr("Manual", lang))
+            self._btn_target_match.setText(_tr("Auto Match", lang))
+            self._btn_target_register.setText(_tr("Register", lang))
+            if self._tgt_status.text() in ("No targets detected.", _tr("No targets detected.", "vi"), _tr("No targets detected.", "ko")):
+                self._tgt_status.setText(_tr("No targets detected.", lang))
 
         # Collapsible section titles + sub-button labels
         for sec in self._sections:
@@ -3262,6 +3277,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if hasattr(self, "_target_table") and hasattr(self, "_target_table_headers_src"):
             self._target_table.setHorizontalHeaderLabels(
                 [_tr(h, lang) for h in self._target_table_headers_src])
+
+        if hasattr(self, "sb_pts") and self.sb_pts.text() in ("Points: --", _tr("Points: --", "vi"), _tr("Points: --", "ko")):
+            self.sb_pts.setText(_tr("Points: --", lang))
+        if hasattr(self, "sb_rmse") and self.sb_rmse.text() in ("RMSE: --", _tr("RMSE: --", "vi"), _tr("RMSE: --", "ko")):
+            self.sb_rmse.setText(_tr("RMSE: --", lang))
 
         # AI assistant panel
         self.ai_prompt.setPlaceholderText(_tr("Enter a structural engineering question for the local AI assistant (Llama 3)...", lang))
