@@ -2726,63 +2726,100 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.plotter.render()
 
     def _render_warning_markers(self, sections, ref_sections=None) -> None:
-        """Overlay coloured disc markers on the 3D viewport at CRITICAL/CAUTION
-        section positions.  Red = CRITICAL, amber = CAUTION.  Existing markers
-        are cleared first so re-running is safe."""
+        """Place coloured flag-pole markers (sphere + stem + label) above each
+        CRITICAL/CAUTION section on the 3D viewport.  Much more visible than
+        thin discs: poles extend 1.5–2 m above the tunnel roof so they are
+        easy to spot even from a distance.  Click on the legend to toggle."""
         if self.plotter is None: return
         frames = self.context.frenet_frames
         if not frames or not sections: return
 
-        # Remove previous warning markers
-        for name in ("warn_markers_crit", "warn_markers_caut"):
-            try: self.plotter.remove_actor(name)
+        # Clear old markers (stems, balls, labels for both levels)
+        for nm in ("warn_stem_crit", "warn_stem_caut",
+                   "warn_ball_crit", "warn_ball_caut",
+                   "warn_lbl_crit",  "warn_lbl_caut"):
+            try: self.plotter.remove_actor(nm)
             except Exception: pass
 
-        ref_map: dict = {}
-        if ref_sections:
-            for rs in ref_sections:
-                ref_map[round(rs.chainage, 3)] = rs
+        ref_map = {round(rs.chainage, 3): rs for rs in (ref_sections or [])}
 
-        crit_centers, crit_radii, crit_normals = [], [], []
-        caut_centers, caut_radii, caut_normals = [], [], []
+        # Accumulate per-level geometry
+        data: dict = {
+            "CRITICAL": {"stems": [], "tops": [], "labels": [], "color": "#DC2626"},
+            "CAUTION":  {"stems": [], "tops": [], "labels": [], "color": "#D97706"},
+        }
 
         for i, sg in enumerate(sections):
-            ref = ref_map.get(round(sg.chainage, 3))
-            status, _ = section_warning_status(sg, ref)
-            if status == "OK": continue
+            ref    = ref_map.get(round(sg.chainage, 3))
+            status, issues = section_warning_status(sg, ref)
+            if status not in data: continue
 
             fr = frames[min(i, len(frames) - 1)]
             C  = np.asarray(fr["center"], dtype=np.float64)
-            T  = np.asarray(fr["T"],      dtype=np.float64)
-            r  = float(sg.radius_fit) if np.isfinite(getattr(sg, "radius_fit", float("nan"))) else 4.0
+            B  = np.asarray(fr["B"],      dtype=np.float64)   # vertical-up axis
+            r  = float(getattr(sg, "radius_fit", 4.0))
+            if not np.isfinite(r) or r <= 0: r = 4.0
 
-            if status == "CRITICAL":
-                crit_centers.append(C); crit_radii.append(r); crit_normals.append(T)
-            else:
-                caut_centers.append(C); caut_radii.append(r); caut_normals.append(T)
+            # Pole top = roof of tunnel + 1.5 m headroom
+            pole_top = C + B * (r + 1.5)
+
+            d = data[status]
+            d["stems"].extend([C, pole_top])
+            d["tops"].append(pole_top)
+            issue_txt = section_warning_text(issues, limit=2) if issues else status
+            d["labels"].append(f"Ch {sg.chainage:.1f}m\n{issue_txt}")
 
         import pyvista as _pv
 
-        def _add_rings(centers, radii, normals, color, name, opacity):
-            if not centers: return
-            blocks = _pv.MultiBlock()
-            for C, r, T in zip(centers, radii, normals):
-                disc = _pv.Disc(center=C, normal=T, inner=r * 0.92,
-                                outer=r * 1.08, r_res=1, c_res=48)
-                blocks.append(disc)
-            merged = blocks.combine()
-            self.plotter.add_mesh(merged, color=color, opacity=opacity,
-                                  style="surface", name=name, reset_camera=False)
+        def _build_lines(pts_flat: list) -> "_pv.PolyData":
+            """Build a PolyData with one line segment per pair of points."""
+            arr = np.array(pts_flat, dtype=np.float64).reshape(-1, 2, 3)
+            n   = len(arr)
+            all_pts = arr.reshape(-1, 3)
+            cells   = np.array([[2, i*2, i*2+1] for i in range(n)], dtype=np.int64).ravel()
+            pd = _pv.PolyData()
+            pd.points = all_pts
+            pd.lines  = cells
+            return pd
 
-        _add_rings(crit_centers, crit_radii, crit_normals,
-                   "#DC2626", "warn_markers_crit", 0.70)
-        _add_rings(caut_centers, caut_radii, caut_normals,
-                   "#D97706", "warn_markers_caut", 0.55)
+        n_crit = len(data["CRITICAL"]["tops"])
+        n_caut = len(data["CAUTION"]["tops"])
 
-        n_crit = len(crit_centers); n_caut = len(caut_centers)
+        for lvl, s_nm, b_nm, l_nm in [
+            ("CRITICAL", "warn_stem_crit", "warn_ball_crit", "warn_lbl_crit"),
+            ("CAUTION",  "warn_stem_caut", "warn_ball_caut", "warn_lbl_caut"),
+        ]:
+            d = data[lvl]
+            if not d["tops"]: continue
+            color = d["color"]
+
+            # Stem lines — thick and solid
+            stems_pd = _build_lines(d["stems"])
+            self.plotter.add_mesh(stems_pd, color=color, line_width=5,
+                                  name=s_nm, reset_camera=False)
+
+            # Spheres at pole tips
+            balls = _pv.MultiBlock(
+                [_pv.Sphere(radius=0.45, center=t) for t in d["tops"]])
+            self.plotter.add_mesh(balls.combine(), color=color,
+                                  name=b_nm, reset_camera=False)
+
+            # Text labels with white background box — always visible
+            try:
+                self.plotter.add_point_labels(
+                    np.array(d["tops"], dtype=np.float64), d["labels"],
+                    font_size=10, text_color="white",
+                    shape_color=color, shape_opacity=0.88,
+                    show_points=False, always_visible=True,
+                    name=l_nm, reset_camera=False)
+            except Exception:
+                pass   # add_point_labels API varies; silently skip labels
+
         if n_crit or n_caut:
             self.plotter.render()
-            self._log(f"3D warning markers: {n_crit} critical (red), {n_caut} caution (amber)")
+            self._log(
+                f"3D warning flags: {n_crit} critical (red pole), "
+                f"{n_caut} caution (amber pole) — visible above tunnel roof")
 
     def _render_bundle(self, b: PointCloudBundle, title: str) -> None:
         mesh = b.cloud or make_vertex_cloud(b.points, b.intensity, b.colors_raw); self._render_mesh(mesh, title)

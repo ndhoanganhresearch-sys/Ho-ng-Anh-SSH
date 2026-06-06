@@ -142,6 +142,75 @@ class CollapsibleSection(QtWidgets.QWidget):
 
 
 # ------------------------------------------------------------------------------
+# Warning track — thin painted bar showing which sections are critical/caution
+# ------------------------------------------------------------------------------
+
+class _WarningTrack(QtWidgets.QWidget):
+    """Thin bar below the slider showing coloured marks at warning-section positions.
+
+    CRITICAL sections → red dot   CAUTION sections → amber dot
+    Hover over a dot to see chainage + status in a tooltip.
+    """
+
+    jumped = QtCore.Signal(int)   # emits section index when user clicks a mark
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(14)
+        self.setMouseTracking(True)
+        self.setCursor(QtCore.Qt.PointingHandCursor)
+        self._marks: list = []   # list of (frac 0-1, color_hex, label, sec_idx)
+
+    def set_marks(self, marks: list) -> None:
+        self._marks = marks
+        self.update()
+
+    # ------------------------------------------------------------------
+    def paintEvent(self, event):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+
+        # Background track
+        p.fillRect(0, 0, w, h, QtGui.QColor("#E2E8F0"))
+
+        r = h // 2
+        for frac, color, _label, _idx in self._marks:
+            cx = int(frac * w)
+            cx = max(r, min(w - r, cx))
+            qc = QtGui.QColor(color)
+            p.setBrush(qc)
+            p.setPen(QtGui.QPen(qc.darker(140), 1))
+            p.drawEllipse(cx - r, 0, h, h)
+        p.end()
+
+    def mouseMoveEvent(self, event):
+        tip = self._hit(event.x())
+        if tip:
+            QtWidgets.QToolTip.showText(event.globalPos(), tip, self)
+        else:
+            QtWidgets.QToolTip.hideText()
+
+    def mousePressEvent(self, event):
+        idx = self._hit_idx(event.x())
+        if idx >= 0:
+            self.jumped.emit(idx)
+
+    def _hit(self, px: int) -> str:
+        w = max(self.width(), 1)
+        for frac, _color, label, _idx in self._marks:
+            if abs(int(frac * w) - px) <= 8:
+                return label
+        return ""
+
+    def _hit_idx(self, px: int) -> int:
+        w = max(self.width(), 1)
+        for frac, _color, _label, idx in self._marks:
+            if abs(int(frac * w) - px) <= 8:
+                return idx
+        return -1
+
+
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 
@@ -233,6 +302,19 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         slider_lay.addWidget(self._lbl_slider_val)
         lay.addWidget(slider_frame)
 
+        # Warning track — dots show warning-section positions along chainage
+        self._warn_track = _WarningTrack()
+        self._warn_track.jumped.connect(self._on_warn_jump)
+        self._warn_track.setToolTip("Red = CRITICAL  |  Amber = CAUTION  |  Click to jump to section")
+        lay.addWidget(self._warn_track)
+
+        # Warning banner — large coloured label for current section status
+        self._warn_banner = QtWidgets.QLabel()
+        self._warn_banner.setAlignment(QtCore.Qt.AlignCenter)
+        self._warn_banner.setMinimumHeight(34)
+        self._warn_banner.setVisible(False)
+        lay.addWidget(self._warn_banner)
+
         if _MPL_OK:
             self._fig = Figure(figsize=(7.5, 6.5), facecolor=_BG)
             self._ax  = self._fig.add_subplot(111)
@@ -312,7 +394,40 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
 
     def set_ref_sections(self, sections) -> None:
         self._ref_sections = sections
+        self._update_warn_track()
         self._refresh()
+
+    # ------------------------------------------------------------------
+    def _on_warn_jump(self, idx: int) -> None:
+        """Jump to a warning section when the user clicks its dot on the track."""
+        if 0 <= idx < len(self._sections):
+            self._idx = idx
+            if hasattr(self, "_slider_ch"):
+                self._slider_ch.setValue(idx)
+            self._refresh()
+
+    def _update_warn_track(self) -> None:
+        """Rebuild the warning track dots from current sections + ref_sections."""
+        if not self._sections:
+            self._warn_track.set_marks([])
+            return
+        n = len(self._sections)
+        ref_map = {round(rs.chainage, 3): rs for rs in self._ref_sections}
+        marks = []
+        for i, sg in enumerate(self._sections):
+            ref = ref_map.get(round(sg.chainage, 3))
+            status, issues = section_warning_status(sg, ref)
+            if status == "OK":
+                continue
+            frac = i / max(n - 1, 1)
+            color = "#DC2626" if status == "CRITICAL" else "#D97706"
+            try:
+                detail = section_warning_text(issues, limit=2)
+            except Exception:
+                detail = status
+            label = f"Ch {sg.chainage:.2f}m  [{status}]\n{detail}"
+            marks.append((frac, color, label, i))
+        self._warn_track.set_marks(marks)
 
     def _toggle_animation(self, checked: bool) -> None:
         if checked:
@@ -538,6 +653,8 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         if hasattr(self, "_slider_ch") and sections:
             self._slider_ch.setRange(0, len(sections) - 1)
             self._slider_ch.setValue(0)
+        self._ref_sections = []          # clear stale ref until set_ref_sections called
+        self._update_warn_track()
         self._refresh()
 
     def _draw_empty(self) -> None:
@@ -563,6 +680,25 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         ref_sg_info = None
         if self._ref_sections and self._idx < len(self._ref_sections):
             ref_sg_info = self._ref_sections[self._idx]
+        # Update warning banner for current section
+        if hasattr(self, "_warn_banner"):
+            _ws, _wi = section_warning_status(sg, ref_sg_info)
+            if _ws == "CRITICAL":
+                self._warn_banner.setText(
+                    f"  CRITICAL  —  Ch {sg.chainage:.2f} m  —  {section_warning_text(_wi, limit=3)}")
+                self._warn_banner.setStyleSheet(
+                    "background:#DC2626;color:white;font-weight:800;"
+                    "font-size:10.5pt;padding:6px 12px;")
+                self._warn_banner.setVisible(True)
+            elif _ws == "CAUTION":
+                self._warn_banner.setText(
+                    f"  CAUTION  —  Ch {sg.chainage:.2f} m  —  {section_warning_text(_wi, limit=3)}")
+                self._warn_banner.setStyleSheet(
+                    "background:#D97706;color:white;font-weight:800;"
+                    "font-size:10.5pt;padding:6px 12px;")
+                self._warn_banner.setVisible(True)
+            else:
+                self._warn_banner.setVisible(False)
         self._current_ref_sg = ref_sg_info
         ref_sg = None
         if hasattr(self, "_chk_overlay") and self._chk_overlay.isChecked():
