@@ -1,0 +1,25 @@
+{
+  "case_id": "case_02_local_deformation",
+  "purpose": "Local T0/Tn deformation: crown settlement, sidewall convergence, and invert heave around chainage 0 m.",
+  "t0_points": 7008,
+  "tn_points": 7008,
+  "truth": {
+    "expected_warning": true,
+    "warning_chainage_m": [
+      -6.0,
+      6.0
+    ],
+    "center_y": 0.0,
+    "sigma_y": 4.2,
+    "crown_mm": -80.0,
+    "sidewall_mm": -50.0,
+    "invert_mm": 15.0
+  },
+  "recommended_tests": [
+    "load T0/Tn",
+    "centerline extraction",
+    "section generation",
+    "deformation comparison",
+    "2D/3D warning visualization"
+  ]
+}

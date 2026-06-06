@@ -1,0 +1,17 @@
+{
+  "case_id": "case_01_clean_reference",
+  "purpose": "Clean circular tunnel for load, centerline, section fitting, and no-warning baseline.",
+  "t0_points": 7008,
+  "tn_points": 7008,
+  "truth": {
+    "expected_warning": false,
+    "max_deformation_mm": 0.0
+  },
+  "recommended_tests": [
+    "load T0/Tn",
+    "centerline extraction",
+    "section generation",
+    "deformation comparison",
+    "2D/3D warning visualization"
+  ]
+}

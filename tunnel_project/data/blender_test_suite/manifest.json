@@ -1,0 +1,144 @@
+{
+  "dataset": "blender_test_suite",
+  "created_by": "tools/create_blender_test_dataset.py",
+  "axis": "Y longitudinal, X lateral, Z vertical",
+  "units": "meters; deformation truth in millimeters",
+  "point_columns": "x y z r g b, plus optional intensity label for *_labels.txt",
+  "cases": [
+    {
+      "case_id": "case_01_clean_reference",
+      "purpose": "Clean circular tunnel for load, centerline, section fitting, and no-warning baseline.",
+      "t0_points": 7008,
+      "tn_points": 7008,
+      "truth": {
+        "expected_warning": false,
+        "max_deformation_mm": 0.0
+      },
+      "recommended_tests": [
+        "load T0/Tn",
+        "centerline extraction",
+        "section generation",
+        "deformation comparison",
+        "2D/3D warning visualization"
+      ]
+    },
+    {
+      "case_id": "case_02_local_deformation",
+      "purpose": "Local T0/Tn deformation: crown settlement, sidewall convergence, and invert heave around chainage 0 m.",
+      "t0_points": 7008,
+      "tn_points": 7008,
+      "truth": {
+        "expected_warning": true,
+        "warning_chainage_m": [
+          -6.0,
+          6.0
+        ],
+        "center_y": 0.0,
+        "sigma_y": 4.2,
+        "crown_mm": -80.0,
+        "sidewall_mm": -50.0,
+        "invert_mm": 15.0
+      },
+      "recommended_tests": [
+        "load T0/Tn",
+        "centerline extraction",
+        "section generation",
+        "deformation comparison",
+        "2D/3D warning visualization"
+      ]
+    },
+    {
+      "case_id": "case_03_noise_and_cables",
+      "purpose": "Denoising stress test with random outliers, interior false clusters, and a crown cable.",
+      "t0_points": 7008,
+      "tn_points": 8068,
+      "truth": {
+        "expected_noise_labels": [
+          2,
+          3
+        ],
+        "structure_label": 1,
+        "center_y": 12.0,
+        "sigma_y": 7.5,
+        "crown_mm": -25.0,
+        "sidewall_mm": -20.0,
+        "invert_mm": 5.0
+      },
+      "recommended_tests": [
+        "load T0/Tn",
+        "centerline extraction",
+        "section generation",
+        "deformation comparison",
+        "2D/3D warning visualization",
+        "clean noise",
+        "label-aware denoise scoring"
+      ]
+    },
+    {
+      "case_id": "case_04_clearance_intrusion",
+      "purpose": "Clearance/headroom test with a known intruding duct inside a 2.2 m gauge.",
+      "t0_points": 7008,
+      "tn_points": 8088,
+      "truth": {
+        "expected_clearance_violation": true,
+        "gauge_radius_m": 2.2,
+        "intruder_label": 4
+      },
+      "recommended_tests": [
+        "load T0/Tn",
+        "centerline extraction",
+        "section generation",
+        "deformation comparison",
+        "2D/3D warning visualization",
+        "clearance/headroom",
+        "warning sections"
+      ]
+    },
+    {
+      "case_id": "case_05_curved_centerline",
+      "purpose": "Curved and slightly graded tunnel for centerline, section frames, registration, and chainage ordering.",
+      "t0_points": 7008,
+      "tn_points": 7008,
+      "truth": {
+        "expected_curved_centerline": true,
+        "center_y": 12.0,
+        "sigma_y": 7.5,
+        "crown_mm": -25.0,
+        "sidewall_mm": -20.0,
+        "invert_mm": 5.0
+      },
+      "recommended_tests": [
+        "load T0/Tn",
+        "centerline extraction",
+        "section generation",
+        "deformation comparison",
+        "2D/3D warning visualization"
+      ]
+    },
+    {
+      "case_id": "case_06_occlusion_sparse",
+      "purpose": "Sparse/occluded tunnel arc to test robust section fitting and UI section display.",
+      "t0_points": 6441,
+      "tn_points": 6441,
+      "truth": {
+        "expected_occlusion": true,
+        "missing_arc_degrees": [
+          205,
+          285
+        ],
+        "center_y": 0.0,
+        "sigma_y": 4.2,
+        "crown_mm": -80.0,
+        "sidewall_mm": -50.0,
+        "invert_mm": 15.0
+      },
+      "recommended_tests": [
+        "load T0/Tn",
+        "centerline extraction",
+        "section generation",
+        "deformation comparison",
+        "2D/3D warning visualization"
+      ]
+    }
+  ]
+}

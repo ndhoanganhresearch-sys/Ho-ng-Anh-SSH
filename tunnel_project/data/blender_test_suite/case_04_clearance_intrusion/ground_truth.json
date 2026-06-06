@@ -1,0 +1,20 @@
+{
+  "case_id": "case_04_clearance_intrusion",
+  "purpose": "Clearance/headroom test with a known intruding duct inside a 2.2 m gauge.",
+  "t0_points": 7008,
+  "tn_points": 8088,
+  "truth": {
+    "expected_clearance_violation": true,
+    "gauge_radius_m": 2.2,
+    "intruder_label": 4
+  },
+  "recommended_tests": [
+    "load T0/Tn",
+    "centerline extraction",
+    "section generation",
+    "deformation comparison",
+    "2D/3D warning visualization",
+    "clearance/headroom",
+    "warning sections"
+  ]
+}

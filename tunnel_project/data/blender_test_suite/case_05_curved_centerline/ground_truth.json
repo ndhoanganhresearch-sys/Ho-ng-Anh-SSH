@@ -1,0 +1,21 @@
+{
+  "case_id": "case_05_curved_centerline",
+  "purpose": "Curved and slightly graded tunnel for centerline, section frames, registration, and chainage ordering.",
+  "t0_points": 7008,
+  "tn_points": 7008,
+  "truth": {
+    "expected_curved_centerline": true,
+    "center_y": 12.0,
+    "sigma_y": 7.5,
+    "crown_mm": -25.0,
+    "sidewall_mm": -20.0,
+    "invert_mm": 5.0
+  },
+  "recommended_tests": [
+    "load T0/Tn",
+    "centerline extraction",
+    "section generation",
+    "deformation comparison",
+    "2D/3D warning visualization"
+  ]
+}

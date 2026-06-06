@@ -1,0 +1,25 @@
+{
+  "case_id": "case_06_occlusion_sparse",
+  "purpose": "Sparse/occluded tunnel arc to test robust section fitting and UI section display.",
+  "t0_points": 6441,
+  "tn_points": 6441,
+  "truth": {
+    "expected_occlusion": true,
+    "missing_arc_degrees": [
+      205,
+      285
+    ],
+    "center_y": 0.0,
+    "sigma_y": 4.2,
+    "crown_mm": -80.0,
+    "sidewall_mm": -50.0,
+    "invert_mm": 15.0
+  },
+  "recommended_tests": [
+    "load T0/Tn",
+    "centerline extraction",
+    "section generation",
+    "deformation comparison",
+    "2D/3D warning visualization"
+  ]
+}
