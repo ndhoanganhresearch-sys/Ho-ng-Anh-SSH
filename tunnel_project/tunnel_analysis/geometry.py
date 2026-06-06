@@ -339,9 +339,22 @@ class GeometricLayer:
     def _tangents(pts: np.ndarray) -> np.ndarray:
         n = len(pts); T = np.empty_like(pts)
         T[1:-1] = pts[2:] - pts[:-2]; T[0] = pts[1] - pts[0]; T[-1] = pts[-1] - pts[-2]
-        norms = np.linalg.norm(T, axis=1, keepdims=True)
-        tiny = norms.ravel() < 1e-10
-        for i in np.where(tiny)[0]: nb = i - 1 if i > 0 else i + 1; T[i] = T[nb]
+        norms = np.linalg.norm(T, axis=1)
+        tiny = norms < 1e-10
+        if tiny.any():
+            good = np.where(~tiny)[0]
+            if len(good) == 0:
+                # Fully degenerate centerline (all points coincident): fall back
+                # to a global axis so downstream Frenet frames stay orthonormal
+                # instead of collapsing N/B to zero vectors.
+                T[:] = np.array([1.0, 0.0, 0.0])
+            else:
+                # Replace each degenerate tangent with the NEAREST non-degenerate
+                # one (not just the immediate neighbour, which may itself be
+                # tiny when two consecutive points coincide).
+                for i in np.where(tiny)[0]:
+                    j = int(good[np.argmin(np.abs(good - i))])
+                    T[i] = T[j]
         norms = np.linalg.norm(T, axis=1, keepdims=True); norms = np.where(norms < 1e-10, 1.0, norms)
         return T / norms
 
@@ -444,6 +457,16 @@ class GeometricLayer:
         span = float(ang.max() - ang.min())
         wrapped = (span > np.deg2rad(220)) or (n_occ >= 24)
         if n_occ < 20 or not wrapped:   # too little / one-sided coverage
+            # Partial / one-sided arc (typical of single-station scans): the
+            # algebraic circle fit extrapolates the centre, and the mass
+            # centroid wanders with the arc shape (the zig-zag the user sees).
+            # Estimate the centre from surface normals instead - each lining
+            # point's in-plane normal points radially at the axis, so the centre
+            # is the least-squares intersection of all the normal lines, which
+            # stays well-conditioned for any arc with a non-trivial span.
+            cn = self._center_from_normals(p2)
+            if cn is not None:
+                return c + float(cn[0]) * e1 + float(cn[1]) * e2
             return c
         # Least-squares circle fit (Kasa). On real tunnel rings this is far
         # more stable than RANSAC with a fixed tolerance, which on large-radius
@@ -460,6 +483,60 @@ class GeometricLayer:
         if np.linalg.norm(c2d) > spread:
             return c
         return c + float(c2d[0]) * e1 + float(c2d[1]) * e2
+
+    @staticmethod
+    def _center_from_normals(p2: np.ndarray):
+        """Centre of a (possibly partial) circular arc via least-squares
+        intersection of per-point surface normals.
+
+        On a cylindrical lining every point's in-plane normal points radially
+        toward the axis, so the section centre lies on each normal line. For a
+        one-sided single-station arc this is far more stable than algebraic
+        circle fitting (which extrapolates) or the mass centroid (which drifts
+        with the arc shape, producing the zig-zag centreline).
+
+        ``p2`` is the slice projected into the in-plane (e1, e2) basis, centred
+        on the slice centroid. Returns (cx, cy) in that basis, or None when the
+        arc is too narrow (normals near-parallel) or the result is not
+        circle-consistent.
+        """
+        n = len(p2)
+        if n < 12:
+            return None
+        # Order points along the arc by polar angle so a central difference
+        # gives a smooth local tangent; the normal is the 90 deg rotation.
+        ctr = p2.mean(axis=0)
+        ang = np.arctan2(p2[:, 1] - ctr[1], p2[:, 0] - ctr[0])
+        order = np.argsort(ang)
+        ps = p2[order]
+        tang = np.empty_like(ps)
+        tang[1:-1] = ps[2:] - ps[:-2]
+        tang[0]    = ps[1] - ps[0]
+        tang[-1]   = ps[-1] - ps[-2]
+        tn = np.linalg.norm(tang, axis=1, keepdims=True)
+        tang = tang / np.where(tn < 1e-12, 1.0, tn)
+        nrm = np.column_stack([-tang[:, 1], tang[:, 0]])      # 90 deg rotation
+        # Least-squares intersection of the lines {ps_i + t * nrm_i}:
+        #   minimise sum_i || (I - n_i n_i^T) (centre - ps_i) ||^2
+        #   => (sum_i P_i) centre = sum_i P_i ps_i,  P_i = I - n_i n_i^T
+        P = np.eye(2)[None] - nrm[:, :, None] * nrm[:, None, :]
+        M = P.sum(axis=0)
+        b = np.einsum("kij,kj->i", P, ps)
+        cond = np.linalg.cond(M)
+        if not np.isfinite(cond) or cond > 1e6:   # arc too narrow to localise
+            return None
+        try:
+            cxy = np.linalg.solve(M, b)
+        except np.linalg.LinAlgError:
+            return None
+        if not np.all(np.isfinite(cxy)):
+            return None
+        # Circle-consistency: radii to the estimated centre must be uniform.
+        rad = np.linalg.norm(p2 - cxy, axis=1)
+        r_mean = float(rad.mean())
+        if r_mean < 1e-6 or float(rad.std()) / r_mean > 0.25:
+            return None
+        return cxy
 
     @staticmethod
     def _lsq_c(pts):

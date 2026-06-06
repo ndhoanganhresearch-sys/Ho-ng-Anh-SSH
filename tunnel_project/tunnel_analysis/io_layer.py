@@ -17,7 +17,12 @@ def _read_las(fp: str, max_points: int = MAX_POINTS_DEFAULT) -> PointCloudBundle
     if laspy is None: raise RuntimeError("laspy not installed.")
     las = laspy.read(fp)
     total = len(las.x)
-    
+
+    # Always defined, regardless of which branch runs below, so the
+    # make_vertex_cloud(...) call cannot hit an unbound 'colors'.
+    colors = None
+    has_rgb = all(hasattr(las, c) for c in ("red", "green", "blue"))
+
     # Subsample if too large
     if total > max_points:
         step = max(1, total // max_points)
@@ -26,8 +31,7 @@ def _read_las(fp: str, max_points: int = MAX_POINTS_DEFAULT) -> PointCloudBundle
         y = np.asarray(las.y)[idx]
         z = np.asarray(las.z)[idx]
         intensity = np.asarray(las.intensity, dtype=np.float64)[idx] if hasattr(las, "intensity") else None
-        colors = None
-        if all(hasattr(las, c) for c in ("red", "green", "blue")):
+        if has_rgb:
             colors = np.vstack([np.asarray(las.red)[idx], np.asarray(las.green)[idx], np.asarray(las.blue)[idx]]).T.astype(np.float64)
         subsampled = True
     else:
@@ -35,24 +39,17 @@ def _read_las(fp: str, max_points: int = MAX_POINTS_DEFAULT) -> PointCloudBundle
         y = np.asarray(las.y)
         z = np.asarray(las.z)
         intensity = np.asarray(las.intensity, dtype=np.float64) if hasattr(las, "intensity") else None
-    # If intensity is all zeros but RGB exists, compute luminance as pseudo-intensity
-    if intensity is not None and float(intensity.max()) < 1e-6:
-        if all(hasattr(las, c) for c in ("red", "green", "blue")):
-            if total > max_points:
-                r_arr = np.asarray(las.red, dtype=np.float64)[idx]
-                g_arr = np.asarray(las.green, dtype=np.float64)[idx]
-                b_arr = np.asarray(las.blue, dtype=np.float64)[idx]
-            else:
-                r_arr = np.asarray(las.red, dtype=np.float64)
-                g_arr = np.asarray(las.green, dtype=np.float64)
-                b_arr = np.asarray(las.blue, dtype=np.float64)
-            luminance = 0.299*r_arr + 0.587*g_arr + 0.114*b_arr
-            if float(luminance.max()) > 1e-6:
-                intensity = luminance
-        colors = None
-        if all(hasattr(las, c) for c in ("red", "green", "blue")):
-            colors = np.vstack([las.red, las.green, las.blue]).T.astype(np.float64)
+        if has_rgb:
+            colors = np.vstack([np.asarray(las.red), np.asarray(las.green), np.asarray(las.blue)]).T.astype(np.float64)
         subsampled = False
+    # If intensity is all zeros but RGB exists, compute luminance as pseudo-
+    # intensity. `colors` is already set (row-aligned to the points) above, so
+    # we only derive luminance here and never re-read colors with a mismatched
+    # length.
+    if intensity is not None and has_rgb and float(intensity.max()) < 1e-6 and colors is not None:
+        luminance = 0.299 * colors[:, 0] + 0.587 * colors[:, 1] + 0.114 * colors[:, 2]
+        if float(luminance.max()) > 1e-6:
+            intensity = luminance
 
     pts = np.vstack([x, y, z]).T.astype(np.float64)
     pts = validate_xyz(pts, Path(fp).name)

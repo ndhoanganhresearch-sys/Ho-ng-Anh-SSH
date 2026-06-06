@@ -6,6 +6,8 @@ from .common import *
 from .models import PipelineContext
 from .headroom_adapter import optimize_prompt
 from pathlib import Path
+from urllib.parse import urlparse
+import os
 import json
 
 
@@ -80,15 +82,38 @@ SAFETY_STANDARDS = [
 class TunnelRAGAssistant:
     """RAG-enhanced AI assistant with tunnel safety knowledge base."""
 
-    OLLAMA_URL   = "http://localhost:11434/api/generate"
-    OLLAMA_MODEL = "llama3"
+    # Defaults; overridden per-instance by env vars in __init__ so that runtime
+    # / Docker environment changes are honoured (class-body reads would freeze
+    # the values at import time):
+    #   TUNNEL_OLLAMA_URL=http://localhost:11434/api/generate
+    #   TUNNEL_OLLAMA_MODEL=qwen2.5:3b
+    #   TUNNEL_CHROMA_HOST=http://localhost:8000  (Docker ChromaDB)
+    OLLAMA_URL_DEFAULT   = "http://localhost:11434/api/generate"
+    OLLAMA_MODEL_DEFAULT = "qwen2.5:3b"
     _TIMEOUT     = (5.0, 120.0)
     _DB_PATH     = str(Path.home() / ".tunnel_analysis" / "chroma_db")
 
     def __init__(self):
+        # Read env at instantiation, not import time.
+        self.OLLAMA_URL   = os.environ.get("TUNNEL_OLLAMA_URL",   self.OLLAMA_URL_DEFAULT)
+        self.OLLAMA_MODEL = os.environ.get("TUNNEL_OLLAMA_MODEL", self.OLLAMA_MODEL_DEFAULT)
+        self.CHROMA_HOST  = os.environ.get("TUNNEL_CHROMA_HOST",  "")   # set → Docker ChromaDB
         self._collection = None
         self._embedder   = None
         self._ready      = False
+
+    @staticmethod
+    def _parse_chroma_host(raw: str) -> tuple:
+        """Parse TUNNEL_CHROMA_HOST into (host, port), tolerating missing
+        scheme, https, trailing slash, and missing port. Defaults to port 8000
+        (ChromaDB default) when none is given."""
+        s = (raw or "").strip()
+        if "://" not in s:
+            s = "http://" + s
+        u = urlparse(s)
+        host = u.hostname or "localhost"
+        port = u.port or 8000
+        return host, int(port)
 
     def initialize(self) -> str:
         """Initialize ChromaDB + sentence-transformers embedder."""
@@ -99,8 +124,13 @@ class TunnelRAGAssistant:
             return "RAG dependencies missing: pip install chromadb sentence-transformers"
 
         try:
-            Path(self._DB_PATH).mkdir(parents=True, exist_ok=True)
-            client = chromadb.PersistentClient(path=self._DB_PATH)
+            # Dùng Docker ChromaDB nếu TUNNEL_CHROMA_HOST được set
+            if self.CHROMA_HOST:
+                host, port = self._parse_chroma_host(self.CHROMA_HOST)
+                client = chromadb.HttpClient(host=host, port=port)
+            else:
+                Path(self._DB_PATH).mkdir(parents=True, exist_ok=True)
+                client = chromadb.PersistentClient(path=self._DB_PATH)
             self._collection = client.get_or_create_collection(
                 name="tunnel_safety",
                 metadata={"hnsw:space": "cosine"})

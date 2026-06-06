@@ -1,13 +1,16 @@
 from .common import *
 from .models import PipelineContext
 from .headroom_adapter import optimize_prompt
+import os
 # ------------------------------------------------------------------------------
 # DigitalTwinAILayer
 # ------------------------------------------------------------------------------
 
 class DigitalTwinAILayer:
-    OLLAMA_URL   = "http://localhost:11434/api/generate"
-    OLLAMA_MODEL = "llama3"
+    # Honour the same env vars as TunnelRAGAssistant so both AI layers target
+    # the same locally-available model (default qwen2.5:3b, not llama3).
+    OLLAMA_URL   = os.environ.get("TUNNEL_OLLAMA_URL",   "http://localhost:11434/api/generate")
+    OLLAMA_MODEL = os.environ.get("TUNNEL_OLLAMA_MODEL", "qwen2.5:3b")
     _TIMEOUT     = (5.0, 120.0)
 
     def export_ifc(self, context: PipelineContext) -> Dict[str, object]:

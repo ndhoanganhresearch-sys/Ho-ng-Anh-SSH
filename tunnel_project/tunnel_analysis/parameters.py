@@ -24,7 +24,10 @@ class ParameterExtractionLayer:
     def calc_arch_settlement(self, context: PipelineContext) -> Dict[str, float]:
         """Crown settlement dv per PDF 3.5.
         Per-section: find crown point (max B-direction) in each Frenet section.
-        If T0 reference exists: dv = crown_Tn - crown_T0 (true displacement).
+        If T0 reference exists: dv = crown_T0 - crown_Tn (positive = downward
+        settlement). Sign matches the positive thresholds used in the offline
+        assessment and PDF report; a settling crown (lower B-projection at Tn)
+        yields a positive value that triggers caution/critical alarms.
         Returns mean/max settlement across all sections.
         """
         pts_n = self._req(context, "5.1")
@@ -56,7 +59,8 @@ class ParameterExtractionLayer:
                         b_proj_0 = (sl_0 - C) @ B
                         crown_0  = float(b_proj_0.max())
                         crown_0_list.append(crown_0)
-                        dv_list.append((crown_n - crown_0) * 1e3)
+                        # Positive = downward settlement (crown lower at Tn).
+                        dv_list.append((crown_0 - crown_n) * 1e3)
         # Fallback to global Z if no Frenet frames
         if not crown_n_list:
             z_n   = pts_n[:, 2]
@@ -507,64 +511,115 @@ class ParameterExtractionLayer:
             a = float(np.sqrt(max(ev.max(), 1e-9))); b = float(np.sqrt(max(ev.min(), 1e-9)))
             ovality = (a - b) / a * 100.0 if a > 1e-6 else float("nan")
         ecc = float(np.sqrt((cx - (x_min + x_max)/2.0)**2 + (cz - (z_min + z_max)/2.0)**2)) * 1e3
+        # Ovality and centroid-eccentricity are CIRCULAR-deformation metrics with
+        # circle-calibrated thresholds (0.5/1.0% and 10/25 mm). They are not
+        # meaningful for box / box-2-cell / u-type profiles: an ellipse fit to a
+        # rectangle always reads ~30-40% "ovality", and the centroid-vs-box-centre
+        # offset is dominated by uneven wall sampling. Report them as NaN for
+        # non-circular profiles so they are not falsely flagged CRITICAL; box/
+        # u-type distortion is captured instead by W/H deltas and wall angles.
+        if profile != "Circle":
+            ovality = float("nan")
+            ecc = float("nan")
         return dict(H1=H1, H2=H2, H3=H3, W1=W1, W2=W2, C1=C1, C2=C2, C3=C3,
                     wall_angle_L=wal, wall_angle_R=war, radius_fit=r_fit, ovality=ovality,
                     eccentricity=ecc, clearance_violation=clearance_violation,
                     min_clearance_dist=min_clearance_dist)
 
+    @staticmethod
+    def _profile_features(p2: np.ndarray) -> Optional[Dict[str, float]]:
+        """Shape features of one cross-section (2D points in the N-B plane,
+        x = N lateral, y = B vertical/up). Used by detect_profile."""
+        if len(p2) < 40:
+            return None
+        x, y = p2[:, 0], p2[:, 1]
+        w = float(x.max() - x.min()); h = float(y.max() - y.min())
+        if w < 1e-6 or h < 1e-6:
+            return None
+        # circle fit (Kasa) -> radial coefficient of variation
+        A = np.column_stack([x, y, np.ones(len(p2))])
+        b = x * x + y * y
+        try:
+            sol, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+        except Exception:
+            return None
+        cx, cy = sol[0] / 2.0, sol[1] / 2.0
+        R = float(np.sqrt(max(sol[2] + cx * cx + cy * cy, 1e-9)))
+        rad = np.hypot(x - cx, y - cy)
+        rad_cv = float(rad.std() / (rad.mean() + 1e-9))
+        # crown flatness: vertical span of the top 20% band, normalised by width
+        top = y > np.percentile(y, 80)
+        crown_flat = float((y[top].max() - y[top].min()) / w) if top.sum() > 10 else np.nan
+        # fraction of points sitting on the straight bbox edges (box/u-type high)
+        sx, sy = 0.08 * w, 0.08 * h
+        edge_frac = float((
+            (np.abs(x - x.min()) < sx) | (np.abs(x - x.max()) < sx) |
+            (np.abs(y - y.min()) < sy) | (np.abs(y - y.max()) < sy)
+        ).mean())
+        # central dividing wall (Box vs Box 2-cell): points in a central
+        # vertical band away from floor/crown
+        midx = 0.5 * (x.min() + x.max())
+        band = (y > np.percentile(y, 15)) & (y < np.percentile(y, 85))
+        center_band = float(((np.abs(x - midx) < 0.10 * w) & band).sum() / max(1, band.sum()))
+        return {"aspect": w / h, "rad_cv": rad_cv, "crown_flat": crown_flat,
+                "edge_frac": edge_frac, "center_band": center_band}
+
     def detect_profile(self, context: "PipelineContext") -> str:
         """Automatically infer the tunnel cross-section profile.
 
-        Samples a few cross-sections (using the existing Frenet frames),
-        projects each to 2D, and fits a circle. A circular tunnel leaves a
-        small radial residual relative to its radius; a box/rectangular bore
-        leaves a large one (corners deviate strongly from any circle). The
-        decision is the median normalised residual across the sampled sections.
+        Samples cross-sections via the Frenet frames and classifies the median
+        shape into one of TUNNEL_PROFILES (Circle / Box / Box 2-cell / U-type)
+        using a decision tree learned from the labelled data/sample_pcd dataset
+        (see learn_profile_shapes.py). Per-shape feature medians measured on
+        that dataset:
 
-        Returns one of TUNNEL_PROFILES ("Circle" or "Box"). Falls back to
-        "Circle" when there is not enough data to decide.
+            shape       aspect rad_cv crown_flat edge_frac center_band
+            Circle       1.44   0.13    0.046       0.73      0.003
+            Box          1.56   0.18    0.017       0.97      0.088
+            Box 2-cell   1.27   0.18    0.009       0.91      0.194
+            U-type       0.94   0.11    0.329       0.92      0.004
+
+        Falls back to "Circle" when there is not enough data to decide.
         """
         pts = context.working_points
         frames = context.frenet_frames
         if pts is None or not frames:
             return "Circle"
         pts = validate_xyz(pts)
-        idxs = np.linspace(0, len(frames) - 1, min(12, len(frames))).astype(int)
-        ratios = []
+        idxs = np.linspace(0, len(frames) - 1, min(16, len(frames))).astype(int)
+        feats: List[Dict[str, float]] = []
         for i in idxs:
             fr = frames[int(i)]
             C, T, N, B = fr["center"], fr["T"], fr["N"], fr["B"]
             sl = pts[np.abs((pts - C) @ T) < 0.05]
-            if len(sl) < 40:
-                continue
-            d = sl - C
-            p2 = np.column_stack([d @ N, d @ B])
-            x, y = p2[:, 0], p2[:, 1]
-            A = np.column_stack([x, y, np.ones(len(p2))])
-            b = x * x + y * y
-            try:
-                sol, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
-            except Exception:
-                continue
-            cx, cy = sol[0] / 2.0, sol[1] / 2.0
-            R = float(np.sqrt(max(sol[2] + cx * cx + cy * cy, 1e-9)))
-            if R < 1e-6:
-                continue
-            resid = np.abs(np.hypot(x - cx, y - cy) - R)
-            # Normalised RMS residual; corners of a box push this up sharply.
-            ratios.append(float(np.sqrt(np.mean(resid ** 2)) / R))
-        if not ratios:
+            f = self._profile_features(np.column_stack([(sl - C) @ N, (sl - C) @ B])) if len(sl) else None
+            if f is not None:
+                feats.append(f)
+        if not feats:
             return "Circle"
-        med = float(np.median(ratios))
-        # NOTE: circle-fit residual does NOT reliably separate Circle from Box
-        # on real scans. Measured on this project: an ideal synthetic circle is
-        # ~0.01 and an ideal box ~0.13, but a REAL circular tunnel (floor slab,
-        # sparse/occluded returns, residual noise) lands ~0.10 - overlapping the
-        # box range. With only circular ground truth available we cannot pick a
-        # safe split, so we default to Circle (correct for bored/shield tunnels
-        # like this dataset) and only flag Box on an unambiguously high residual
-        # to avoid ever misreading a circular bore as a box.
-        return "Box" if med >= 0.30 else "Circle"
+
+        def med(k):
+            vals = [f[k] for f in feats if np.isfinite(f[k])]
+            return float(np.median(vals)) if vals else np.nan
+
+        aspect      = med("aspect")
+        rad_cv      = med("rad_cv")
+        crown_flat  = med("crown_flat")
+        edge_frac   = med("edge_frac")
+        center_band = med("center_band")
+
+        # 1) U-type: open top / tall vertical walls. The reliable signal is a
+        # large crown band (top 20% of B spans a tall range because the walls
+        # are open at the top), NOT a low aspect ratio - a perfect circular bore
+        # also has aspect ~1.0, so keying U-type on aspect misreads circles.
+        if np.isfinite(crown_flat) and crown_flat > 0.15:
+            return "U-type"
+        # 2) Box family: flat crown + boxy radial spread + straight edges.
+        if (np.isfinite(crown_flat) and crown_flat < 0.030
+                and rad_cv > 0.150 and edge_frac > 0.85):
+            return "Box 2-cell" if center_band > 0.12 else "Box"
+        # 3) Otherwise a circular / shield bore.
+        return "Circle"
 
     def compute_all_sections(
         self, context: PipelineContext, vl_box_w: float, vl_box_h: float, vl_cir_r: float, epsilon: float = 0.05

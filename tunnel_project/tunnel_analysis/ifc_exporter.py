@@ -221,7 +221,21 @@ class TunnelIFCExporter:
         if include_components:
             self._export_components(ifc, body_ctx, storey, context)
 
-        ifc.write(str(path))
+        # Atomic write: serialise to a temp file in the same directory, then
+        # replace the target. A crash or disk-full mid-write never leaves a
+        # truncated/corrupt .ifc at the final path.
+        import os as _os
+        tmp = path.with_name(path.name + ".tmp")
+        try:
+            ifc.write(str(tmp))
+            _os.replace(str(tmp), str(path))
+        except Exception:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+            raise
         return str(path)
 
     def _export_components(self, ifc, body_ctx, storey, context):

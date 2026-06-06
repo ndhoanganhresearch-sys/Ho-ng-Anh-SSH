@@ -462,6 +462,11 @@ class PreprocessingLayer:
         # ---- Stage A: semantic / morphological classification --------------
         sem_noise = np.zeros(n_raw, dtype=bool)
         n_cable = n_light = n_person = 0
+        # Per-class masks are consumed in the return dict below; initialise them
+        # here so they exist even when Stage A is skipped (scipy/cKDTree absent).
+        is_cable  = np.zeros(n_raw, dtype=bool)
+        is_light  = np.zeros(n_raw, dtype=bool)
+        is_person = np.zeros(n_raw, dtype=bool)
         if cKDTree is not None:
             k = min(k_neighbors, n_raw - 1)
             tree = cKDTree(pts)
@@ -524,6 +529,22 @@ class PreprocessingLayer:
                 except Exception:
                     pass
 
+            # Sanity guard: each non-structural class can only be a small part
+            # of a real tunnel. If a shape gate flags an implausibly large
+            # fraction it is misfiring on clean/dense data (e.g. voxel-merged or
+            # already-curated scans where local patches mimic the target shape)
+            # and would strip the lining. Disable that class and warn instead of
+            # silently destroying the structure.
+            MAX_CLASS_FRAC = 0.30
+            if is_cable.mean() > MAX_CLASS_FRAC:
+                warnings.warn(f"Auto-denoise: cable gate flagged {100*is_cable.mean():.0f}% "
+                              f"(> {int(MAX_CLASS_FRAC*100)}%) - likely lining, disabled.")
+                is_cable = np.zeros(n_raw, dtype=bool)
+            if is_light.mean() > MAX_CLASS_FRAC:
+                warnings.warn(f"Auto-denoise: light gate flagged {100*is_light.mean():.0f}% "
+                              f"(> {int(MAX_CLASS_FRAC*100)}%) - likely lining, disabled.")
+                is_light = np.zeros(n_raw, dtype=bool)
+
             sem_noise = is_cable | is_light | is_person
             n_cable = int(is_cable.sum())
             n_light = int(is_light.sum())
@@ -577,6 +598,13 @@ class PreprocessingLayer:
                     pts, candidate, protrusion_thr=float(wall_protrusion_thr))
             except Exception as e:
                 warnings.warn(f"Wall-protrusion detection failed: {e}")
+                wall_noise = np.zeros(n_raw, dtype=bool)
+            # Same sanity guard as the shape gates: wall cables cannot be a huge
+            # fraction of the cloud. If the protrusion detector flags too much it
+            # is eating the curved lining itself (dense/merged data) - disable.
+            if wall_noise.mean() > 0.30:
+                warnings.warn(f"Auto-denoise: wall-cable gate flagged {100*wall_noise.mean():.0f}% "
+                              f"(> 30%) - likely lining, disabled.")
                 wall_noise = np.zeros(n_raw, dtype=bool)
 
         noise_mask = sem_noise | radial_noise | wall_noise

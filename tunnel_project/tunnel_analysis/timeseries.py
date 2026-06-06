@@ -89,12 +89,32 @@ class TimeSeriesLayer:
             dist_mm = np.asarray(dist, dtype=np.float64) * 1e3
             lod_mm = np.asarray(unc["lodetection"], dtype=np.float64) * 1e3
             significant = np.abs(dist_mm) > lod_mm
+
+            # Data-quality guard: a partial re-scan (e.g. Tn covers only the
+            # entrance) leaves most corepoints with no Tn neighbour inside
+            # cyl_radius, so M3C2 returns NaN there. The downstream nanmedian /
+            # nanpercentile would still report plausible-looking numbers from
+            # the few valid points, silently masking the degraded coverage.
+            quality_warning = None
+            n_total = dist_mm.size
+            nan_frac = float(np.isnan(dist_mm).mean()) if n_total else 1.0
+            ratio = max(src.shape[0], tgt.shape[0]) / max(1, min(src.shape[0], tgt.shape[0]))
+            if nan_frac > 0.5:
+                quality_warning = (f"M3C2: {nan_frac*100:.0f}% of corepoints have no Tn "
+                                   f"neighbour within {cyl_radius} m - coverage likely partial.")
+            elif ratio >= 10.0:
+                quality_warning = (f"M3C2: epoch point counts differ {ratio:.0f}x "
+                                   f"(T0={src.shape[0]:,}, Tn={tgt.shape[0]:,}) - "
+                                   f"results may be unreliable.")
+            if quality_warning:
+                warnings.warn(quality_warning)
             return {
                 "corepoints": cp,
                 "distance_mm": dist_mm,
                 "lod_mm": lod_mm,
                 "significant": significant,
                 "method": "M3C2",
+                "quality_warning": quality_warning,
             }
 
         return self._c2c_fallback(cp, tgt)

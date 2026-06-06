@@ -82,7 +82,10 @@ def _flatten_texts(value: Any) -> list[OCRBlock]:
                         score = None
                     blocks.append(OCRBlock(str(rec_text), score, bbox))
             text = node.get("text") or node.get("rec_text") or node.get("transcription")
-            score = node.get("score") or node.get("confidence") or node.get("rec_score")
+            # Use explicit None checks: a genuine confidence of 0.0 is falsy and
+            # an `or` chain would silently drop it for the next key.
+            score = next((node[k] for k in ("score", "confidence", "rec_score")
+                          if node.get(k) is not None), None)
             bbox = node.get("bbox") or node.get("points") or node.get("dt_polys")
             if text:
                 try:
