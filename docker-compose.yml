@@ -1,0 +1,58 @@
+services:
+
+  # ── Ollama (GPU) ──────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama
+    container_name: tunnel_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - OLLAMA_KEEP_ALIVE=5m   # tự tắt model sau 5 phút không dùng → tiết kiệm VRAM
+
+  # ── ChromaDB (RAG vector database) ───────────────────────────
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: tunnel_chromadb
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - CHROMA_SERVER_AUTH_CREDENTIALS=tunnel_secret
+      - CHROMA_SERVER_AUTH_PROVIDER=chromadb.auth.token.TokenAuthServerProvider
+
+  # ── Tunnel Analysis Pipeline (headless) ──────────────────────
+  tunnel:
+    build:
+      context: ./tunnel_project
+      dockerfile: Dockerfile
+    container_name: tunnel_pipeline
+    restart: unless-stopped
+    depends_on:
+      - ollama
+      - chromadb
+    environment:
+      - TUNNEL_OLLAMA_URL=http://ollama:11434/api/generate
+      - TUNNEL_OLLAMA_MODEL=qwen2.5:3b
+      - TUNNEL_CHROMA_HOST=http://chromadb:8000
+    volumes:
+      - ./tunnel_project:/app                  # live code sync
+      - tunnel_data:/data                      # point cloud data
+    profiles:
+      - pipeline   # chỉ chạy khi: docker compose --profile pipeline up
+
+volumes:
+  ollama_data:
+  chroma_data:
+  tunnel_data:

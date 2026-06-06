@@ -37,12 +37,15 @@ Thumbs.db
 *.bak
 _*.py
 _*.txt
+~$*.docx
+tunnel_project/i18n_missing_scan.txt
 
 # ---------------------------------------------------------------------------
 # Build / runtime output / Kết xuất khi chạy
 # ---------------------------------------------------------------------------
 *.png
 ssl_tunnel_view.png
+tunnel_project/data/blender_test_suite/benchmark_report.json
 
 # ---------------------------------------------------------------------------
 # Large point-cloud data / Dữ liệu point cloud lớn
@@ -50,6 +53,7 @@ ssl_tunnel_view.png
 *.las
 *.laz
 *.ply
+tunnel_project/data/sample_pcd/*.txt
 
 # ---------------------------------------------------------------------------
 # Generated merge artifacts / Tệp gộp sinh ra khi chạy

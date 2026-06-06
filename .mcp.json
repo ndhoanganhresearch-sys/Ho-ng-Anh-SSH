@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "blender": {
+      "command": "C:\\Users\\ssl\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\Scripts\\blender-mcp.exe",
+      "args": []
+    },
+    "headroom": {
+      "command": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\.venv\\Scripts\\headroom.exe",
+      "args": ["mcp", "serve"],
+      "env": {
+        "HEADROOM_MCP_READ": "on"
+      }
+    }
+  }
+}
