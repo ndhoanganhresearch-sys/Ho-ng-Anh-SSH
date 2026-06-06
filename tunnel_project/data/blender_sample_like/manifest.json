@@ -1,0 +1,46 @@
+{
+  "dataset": "blender_sample_like",
+  "created_by": "tools/create_blender_sample_like_dataset.py",
+  "purpose": "OS1/OS6-style field sample surrogate for load, denoise, centerline, section, and Step 6 testing.",
+  "units": "meters",
+  "columns": "x y z r g b",
+  "coordinates": {
+    "base_x": 748.8,
+    "base_y": -367.0,
+    "base_z": 3.1,
+    "axis": "Y/chainage"
+  },
+  "files": [
+    {
+      "name": "OS1_blender_tunnel_entire_10cm.txt",
+      "role": "T0/reference",
+      "header": false,
+      "points": 167430
+    },
+    {
+      "name": "OS6_blender_tunnel_entire_10cm.txt",
+      "role": "Tn/deformed",
+      "header": true,
+      "points": 167422
+    }
+  ],
+  "ground_truth": {
+    "local_deformation_center_chainage_m": 38.0,
+    "local_deformation_sigma_m": 6.0,
+    "crown_settlement_mm": -70.0,
+    "sidewall_convergence_per_side_mm": -45.0,
+    "scanner_bias_m": {
+      "x": 0.018,
+      "y": -0.011,
+      "z": 0.006
+    },
+    "expected_warning": true,
+    "expected_warning_chainage_m": [
+      28.0,
+      48.0
+    ],
+    "contains_cable_like_clutter": true,
+    "contains_random_outliers": true,
+    "contains_occlusion_band": true
+  }
+}
