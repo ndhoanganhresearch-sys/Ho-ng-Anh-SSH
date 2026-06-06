@@ -363,6 +363,31 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         tgt_tb_lay.addWidget(self._btn_target_register)
         tgt_lay.addWidget(tgt_tb)
 
+        # Second row: multi-station target workflow
+        tgt_tb2 = QtWidgets.QFrame()
+        tgt_tb2.setStyleSheet("QFrame{background:#064E3B;padding:2px;}")
+        tgt_tb2_lay = QtWidgets.QHBoxLayout(tgt_tb2)
+        tgt_tb2_lay.setContentsMargins(8, 3, 8, 3); tgt_tb2_lay.setSpacing(4)
+        self._btn_target_detect_all = QtWidgets.QPushButton("Detect All Stations")
+        self._btn_target_detect_all.setStyleSheet(
+            "QPushButton{background:#0F766E;color:white;border-radius:4px;"
+            "padding:3px 10px;font-weight:700;border:none;font-size:9pt;}"
+            "QPushButton:hover{background:#0D9488;}")
+        self._btn_target_detect_all.setToolTip(
+            "Auto-detect targets (sphere / checkerboard / intensity) in ALL loaded scan stations")
+        self._btn_target_merge = QtWidgets.QPushButton("Merge Stations")
+        self._btn_target_merge.setStyleSheet(
+            "QPushButton{background:#B45309;color:white;border-radius:4px;"
+            "padding:3px 10px;font-weight:700;border:none;font-size:9pt;}"
+            "QPushButton:hover{background:#D97706;}")
+        self._btn_target_merge.setToolTip(
+            "Chain-register all stations using matched targets (SVD + ICP refinement)")
+        self._btn_target_detect_all.clicked.connect(self._slot_target_detect_all)
+        self._btn_target_merge.clicked.connect(self._slot_target_merge_chain)
+        tgt_tb2_lay.addWidget(self._btn_target_detect_all, 1)
+        tgt_tb2_lay.addWidget(self._btn_target_merge, 1)
+        tgt_lay.addWidget(tgt_tb2)
+
         # Target table
         self._target_table = QtWidgets.QTableWidget(0, 7)
         self._target_table_headers_src = ["Name", "Type", "Scan", "X", "Y", "Z", "Conf"]
@@ -816,6 +841,43 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             for sid, tid, res in residuals:
                 status = "OK" if res < 2.0 else "CAUTION" if res < 5.0 else "POOR"
                 self._log(f"  {sid} <-> {tid}: {res:.3f} mm [{status}]")
+
+        elif key == "target_detect_all":
+            new_targets: List[Target] = result
+            self._targets.clear()
+            self._targets.extend(new_targets)
+            self._refresh_target_table()
+            self._render_target_markers()
+            for i in range(self.right_tabs.count()):
+                if self.right_tabs.tabText(i) == "Targets":
+                    self.right_tabs.setCurrentIndex(i); break
+            n_stations = len(set(t.scan_idx for t in new_targets)) if new_targets else 0
+            self._log(f"Detect All: {len(new_targets)} targets in {n_stations} station(s):")
+            for s in range(n_stations):
+                st = [t for t in new_targets if t.scan_idx == s]
+                n_sph = sum(1 for t in st if t.type == "sphere")
+                n_flt = sum(1 for t in st if t.type in ("flat", "checkerboard"))
+                n_ity = sum(1 for t in st if t.type == "intensity")
+                self._log(f"  Station {s+1}: {len(st)} targets  (sphere={n_sph} flat={n_flt} intensity={n_ity})")
+            if not new_targets:
+                self._log("  No targets found. Check scan intensity data.")
+
+        elif key == "target_merge_chain":
+            merged_pts, rmse_list = result
+            self.context.registered_points = merged_pts
+            self._render_pts(merged_pts, f"Target Chain: {len(rmse_list)} stations", "#10B981")
+            self.pt_label.setText(f"Points: {len(merged_pts):,}")
+            self.sb_pts.setText(f"Points: {len(merged_pts):,}")
+            avg_rmse = (sum(rmse_list[1:]) / max(1, len(rmse_list) - 1)) if len(rmse_list) > 1 else 0.0
+            rt = f"{avg_rmse:.3f} mm"
+            self.rmse_label.setText(f"RMSE: {rt}")
+            self.sb_rmse.setText(f"RMSE: {rt}")
+            self._log(f"Target chain registration: {len(rmse_list)} stations merged. Avg RMSE: {rt}")
+            self._log(f"  Station 1: reference (0.000 mm)")
+            for i, r in enumerate(rmse_list[1:], start=2):
+                status = "OK" if r < 2.0 else "CAUTION" if r < 5.0 else "POOR"
+                self._log(f"  Station {i}: RMSE = {r:.3f} mm [{status}]")
+
         elif key == "1.6_chain":
             pts, rmse_list = result
             self.context.registered_points = pts
@@ -1749,18 +1811,25 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             return pick_pt, None, 0.0
 
     def _slot_target_match(self) -> None:
-        """Auto-match targets between scan stations."""
-        if len(self.context.scans) < 2:
+        """Auto-match targets between consecutive scan stations (handles N stations)."""
+        n_scans = len(self.context.scans)
+        if n_scans < 2:
             self._log(_tr("Need at least 2 scan stations.", self.current_language)); return
-        src_t = [t for t in self._targets if t.scan_idx == 0]
-        tgt_t = [t for t in self._targets if t.scan_idx == 1]
-        if not src_t or not tgt_t:
-            self._log(_tr("Detect targets in both stations first.", self.current_language)); return
-        matches = self.tgt_mod.match_targets(src_t, tgt_t, max_dist=5.0)
+        if not self._targets:
+            self._log("No targets detected. Run 'Detect All Stations' first."); return
+        total_matches = 0
+        for i in range(n_scans - 1):
+            src_t = [t for t in self._targets if t.scan_idx == i]
+            tgt_t = [t for t in self._targets if t.scan_idx == i + 1]
+            if not src_t or not tgt_t:
+                self._log(f"  No targets in S{i+1} or S{i+2}. Run 'Detect All Stations' first.")
+                continue
+            matches = self.tgt_mod.match_targets(src_t, tgt_t, max_dist=5.0)
+            total_matches += len(matches)
+            for st, tt, d in matches:
+                self._log(f"  S{i+1}.{st.name} <-> S{i+2}.{tt.name}  dist={d:.3f}m")
         self._refresh_target_table()
-        self._log(f"Auto-matched {len(matches)} target pairs:")
-        for st, tt, d in matches:
-            self._log(f"  {st.name} <-> {tt.name}  dist={d:.3f}m")
+        self._log(f"Auto Match: {total_matches} pairs across {n_scans-1} station pair(s).")
 
     def _slot_target_register(self) -> None:
         """Register scans using matched targets."""
@@ -1777,6 +1846,102 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 reg_pts = None
             return T, rmse, residuals, reg_pts
         self._start_worker("target_register", _task)
+
+    def _slot_target_detect_all(self) -> None:
+        """Detect targets in ALL loaded scan stations at once."""
+        if not self.context.scans:
+            self._log("Load scan stations first."); return
+        n = len(self.context.scans)
+        self._log(f"Detecting targets in {n} scan station(s) ...")
+        self._targets.clear()
+        self._refresh_target_table()
+        def _task():
+            import numpy as _np
+            from tunnel_analysis.models import PointCloudBundle as _PCB
+            all_targets = []
+            MAX_DET = 100_000
+            for i, scan in enumerate(self.context.scans):
+                pts = scan.points
+                intensity = scan.intensity
+                if len(pts) > MAX_DET:
+                    step = max(1, len(pts) // MAX_DET)
+                    pts_d = pts[::step]
+                    int_d = intensity[::step] if intensity is not None else None
+                else:
+                    pts_d = pts; int_d = intensity
+                b_det = _PCB(points=pts_d, intensity=int_d, path=scan.path)
+                found = self.tgt_mod.detect_all(
+                    b_det, scan_idx=i,
+                    detect_sphere=True, detect_flat=True, detect_intensity=True)
+                all_targets.extend(found)
+            return all_targets
+        self._start_worker("target_detect_all", _task)
+
+    def _slot_target_merge_chain(self) -> None:
+        """Chain-register all scan stations using matched targets + ICP refinement."""
+        n_scans = len(self.context.scans)
+        if n_scans < 2:
+            self._log("Need at least 2 scan stations."); return
+        n_matched = sum(1 for t in self._targets if t.matched_id)
+        if n_matched < 6:
+            self._log(
+                "Not enough matched targets (need >= 6). "
+                "Run 'Detect All Stations' → 'Auto Match' first."); return
+        self._hdr("Target-based Chain Registration",
+                  "SVD from targets per station pair, refined with surface ICP.")
+        targets_snap = list(self._targets)
+        scans_snap   = list(self.context.scans)
+        reg_mod      = self.reg_mod
+        tgt_mod      = self.tgt_mod
+
+        def _task():
+            import numpy as _np
+            merged_clouds = [validate_xyz(scans_snap[0].points)]
+            rmse_list     = [0.0]
+            for i in range(len(scans_snap) - 1):
+                # --- collect matched target pairs for this station pair ---
+                src_t  = [t for t in targets_snap if t.scan_idx == i and t.matched_id]
+                nxt_t  = {t.id: t for t in targets_snap if t.scan_idx == i + 1}
+                m_src  = [t for t in src_t if t.matched_id in nxt_t]
+                m_tgt  = [nxt_t[t.matched_id] for t in m_src]
+
+                src_pts  = validate_xyz(scans_snap[i + 1].points)
+                ref_cloud = merged_clouds[i]            # growing reference cloud
+
+                if len(m_src) >= 3:
+                    # SVD coarse alignment from target correspondences
+                    sc = _np.array([t.center for t in m_src], dtype=_np.float64)
+                    tc = _np.array([t.center for t in m_tgt], dtype=_np.float64)
+                    T_svd, _ = tgt_mod._horn_svd(sc, tc)
+                    ones = _np.ones((len(src_pts), 1))
+                    src_coarse = (T_svd @ _np.hstack([src_pts, ones]).T).T[:, :3]
+                else:
+                    # Fall back to intensity anchor
+                    src_coarse = reg_mod._coarse_align(
+                        src_pts, ref_cloud,
+                        src_intensity=scans_snap[i + 1].intensity,
+                        tgt_intensity=scans_snap[i].intensity)
+
+                # ICP fine refinement against the growing merged cloud
+                try:
+                    src_reg, rmse = reg_mod._icp(src_coarse, ref_cloud)
+                except Exception:
+                    src_reg = src_coarse
+                    try:
+                        from scipy.spatial import cKDTree as _kd
+                        step = max(1, len(src_reg) // 100_000)
+                        d, _ = _kd(ref_cloud).query(src_reg[::step], k=1, workers=-1)
+                        rmse = float(_np.sqrt(_np.mean(d ** 2))) * 1000.0
+                    except Exception:
+                        rmse = 0.0
+
+                merged_clouds.append(src_reg)
+                rmse_list.append(rmse)
+
+            merged = _np.vstack(merged_clouds)
+            return validate_xyz(merged), rmse_list
+
+        self._start_worker("target_merge_chain", _task)
 
     def _refresh_target_table(self) -> None:
         """Update target table widget."""
