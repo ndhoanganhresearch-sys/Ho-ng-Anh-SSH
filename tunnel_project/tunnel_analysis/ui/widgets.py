@@ -4,6 +4,20 @@ from ..models import SectionGeometry
 SECTION_DELTA_CAUTION_MM = 10.0
 SECTION_DELTA_CRITICAL_MM = 25.0
 
+def _directed_delta_label(label: str, delta: float) -> str:
+    """Return a section-delta label that explains the sign of the change."""
+    if label == "dW":
+        return "convergence dW" if delta < 0 else "expansion dW"
+    if label == "dH":
+        return "clearance loss dH" if delta < 0 else "height gain dH"
+    if label == "dR":
+        return "radius loss dR" if delta < 0 else "radius gain dR"
+    if label == "dOval":
+        return "ovality change dOval"
+    if label == "dEcc":
+        return "eccentricity change dEcc"
+    return label
+
 
 def section_warning_status(sg: SectionGeometry, ref_sg: SectionGeometry = None):
     """Classify risk. With T0 available, compare Tn against T0 baseline."""
@@ -28,22 +42,23 @@ def section_warning_status(sg: SectionGeometry, ref_sg: SectionGeometry = None):
             b = getattr(ref_sg, attr, float("nan"))
             if np.isfinite(a) and np.isfinite(b):
                 delta_mm = (a - b) * 1e3
+                directed = _directed_delta_label(label, delta_mm)
                 if abs(delta_mm) >= SECTION_DELTA_CRITICAL_MM:
-                    add("CRITICAL", label, delta_mm, "mm")
+                    add("CRITICAL", directed, delta_mm, "mm")
                 elif abs(delta_mm) >= SECTION_DELTA_CAUTION_MM:
-                    add("CAUTION", label, delta_mm, "mm")
+                    add("CAUTION", directed, delta_mm, "mm")
         if np.isfinite(sg.ovality) and np.isfinite(ref_sg.ovality):
             d_oval = sg.ovality - ref_sg.ovality
             if abs(d_oval) >= 1.0:
-                add("CRITICAL", "dOval", d_oval, "%")
+                add("CRITICAL", _directed_delta_label("dOval", d_oval), d_oval, "%")
             elif abs(d_oval) >= 0.5:
-                add("CAUTION", "dOval", d_oval, "%")
+                add("CAUTION", _directed_delta_label("dOval", d_oval), d_oval, "%")
         if np.isfinite(sg.eccentricity) and np.isfinite(ref_sg.eccentricity):
             d_ecc = sg.eccentricity - ref_sg.eccentricity
             if abs(d_ecc) >= 25.0:
-                add("CRITICAL", "dEcc", d_ecc, "mm")
+                add("CRITICAL", _directed_delta_label("dEcc", d_ecc), d_ecc, "mm")
             elif abs(d_ecc) >= 10.0:
-                add("CAUTION", "dEcc", d_ecc, "mm")
+                add("CAUTION", _directed_delta_label("dEcc", d_ecc), d_ecc, "mm")
     else:
         if np.isfinite(sg.ovality):
             if abs(sg.ovality) >= 1.0:
@@ -323,142 +338,147 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         self._canvas.draw_idle()
 
     def _show_info_dialog(self) -> None:
-        """Show section parameters in clean readable dialog."""
+        """Show section parameters grouped by engineering purpose."""
         sg = getattr(self, "_current_sg", None)
         if sg is None:
-            if not self._sections: return
+            if not self._sections:
+                return
             sg = self._sections[self._idx]
         ref_sg = getattr(self, "_current_ref_sg", None)
         warn_status, warn_issues = section_warning_status(sg, ref_sg)
-        import numpy as _np
+        tr = self._translate
+
+        def finite(value: float) -> bool:
+            return np.isfinite(value)
+
+        def fmt_m(value: float) -> str:
+            return f"{value:.4f} m" if finite(value) else "N/A"
+
+        def fmt_mm(value: float, signed: bool = False) -> str:
+            if not finite(value):
+                return "N/A"
+            return f"{value:+.2f} mm" if signed else f"{value:.2f} mm"
+
+        def fmt_pct(value: float, signed: bool = False) -> str:
+            if not finite(value):
+                return "N/A"
+            return f"{value:+.4f} %" if signed else f"{value:.4f} %"
+
+        def delta_mm(attr: str) -> float:
+            if ref_sg is None:
+                return float("nan")
+            a = getattr(sg, attr, float("nan"))
+            b = getattr(ref_sg, attr, float("nan"))
+            return (a - b) * 1e3 if finite(a) and finite(b) else float("nan")
+
+        def value_color(is_warn: bool) -> str:
+            return "#DC2626" if is_warn else "#0F172A"
+
         dlg = QtWidgets.QDialog(self.parent() if self.parent() else self)
         title_prefix = "Section Info  |  T0 vs Tn" if ref_sg is not None else "Section Info"
         dlg.setWindowTitle(title_prefix + "  |  Ch. " + f"{sg.chainage:.3f} m")
-        dlg.setMinimumWidth(380)
+        dlg.setMinimumWidth(520)
         lay = QtWidgets.QVBoxLayout(dlg)
-        lay.setSpacing(0); lay.setContentsMargins(0,0,0,0)
+        lay.setSpacing(0)
+        lay.setContentsMargins(0, 0, 0, 0)
+
         hdr = QtWidgets.QFrame()
         hdr.setStyleSheet("QFrame{background:#0F4C81;padding:10px;}")
-        hl = QtWidgets.QVBoxLayout(hdr); hl.setContentsMargins(16,10,16,10)
+        hl = QtWidgets.QVBoxLayout(hdr)
+        hl.setContentsMargins(16, 10, 16, 10)
         t1 = QtWidgets.QLabel("Chainage: " + f"{sg.chainage:.3f} m")
         t1.setStyleSheet("color:white;font-size:14pt;font-weight:bold;background:transparent;")
-        t2 = QtWidgets.QLabel("Profile: " + self._profile)
+        mode = "T0 vs Tn comparison" if ref_sg is not None else "single-scan geometry"
+        t2 = QtWidgets.QLabel(f"Profile: {self._profile}   |   Mode: {mode}")
         t2.setStyleSheet("color:#CBD5E1;font-size:10pt;background:transparent;")
-        hl.addWidget(t1); hl.addWidget(t2); lay.addWidget(hdr)
-        grid = QtWidgets.QWidget()
-        grid.setStyleSheet("QWidget{background:#F8FAFC;}")
-        gl = QtWidgets.QGridLayout(grid)
-        gl.setContentsMargins(16,12,16,12); gl.setSpacing(8)
-        # (label, value, tooltip/description)
-        rows = [
-            ("H1  Clear Height",
-             f"{sg.H1:.4f} m" if _np.isfinite(sg.H1) else "N/A",
-             "Vertical clearance from floor to crown (total internal height)"),
-            ("W1  Clear Width",
-             f"{sg.W1:.4f} m" if _np.isfinite(sg.W1) else "N/A",
-             "Horizontal clearance between left and right walls (internal width)"),
-            ("H2  Crown Height",
-             f"{sg.H2:.4f} m" if _np.isfinite(sg.H2) else "N/A",
-             "Height from springline to crown (upper arch height)"),
-            ("H3  Invert Height",
-             f"{sg.H3:.4f} m" if _np.isfinite(sg.H3) else "N/A",
-             "Height from floor to springline (lower section height)"),
-            ("W2  Base Width",
-             f"{sg.W2:.4f} m" if _np.isfinite(sg.W2) else "N/A",
-             "Width at floor level (base width)"),
-            ("R   Fitted Radius",
-             f"{sg.radius_fit:.4f} m" if _np.isfinite(sg.radius_fit) else "N/A",
-             "Best-fit circle radius to section points (design radius comparison)"),
-            ("epsilon  Ovality",
-             f"{sg.ovality:.4f} %" if _np.isfinite(sg.ovality) else "N/A",
-             "Shape distortion: (a-b)/a x 100% where a=major, b=minor semi-axis. Caution>0.5%, Critical>1.0%"),
-            ("e  Eccentricity",
-             f"{sg.eccentricity:.2f} mm" if _np.isfinite(sg.eccentricity) else "N/A",
-             "Distance between measured center and design center |C_meas - C_design|. Caution>10mm, Critical>25mm"),
-            ("Clearance Min",
-             f"{sg.min_clearance_dist:.4f} m" if _np.isfinite(sg.min_clearance_dist) else "N/A",
-             "Minimum distance from tunnel surface to vehicle clearance envelope. Negative = violation"),
-            ("Angle L  Wall-Floor",
-             f"{sg.wall_angle_L:.2f} deg" if _np.isfinite(sg.wall_angle_L) else "N/A",
-             "Angle between left wall and floor (90 deg = perfectly vertical wall)"),
-            ("Angle R  Wall-Floor",
-             f"{sg.wall_angle_R:.2f} deg" if _np.isfinite(sg.wall_angle_R) else "N/A",
-             "Angle between right wall and floor (90 deg = perfectly vertical wall)"),
+        hl.addWidget(t1)
+        hl.addWidget(t2)
+        lay.addWidget(hdr)
+
+        body = QtWidgets.QWidget()
+        body.setStyleSheet("QWidget{background:#F8FAFC;}")
+        body_lay = QtWidgets.QVBoxLayout(body)
+        body_lay.setContentsMargins(14, 10, 14, 10)
+        body_lay.setSpacing(8)
+
+        def add_group(title: str, rows: list[tuple[str, str, str, bool]]) -> None:
+            box = QtWidgets.QGroupBox(title)
+            box.setStyleSheet(
+                "QGroupBox{font-weight:700;color:#1E3A5F;border:1px solid #CBD5E1;"
+                "border-radius:6px;margin-top:8px;padding-top:8px;background:#FFFFFF;}"
+                "QGroupBox::title{subcontrol-origin:margin;left:10px;padding:0 4px;}")
+            grid = QtWidgets.QGridLayout(box)
+            grid.setContentsMargins(12, 10, 12, 10)
+            grid.setHorizontalSpacing(12)
+            grid.setVerticalSpacing(6)
+            for i, (label, value, tip, is_warn) in enumerate(rows):
+                l = QtWidgets.QLabel(label)
+                l.setStyleSheet("color:#64748B;font-size:9pt;font-weight:600;background:transparent;")
+                l.setToolTip(tip)
+                v = QtWidgets.QLabel(value)
+                v.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+                v.setStyleSheet(
+                    f"color:{value_color(is_warn)};font-size:10pt;font-weight:800;"
+                    "font-family:monospace;background:transparent;")
+                v.setToolTip(tip)
+                grid.addWidget(l, i, 0)
+                grid.addWidget(v, i, 1)
+            body_lay.addWidget(box)
+
+        if warn_issues:
+            issue_rows = []
+            for level, label, value, unit in warn_issues:
+                value_txt = fmt_pct(value, signed=True) if unit == "%" else fmt_mm(value, signed=True)
+                issue_rows.append((f"{level}  {label}", value_txt, "This item triggered the section warning.", True))
+            add_group("Warning drivers", issue_rows)
+
+        geometry_rows = [
+            ("H1  Clear height", fmt_m(sg.H1), "Vertical clearance from floor to crown.", False),
+            ("W1  Clear width", fmt_m(sg.W1), "Horizontal clearance between left and right walls.", False),
+            ("R   Fitted radius", fmt_m(sg.radius_fit), "Best-fit section radius.", False),
+            ("Ovality", fmt_pct(sg.ovality), "Shape distortion. Caution >= 0.5%, critical >= 1.0%.", finite(sg.ovality) and abs(sg.ovality) >= 0.5),
+            ("Eccentricity", fmt_mm(sg.eccentricity), "Measured center offset. Caution >= 10 mm, critical >= 25 mm.", finite(sg.eccentricity) and abs(sg.eccentricity) >= 10.0),
         ]
+        add_group("Current section geometry", geometry_rows)
+
+        shape_rows = [
+            ("H2  Crown height", fmt_m(sg.H2), "Upper arch height from springline to crown.", False),
+            ("H3  Invert height", fmt_m(sg.H3), "Lower section height from floor to springline.", False),
+            ("W2  Base width", fmt_m(sg.W2), "Width near floor/base level.", False),
+            ("Angle L", f"{sg.wall_angle_L:.2f} deg" if finite(sg.wall_angle_L) else "N/A", "Left wall-floor angle.", False),
+            ("Angle R", f"{sg.wall_angle_R:.2f} deg" if finite(sg.wall_angle_R) else "N/A", "Right wall-floor angle.", False),
+        ]
+        add_group("Shape details", shape_rows)
+
         if ref_sg is not None:
-            rows += [
-                ("T0 W1  Clear Width",
-                 f"{ref_sg.W1:.4f} m" if _np.isfinite(ref_sg.W1) else "N/A",
-                 "Baseline T0 horizontal clearance width"),
-                ("T0 H1  Clear Height",
-                 f"{ref_sg.H1:.4f} m" if _np.isfinite(ref_sg.H1) else "N/A",
-                 "Baseline T0 vertical clearance height"),
-                ("T0 R   Fitted Radius",
-                 f"{ref_sg.radius_fit:.4f} m" if _np.isfinite(ref_sg.radius_fit) else "N/A",
-                 "Baseline T0 fitted section radius"),
-                ("Delta W1  Tn-T0",
-                 f"{(sg.W1 - ref_sg.W1) * 1e3:+.2f} mm" if _np.isfinite(sg.W1) and _np.isfinite(ref_sg.W1) else "N/A",
-                 "Change in clear width between Tn and T0"),
-                ("Delta H1  Tn-T0",
-                 f"{(sg.H1 - ref_sg.H1) * 1e3:+.2f} mm" if _np.isfinite(sg.H1) and _np.isfinite(ref_sg.H1) else "N/A",
-                 "Change in clear height between Tn and T0"),
-                ("Delta R   Tn-T0",
-                 f"{(sg.radius_fit - ref_sg.radius_fit) * 1e3:+.2f} mm" if _np.isfinite(sg.radius_fit) and _np.isfinite(ref_sg.radius_fit) else "N/A",
-                 "Change in fitted radius between Tn and T0"),
-                ("Delta Ovality  Tn-T0",
-                 f"{(sg.ovality - ref_sg.ovality):+.4f} %" if _np.isfinite(sg.ovality) and _np.isfinite(ref_sg.ovality) else "N/A",
-                 "Change in ovality between Tn and T0"),
-                ("Delta Eccentricity  Tn-T0",
-                 f"{(sg.eccentricity - ref_sg.eccentricity):+.2f} mm" if _np.isfinite(sg.eccentricity) and _np.isfinite(ref_sg.eccentricity) else "N/A",
-                 "Change in eccentricity between Tn and T0"),
+            dw = delta_mm("W1")
+            dh = delta_mm("H1")
+            dr = delta_mm("radius_fit")
+            d_oval = sg.ovality - ref_sg.ovality if finite(sg.ovality) and finite(ref_sg.ovality) else float("nan")
+            d_ecc = sg.eccentricity - ref_sg.eccentricity if finite(sg.eccentricity) and finite(ref_sg.eccentricity) else float("nan")
+            comparison_rows = [
+                ("T0 W1", fmt_m(ref_sg.W1), "Baseline clear width.", False),
+                ("Tn-T0 W1", fmt_mm(dw, signed=True), "Negative means convergence / reduced width.", finite(dw) and abs(dw) >= SECTION_DELTA_CAUTION_MM),
+                ("T0 H1", fmt_m(ref_sg.H1), "Baseline clear height.", False),
+                ("Tn-T0 H1", fmt_mm(dh, signed=True), "Negative means clearance loss / settlement.", finite(dh) and abs(dh) >= SECTION_DELTA_CAUTION_MM),
+                ("T0 R", fmt_m(ref_sg.radius_fit), "Baseline fitted radius.", False),
+                ("Tn-T0 R", fmt_mm(dr, signed=True), "Negative means radius shrinkage.", finite(dr) and abs(dr) >= SECTION_DELTA_CAUTION_MM),
+                ("Tn-T0 ovality", fmt_pct(d_oval, signed=True), "Change in section ovality.", finite(d_oval) and abs(d_oval) >= 0.5),
+                ("Tn-T0 eccentricity", fmt_mm(d_ecc, signed=True), "Change in measured center offset.", finite(d_ecc) and abs(d_ecc) >= 10.0),
             ]
-        for i,(lbl,val,tip) in enumerate(rows):
-            # Label with tooltip
-            l = QtWidgets.QLabel(lbl)
-            l.setStyleSheet("color:#64748B;font-size:9.5pt;font-weight:600;")
-            l.setToolTip(tip)
-            # Value
-            v = QtWidgets.QLabel(val)
-            warn = False
-            if "Ovality" in lbl and val != "N/A":
-                try:
-                    warn = float(val.replace("%","").strip()) >= 0.5
-                except Exception: pass
-            if "Eccentricity" in lbl and val != "N/A":
-                try:
-                    warn = float(val.replace("mm","").strip()) >= 10.0
-                except Exception: pass
-            if "Clearance" in lbl and val != "N/A":
-                try:
-                    warn = float(val.replace("m","").strip()) < 0
-                except Exception: pass
-            color = "#DC2626" if warn else "#0F172A"
-            v.setStyleSheet(f"color:{color};font-size:10.5pt;font-weight:bold;font-family:monospace;")
-            v.setToolTip(tip)
-            # Info icon
-            info_lbl = QtWidgets.QLabel("?")
-            info_lbl.setStyleSheet(
-                "color:#94A3B8;font-size:8pt;font-weight:bold;"
-                "background:#F1F5F9;border-radius:8px;padding:1px 5px;")
-            info_lbl.setToolTip(tip)
-            gl.addWidget(l, i, 0)
-            gl.addWidget(v, i, 1, QtCore.Qt.AlignRight)
-            gl.addWidget(info_lbl, i, 2)
-        lay.addWidget(grid)
-        sf = QtWidgets.QFrame()
-        bg = "#FEE2E2" if warn_status == "CRITICAL" else ("#FEF3C7" if warn_status == "CAUTION" else "#D1FAE5")
-        bc = "#DC2626" if warn_status == "CRITICAL" else ("#D97706" if warn_status == "CAUTION" else "#047857")
-        sf.setStyleSheet(
-            f"QFrame{{background:{bg};border-top-width:2px;border-top-style:solid;"
-            f"border-top-color:{bc};padding:8px;}}")
-        sl = QtWidgets.QHBoxLayout(sf); sl.setContentsMargins(16,8,16,8)
-        st = f"{warn_status} - {section_warning_text(warn_issues)}" if warn_status != "OK" else "OK - Within Limits"
-        slbl = QtWidgets.QLabel(st)
-        slbl.setStyleSheet(f"color:{bc};font-size:12pt;font-weight:bold;background:transparent;")
-        sl.addWidget(slbl); lay.addWidget(sf)
-        btn = QtWidgets.QPushButton(self._translate("Close"))
+            add_group("T0/Tn comparison", comparison_rows)
+
+        clearance_rows = [
+            ("Clearance min", fmt_m(sg.min_clearance_dist), "Minimum distance to vehicle clearance envelope. Negative means violation.", sg.clearance_violation),
+            ("Status", warn_status if warn_status != "OK" else "OK - Within Limits", section_warning_text(warn_issues), warn_status != "OK"),
+        ]
+        add_group("Safety", clearance_rows)
+
+        lay.addWidget(body)
+        btn = QtWidgets.QPushButton(tr("Close"))
         btn.setStyleSheet("QPushButton{background:#0F4C81;color:white;border-radius:0;padding:10px;font-weight:700;font-size:10pt;border:none;}QPushButton:hover{background:#1D4ED8;}")
-        btn.clicked.connect(dlg.accept); lay.addWidget(btn)
+        btn.clicked.connect(dlg.accept)
+        lay.addWidget(btn)
         dlg.exec()
 
     def _open_fullscreen(self) -> None:
@@ -926,35 +946,26 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
 
         # Title block moved to Info dialog button
         self._current_sg = sg
-        # ── Info panel below plot ──────────────────────────────────────────
         if hasattr(self, "_info_label"):
-            parts = [f"Ch:{sg.chainage:.2f}m"]
-            if np.isfinite(sg.W1): parts.append(f"W1={sg.W1:.3f}m")
-            if np.isfinite(sg.H1): parts.append(f"H1={sg.H1:.3f}m")
-            if np.isfinite(sg.ovality): parts.append(f"ε={sg.ovality:.2f}%")
-            if np.isfinite(sg.eccentricity): parts.append(f"e={sg.eccentricity:.1f}mm")
-            if np.isfinite(sg.min_clearance_dist): parts.append(f"Clr={sg.min_clearance_dist:.3f}m")
-            if self._profile=="Circle" and np.isfinite(sg.radius_fit): parts.append(f"R={sg.radius_fit:.3f}m")
-            if sg.clearance_violation: parts.append("⚠ VIOLATION")
-            color = "#DC2626" if sg.clearance_violation else "#0F172A"
-            self._info_label.setStyleSheet(
-                f"color:{color}; font-family:monospace; font-size:9pt; "
-                f"padding:4px 8px; background:#F8FAFC; border-top:1px solid #CBD5E1;")
-            self._info_label.setText("   |   ".join(parts))
-
-            parts = [f"Ch:{sg.chainage:.2f}m", "Tn"]
-            if np.isfinite(sg.W1): parts.append(f"W1={sg.W1:.3f}m")
-            if np.isfinite(sg.H1): parts.append(f"H1={sg.H1:.3f}m")
-            if np.isfinite(sg.ovality): parts.append(f"Oval={sg.ovality:.2f}%")
-            if np.isfinite(sg.eccentricity): parts.append(f"e={sg.eccentricity:.1f}mm")
-            if np.isfinite(sg.min_clearance_dist): parts.append(f"Clr={sg.min_clearance_dist:.3f}m")
-            if self._profile == "Circle" and np.isfinite(sg.radius_fit): parts.append(f"R={sg.radius_fit:.3f}m")
             ref_info = getattr(self, "_current_ref_sg", None)
+            parts = []
+            if warn_status != "OK":
+                parts.append(f"{warn_status}: {section_warning_text(warn_issues)}")
+            parts.append(f"Ch:{sg.chainage:.2f}m")
+            parts.append("Tn")
+            if np.isfinite(sg.W1):
+                parts.append(f"W1={sg.W1:.3f}m")
+            if np.isfinite(sg.H1):
+                parts.append(f"H1={sg.H1:.3f}m")
+            if self._profile == "Circle" and np.isfinite(sg.radius_fit):
+                parts.append(f"R={sg.radius_fit:.3f}m")
+            if np.isfinite(sg.ovality):
+                parts.append(f"Oval={sg.ovality:.2f}%")
+            if np.isfinite(sg.eccentricity):
+                parts.append(f"e={sg.eccentricity:.1f}mm")
+            if np.isfinite(sg.min_clearance_dist):
+                parts.append(f"Clr={sg.min_clearance_dist:.3f}m")
             if ref_info is not None:
-                ref_parts = ["T0"]
-                if np.isfinite(ref_info.W1): ref_parts.append(f"W1={ref_info.W1:.3f}m")
-                if np.isfinite(ref_info.H1): ref_parts.append(f"H1={ref_info.H1:.3f}m")
-                if self._profile == "Circle" and np.isfinite(ref_info.radius_fit): ref_parts.append(f"R={ref_info.radius_fit:.3f}m")
                 delta_parts = []
                 if np.isfinite(sg.W1) and np.isfinite(ref_info.W1):
                     delta_parts.append(f"dW={(sg.W1 - ref_info.W1) * 1e3:+.1f}mm")
@@ -966,16 +977,14 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                     delta_parts.append(f"dOval={sg.ovality - ref_info.ovality:+.2f}%")
                 if np.isfinite(sg.eccentricity) and np.isfinite(ref_info.eccentricity):
                     delta_parts.append(f"dEcc={sg.eccentricity - ref_info.eccentricity:+.1f}mm")
-                parts.append(" | ".join(ref_parts))
                 if delta_parts:
                     parts.append("Delta " + " ".join(delta_parts))
-            if warn_status != "OK":
-                parts.append(f"{warn_status} {section_warning_text(warn_issues)}")
-            self._info_label.setText("   |   ".join(parts))
             color = "#DC2626" if warn_status == "CRITICAL" else ("#D97706" if warn_status == "CAUTION" else "#0F172A")
             self._info_label.setStyleSheet(
                 f"color:{color}; font-family:monospace; font-size:9pt; "
-                f"padding:4px 8px; background:#F8FAFC; border-top:1px solid #CBD5E1;")
+                "padding:4px 8px; background:#F8FAFC; "
+                "border-top-width:1px; border-top-style:solid; border-top-color:#CBD5E1;")
+            self._info_label.setText("   |   ".join(parts))
 
         self._fig.tight_layout(pad=0.55)
         self._canvas.draw_idle()
