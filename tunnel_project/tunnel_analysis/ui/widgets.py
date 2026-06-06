@@ -831,6 +831,15 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                     color=banner_color, fontsize=8.2, fontweight="bold",
                     bbox=dict(facecolor=banner_bg, edgecolor=banner_color,
                               boxstyle="round,pad=0.25", alpha=0.95), zorder=10)
+            # Colour the plot border to match warning level
+            spine_lw = 3.0 if warn_status == "CRITICAL" else 2.0
+            for sp in ax.spines.values():
+                sp.set_color(banner_color); sp.set_linewidth(spine_lw)
+            self._fig.patch.set_facecolor(banner_bg)
+        else:
+            for sp in ax.spines.values():
+                sp.set_color("#888888"); sp.set_linewidth(0.8)
+            self._fig.patch.set_facecolor("#FFFFFF")
 
         # ── Limits & aspect ────────────────────────────────────────────────
         if self._profile == "Circle":

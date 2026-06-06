@@ -1120,6 +1120,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             ref_secs = getattr(self, "_section_ref_sections", []) or []
             self.dashboard_widget.update_sections(
                 sections, ref_secs, profile=self.context.tunnel_profile or "Circle")
+            # Overlay coloured warning rings on 3D viewport.
+            self._render_warning_markers(sections, ref_secs)
             valid = [s for s in sections if s.pts_2d is not None]
             self._log(_tr("--- 2D technical cross-section analysis ---", self.current_language))
             self._log(f"  Total section slices analyzed along the alignment: {len(sections)}")
@@ -1952,6 +1954,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             except Exception: pass
         self.results_text.clear()
         self.dashboard_widget.clear()
+        # Remove 3D warning markers
+        if self.plotter:
+            for _nm in ("warn_markers_crit", "warn_markers_caut"):
+                try: self.plotter.remove_actor(_nm)
+                except Exception: pass
         self.pt_label.setText("Points: --")
         self.sb_pts.setText("Points: --")
         self.sb_msg.setText(_tr("Pipeline reset. Raw scans preserved.", self.current_language))
@@ -2713,6 +2720,65 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self.plotter.add_lines(ln, color=col, width=3, connected=True, name=nm)
 
         self.plotter.render()
+
+    def _render_warning_markers(self, sections, ref_sections=None) -> None:
+        """Overlay coloured disc markers on the 3D viewport at CRITICAL/CAUTION
+        section positions.  Red = CRITICAL, amber = CAUTION.  Existing markers
+        are cleared first so re-running is safe."""
+        if self.plotter is None: return
+        frames = self.context.frenet_frames
+        if not frames or not sections: return
+
+        # Remove previous warning markers
+        for name in ("warn_markers_crit", "warn_markers_caut"):
+            try: self.plotter.remove_actor(name)
+            except Exception: pass
+
+        ref_map: dict = {}
+        if ref_sections:
+            for rs in ref_sections:
+                ref_map[round(rs.chainage, 3)] = rs
+
+        crit_centers, crit_radii, crit_normals = [], [], []
+        caut_centers, caut_radii, caut_normals = [], [], []
+
+        for i, sg in enumerate(sections):
+            ref = ref_map.get(round(sg.chainage, 3))
+            status, _ = section_warning_status(sg, ref)
+            if status == "OK": continue
+
+            fr = frames[min(i, len(frames) - 1)]
+            C  = np.asarray(fr["center"], dtype=np.float64)
+            T  = np.asarray(fr["T"],      dtype=np.float64)
+            r  = float(sg.radius_fit) if np.isfinite(getattr(sg, "radius_fit", float("nan"))) else 4.0
+
+            if status == "CRITICAL":
+                crit_centers.append(C); crit_radii.append(r); crit_normals.append(T)
+            else:
+                caut_centers.append(C); caut_radii.append(r); caut_normals.append(T)
+
+        import pyvista as _pv
+
+        def _add_rings(centers, radii, normals, color, name, opacity):
+            if not centers: return
+            blocks = _pv.MultiBlock()
+            for C, r, T in zip(centers, radii, normals):
+                disc = _pv.Disc(center=C, normal=T, inner=r * 0.92,
+                                outer=r * 1.08, r_res=1, c_res=48)
+                blocks.append(disc)
+            merged = blocks.combine()
+            self.plotter.add_mesh(merged, color=color, opacity=opacity,
+                                  style="surface", name=name, reset_camera=False)
+
+        _add_rings(crit_centers, crit_radii, crit_normals,
+                   "#DC2626", "warn_markers_crit", 0.70)
+        _add_rings(caut_centers, caut_radii, caut_normals,
+                   "#D97706", "warn_markers_caut", 0.55)
+
+        n_crit = len(crit_centers); n_caut = len(caut_centers)
+        if n_crit or n_caut:
+            self.plotter.render()
+            self._log(f"3D warning markers: {n_crit} critical (red), {n_caut} caution (amber)")
 
     def _render_bundle(self, b: PointCloudBundle, title: str) -> None:
         mesh = b.cloud or make_vertex_cloud(b.points, b.intensity, b.colors_raw); self._render_mesh(mesh, title)
