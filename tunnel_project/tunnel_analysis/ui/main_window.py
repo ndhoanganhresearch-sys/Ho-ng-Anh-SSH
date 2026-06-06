@@ -2278,7 +2278,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if not self.context.sections and not self.context.parameters:
             self._log(_tr("Run parameter extraction first (Step 5).", self.current_language)); return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save CSV", "tunnel_report.csv", "CSV Files (*.csv)")
+            self, _tr("Save CSV", self.current_language), "tunnel_report.csv", "CSV Files (*.csv)")
         if not path: return
         self._start_worker("8.1_csv", lambda: self.exp_mod.export_csv(self.context, path))
 
@@ -2287,7 +2287,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if not self.context.sections and not self.context.parameters:
             self._log(_tr("Run parameter extraction first (Step 5).", self.current_language)); return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save Excel Report", "tunnel_report.xlsx", "Excel Files (*.xlsx)")
+            self, _tr("Save Excel Report", self.current_language), "tunnel_report.xlsx", "Excel Files (*.xlsx)")
         if not path: return
         scan = self.context.active_scan
         proj = scan.path if scan and scan.path else "Tunnel Analysis"
@@ -2319,7 +2319,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if not self.context.sections and not self.context.parameters:
             self._log(_tr("Run parameter extraction first (Step 5).", self.current_language)); return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save PDF Report", "tunnel_report.pdf", "PDF Files (*.pdf)")
+            self, _tr("Save PDF Report", self.current_language), "tunnel_report.pdf", "PDF Files (*.pdf)")
         if not path: return
         scan = self.context.active_scan
         proj = scan.path if scan and scan.path else "Tunnel Analysis"
@@ -2329,7 +2329,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _slot_7_1_ifc(self) -> None:
         self._hdr("IFC/BIM Export (IFC4)", "Export tunnel geometry and parameters to IFC4 format.")
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save IFC Model", "tunnel_model.ifc", "IFC Files (*.ifc)")
+            self, _tr("Save IFC Model", self.current_language), "tunnel_model.ifc", "IFC Files (*.ifc)")
         if not path: return
         scan = self.context.active_scan
         proj = scan.path if scan and scan.path else "Tunnel Analysis"
@@ -2339,7 +2339,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _slot_7_1b_ifc_alignment(self) -> None:
         self._hdr("IFC4X3 Export (IfcAlignment)", "Export with the centerline as an IfcAlignment (infrastructure linear-referencing standard).")
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save IFC4X3 Model", "tunnel_model_4x3.ifc", "IFC Files (*.ifc)")
+            self, _tr("Save IFC4X3 Model", self.current_language), "tunnel_model_4x3.ifc", "IFC Files (*.ifc)")
         if not path: return
         scan = self.context.active_scan
         proj = scan.path if scan and scan.path else "Tunnel Analysis"
@@ -2352,7 +2352,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if not self.context.component_points:
             self._log(_tr("Run auto-denoise (Step 2.5) first to detect components.", self.current_language)); return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save IFC Model with Components", "tunnel_model_components.ifc", "IFC Files (*.ifc)")
+            self, _tr("Save IFC Model with Components", self.current_language), "tunnel_model_components.ifc", "IFC Files (*.ifc)")
         if not path: return
         scan = self.context.active_scan
         proj = scan.path if scan and scan.path else "Tunnel Analysis"
@@ -3226,6 +3226,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             sec.set_translation(_tr(sec.title_source, lang), step_word)
             sec.retranslate_buttons(lambda t: _tr(t, lang))
 
+        if hasattr(self, "section_widget") and hasattr(self.section_widget, "retranslate"):
+            self.section_widget.retranslate(lambda t: _tr(t, lang))
+        if hasattr(self, "dashboard_widget") and hasattr(self.dashboard_widget, "retranslate"):
+            self.dashboard_widget.retranslate(lambda t: _tr(t, lang))
+
         # Header task title/description (retranslate from stored English source)
         self.task_title.setText(_tr(self._hdr_title_src, lang))
         self.task_desc.setText(_tr(self._hdr_desc_src, lang))
@@ -3241,6 +3246,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 if cur == src_title or cur in (_tr(src_title, "vi"), _tr(src_title, "ko")):
                     self.right_tabs.setTabText(i, _tr(src_title, lang))
                     break
+
+        self.param_table.setHorizontalHeaderLabels([
+            _tr("Parameter", lang), _tr("Value", lang),
+            _tr("Unit", lang), _tr("Status", lang)])
+        self.meta_table.setHorizontalHeaderLabels([
+            _tr("Property", lang), _tr("Value", lang)])
 
         # AI assistant panel
         self.ai_prompt.setPlaceholderText(_tr("Enter a structural engineering question for the local AI assistant (Llama 3)...", lang))

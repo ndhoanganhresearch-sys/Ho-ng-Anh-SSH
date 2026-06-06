@@ -195,7 +195,8 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         slider_frame.setStyleSheet("QFrame{background:#F1F5F9;border-bottom:1px solid #E2E8F0;padding:2px;}")
         slider_lay = QtWidgets.QHBoxLayout(slider_frame)
         slider_lay.setContentsMargins(8, 2, 8, 2); slider_lay.setSpacing(6)
-        lbl_slider = QtWidgets.QLabel("Ch:")
+        self._lbl_slider_ch = QtWidgets.QLabel("Ch:")
+        lbl_slider = self._lbl_slider_ch
         lbl_slider.setStyleSheet("color:#475569;font-size:8.5pt;")
         self._slider_ch = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self._slider_ch.setRange(0, 0)
@@ -232,13 +233,16 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
             self._toolbar.setIconSize(QtCore.QSize(16, 16))
             lay.addWidget(self._toolbar)
         else:
-            lay.addWidget(QtWidgets.QLabel("Matplotlib is required for 2D cross-section plotting."))
+            self._mpl_missing_label = QtWidgets.QLabel("Matplotlib is required for 2D cross-section plotting.")
+            lay.addWidget(self._mpl_missing_label)
         # Epoch overlay + animation controls
         ctrl = QtWidgets.QHBoxLayout(); ctrl.setSpacing(6)
         self._chk_overlay = QtWidgets.QCheckBox("Show T0 overlay")
         self._chk_overlay.setStyleSheet("color:#0F172A;font-size:9pt;font-weight:600;")
         self._chk_overlay.setToolTip("Overlay reference epoch T0 on current section")
         self._chk_overlay.toggled.connect(self._refresh)
+        self._anim_label = "Animate"
+        self._stop_label = "Stop"
         self._btn_anim = QtWidgets.QPushButton("▶ Animate")
         self._btn_anim.setStyleSheet(
             "QPushButton{background:#7C3AED;color:white;border-radius:5px;"
@@ -265,6 +269,26 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         lay.addWidget(self._info_label, 0)
         self._draw_empty()
 
+    def retranslate(self, translate: Callable[[str], str]) -> None:
+        """Update static 2D-section widget labels when the app language changes."""
+        self._anim_label = translate("Animate")
+        self._stop_label = translate("Stop")
+        self._btn_prev.setText("\u25C0 " + translate("Prev"))
+        self._btn_next.setText(translate("Next") + " \u25B6")
+        self._btn_reset.setText("\u27F3 " + translate("Zoom"))
+        self._btn_reset.setToolTip(translate("Reset zoom (R)"))
+        self._btn_info.setText("\u24d8 " + translate("Info"))
+        self._btn_info.setToolTip(translate("Show section parameters"))
+        self._lbl_slider_ch.setText(translate("Ch:"))
+        self._chk_overlay.setText(translate("Show T0 overlay"))
+        self._chk_overlay.setToolTip(translate("Overlay reference epoch T0 on current section"))
+        self._btn_anim.setText(("⏹ " + self._stop_label) if self._btn_anim.isChecked() else ("▶ " + self._anim_label))
+        self._btn_anim.setToolTip(translate("Animate deformation T0 -> Tn"))
+        if hasattr(self, "_mpl_missing_label"):
+            self._mpl_missing_label.setText(translate("Matplotlib is required for 2D cross-section plotting."))
+        if not self._sections:
+            self._info_label.setText(translate("Run Step 6.3 to display section parameters."))
+
     def set_ref_sections(self, sections) -> None:
         self._ref_sections = sections
         self._refresh()
@@ -272,9 +296,9 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
     def _toggle_animation(self, checked: bool) -> None:
         if checked:
             self._anim_alpha = 0.0; self._anim_dir = 1
-            self._btn_anim.setText("⏹ Stop"); self._anim_timer.start()
+            self._btn_anim.setText("⏹ " + self._stop_label); self._anim_timer.start()
         else:
-            self._anim_timer.stop(); self._btn_anim.setText("▶ Animate"); self._refresh()
+            self._anim_timer.stop(); self._btn_anim.setText("▶ " + self._anim_label); self._refresh()
 
     def _anim_step(self) -> None:
         self._anim_alpha += 0.05 * self._anim_dir
@@ -1181,12 +1205,12 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
         outer.addWidget(info_frame)
 
         # Section alerts table (worst 8)
-        alerts_box = QtWidgets.QGroupBox("Section Alerts (worst 8)")
-        alerts_box.setStyleSheet(
+        self._alerts_box = QtWidgets.QGroupBox("Section Alerts (worst 8)")
+        self._alerts_box.setStyleSheet(
             "QGroupBox{font-weight:600;color:#1E3A5F;border:1px solid #CBD5E1;"
             "border-radius:6px;margin-top:8px;padding-top:4px;}"
             "QGroupBox::title{subcontrol-origin:margin;left:10px;}")
-        alerts_lay = QtWidgets.QVBoxLayout(alerts_box)
+        alerts_lay = QtWidgets.QVBoxLayout(self._alerts_box)
         alerts_lay.setContentsMargins(4, 4, 4, 4)
         self._alerts_table = QtWidgets.QTableWidget(0, 4)
         self._alerts_table.setHorizontalHeaderLabels(
@@ -1203,16 +1227,26 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
             "QHeaderView::section{background:#E2E8F0;color:#334155;padding:4px;"
             "font-weight:600;font-size:8.5pt;border:none;border-bottom:1px solid #CBD5E1;}")
         alerts_lay.addWidget(self._alerts_table)
-        outer.addWidget(alerts_box)
+        outer.addWidget(self._alerts_box)
 
         # Refresh button
-        refresh_btn = QtWidgets.QPushButton("Refresh Dashboard")
-        refresh_btn.setStyleSheet(
+        self._refresh_btn = QtWidgets.QPushButton("Refresh Dashboard")
+        self._refresh_btn.setStyleSheet(
             "QPushButton{background:#1D4ED8;color:white;border:none;border-radius:6px;"
             "padding:6px 16px;font-weight:700;}"
             "QPushButton:hover{background:#2563EB;}")
-        refresh_btn.clicked.connect(self._refresh)
-        outer.addWidget(refresh_btn, 0, QtCore.Qt.AlignRight)
+        self._refresh_btn.clicked.connect(self._refresh)
+        outer.addWidget(self._refresh_btn, 0, QtCore.Qt.AlignRight)
+
+    def retranslate(self, translate: Callable[[str], str]) -> None:
+        """Update static dashboard labels when the app language changes."""
+        self._translate = translate
+        self._alerts_box.setTitle(translate("Section Alerts (worst 8)"))
+        self._alerts_table.setHorizontalHeaderLabels([
+            translate("Chainage"), translate("Status"),
+            translate("Issues"), translate("Details")])
+        self._refresh_btn.setText(translate("Refresh Dashboard"))
+        self._refresh()
 
     # ------------------------------------------------------------------
     @staticmethod
