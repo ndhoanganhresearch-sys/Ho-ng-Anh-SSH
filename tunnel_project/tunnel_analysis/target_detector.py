@@ -311,18 +311,48 @@ class TargetDetector:
     def match_targets(
         self, src_targets: List[Target], tgt_targets: List[Target],
         max_dist: float = 2.0, same_type: bool = True,
+        centroid_align: bool = True,
     ) -> List[Tuple[Target, Target, float]]:
-        matches = []; used = set()
+        """Match targets between two stations by nearest-neighbour.
+
+        centroid_align=True (default): pre-shifts the *target* station by
+        (centroid_src − centroid_tgt) before computing distances.  This makes
+        matching robust when the two stations are far apart along the tunnel
+        axis — without alignment a simple NN search would pick wrong pairs.
+        The SVD / ICP step later uses the *original* (unshifted) coordinates.
+        """
+        if not src_targets or not tgt_targets:
+            return []
+
+        # ── centroid pre-alignment ────────────────────────────────────────
+        if centroid_align:
+            src_c = np.array([t.center for t in src_targets if t.center is not None],
+                             dtype=np.float64)
+            tgt_c = np.array([t.center for t in tgt_targets if t.center is not None],
+                             dtype=np.float64)
+            shift = (src_c.mean(0) - tgt_c.mean(0)
+                     if len(src_c) and len(tgt_c) else np.zeros(3))
+        else:
+            shift = np.zeros(3)
+
+        matches: List[Tuple[Target, Target, float]] = []
+        used: set = set()
         for st in src_targets:
-            if st.center is None: continue
+            if st.center is None:
+                continue
             best_d, best_tt = max_dist, None
             for tt in tgt_targets:
-                if tt.id in used or tt.center is None: continue
-                if same_type and st.type != tt.type: continue
-                d = float(np.linalg.norm(st.center - tt.center))
-                if d < best_d: best_d = d; best_tt = tt
-            if best_tt:
-                st.matched_id = best_tt.id; best_tt.matched_id = st.id
+                if tt.id in used or tt.center is None:
+                    continue
+                if same_type and st.type != tt.type:
+                    continue
+                # distance in centroid-aligned space
+                d = float(np.linalg.norm(st.center - (tt.center + shift)))
+                if d < best_d:
+                    best_d = d; best_tt = tt
+            if best_tt is not None:
+                st.matched_id = best_tt.id
+                best_tt.matched_id = st.id
                 used.add(best_tt.id)
                 matches.append((st, best_tt, best_d))
         return matches

@@ -1896,33 +1896,57 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
         def _task():
             import numpy as _np
-            merged_clouds = [validate_xyz(scans_snap[0].points)]
-            rmse_list     = [0.0]
-            for i in range(len(scans_snap) - 1):
-                # --- collect matched target pairs for this station pair ---
-                src_t  = [t for t in targets_snap if t.scan_idx == i and t.matched_id]
-                nxt_t  = {t.id: t for t in targets_snap if t.scan_idx == i + 1}
-                m_src  = [t for t in src_t if t.matched_id in nxt_t]
-                m_tgt  = [nxt_t[t.matched_id] for t in m_src]
 
-                src_pts  = validate_xyz(scans_snap[i + 1].points)
-                ref_cloud = merged_clouds[i]            # growing reference cloud
+            # acc_transforms[i] = 4×4 that maps station i → station 0 frame.
+            # Station 0 is already the reference (identity).
+            acc_transforms = [_np.eye(4, dtype=_np.float64)]
+            merged_clouds  = [validate_xyz(scans_snap[0].points)]
+            rmse_list      = [0.0]
+
+            for i in range(len(scans_snap) - 1):
+                src_t_all = [t for t in targets_snap if t.scan_idx == i]
+                nxt_t_all = [t for t in targets_snap if t.scan_idx == i + 1]
+
+                src_pts   = validate_xyz(scans_snap[i + 1].points)
+                # Use the FULL growing merged cloud as ICP reference so that
+                # the later station benefits from all earlier aligned scans.
+                ref_cloud = _np.vstack(merged_clouds)
+
+                # ── Fresh centroid-aligned matching for this pair ──────────
+                for t in src_t_all: t.matched_id = ""
+                for t in nxt_t_all: t.matched_id = ""
+                if src_t_all and nxt_t_all:
+                    tgt_mod.match_targets(src_t_all, nxt_t_all,
+                                          max_dist=2.0, centroid_align=True)
+
+                nxt_by_id = {t.id: t for t in nxt_t_all}
+                m_src = [t for t in src_t_all if t.matched_id in nxt_by_id]
+                m_tgt = [nxt_by_id[t.matched_id] for t in m_src]
 
                 if len(m_src) >= 3:
-                    # SVD coarse alignment from target correspondences
+                    # sc = station i targets (in their original local frame)
+                    # tc = station i+1 targets (in their original local frame)
+                    # _horn_svd(tc, sc) → T_rel that maps station i+1 → station i
                     sc = _np.array([t.center for t in m_src], dtype=_np.float64)
                     tc = _np.array([t.center for t in m_tgt], dtype=_np.float64)
-                    T_svd, _ = tgt_mod._horn_svd(sc, tc)
+                    T_rel, _ = tgt_mod._horn_svd(tc, sc)
+
+                    # Accumulated transform: station i+1 → station 0.
+                    # acc_transforms[i] maps station i → station 0.
+                    # T_rel maps station i+1 → station i.
+                    # ∴  acc_transforms[i] @ T_rel  maps station i+1 → station 0.
+                    T_to_global = acc_transforms[i] @ T_rel
                     ones = _np.ones((len(src_pts), 1))
-                    src_coarse = (T_svd @ _np.hstack([src_pts, ones]).T).T[:, :3]
+                    src_coarse = (T_to_global @ _np.hstack([src_pts, ones]).T).T[:, :3]
                 else:
-                    # Fall back to intensity anchor
-                    src_coarse = reg_mod._coarse_align(
+                    # Fall back to intensity anchor + GROR coarse align
+                    src_coarse  = reg_mod._coarse_align(
                         src_pts, ref_cloud,
                         src_intensity=scans_snap[i + 1].intensity,
                         tgt_intensity=scans_snap[i].intensity)
+                    T_to_global = acc_transforms[i]
 
-                # ICP fine refinement against the growing merged cloud
+                # ── ICP fine refinement against growing merged cloud ───────
                 try:
                     src_reg, rmse = reg_mod._icp(src_coarse, ref_cloud)
                 except Exception:
@@ -1935,6 +1959,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                     except Exception:
                         rmse = 0.0
 
+                acc_transforms.append(T_to_global)
                 merged_clouds.append(src_reg)
                 rmse_list.append(rmse)
 
