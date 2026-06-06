@@ -193,7 +193,9 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
 
         # Section slider
         slider_frame = QtWidgets.QFrame()
-        slider_frame.setStyleSheet("QFrame{background:#F1F5F9;border-bottom:1px solid #E2E8F0;padding:2px;}")
+        slider_frame.setStyleSheet(
+            "QFrame{background:#F1F5F9;border-bottom-width:1px;border-bottom-style:solid;"
+            "border-bottom-color:#E2E8F0;padding:2px;}")
         slider_lay = QtWidgets.QHBoxLayout(slider_frame)
         slider_lay.setContentsMargins(8, 2, 8, 2); slider_lay.setSpacing(6)
         self._lbl_slider_ch = QtWidgets.QLabel("Ch:")
@@ -446,7 +448,9 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         sf = QtWidgets.QFrame()
         bg = "#FEE2E2" if warn_status == "CRITICAL" else ("#FEF3C7" if warn_status == "CAUTION" else "#D1FAE5")
         bc = "#DC2626" if warn_status == "CRITICAL" else ("#D97706" if warn_status == "CAUTION" else "#047857")
-        sf.setStyleSheet(f"QFrame{{background:{bg};border-top:2px solid {bc};padding:8px;}}")
+        sf.setStyleSheet(
+            f"QFrame{{background:{bg};border-top-width:2px;border-top-style:solid;"
+            f"border-top-color:{bc};padding:8px;}}")
         sl = QtWidgets.QHBoxLayout(sf); sl.setContentsMargins(16,8,16,8)
         st = f"{warn_status} - {section_warning_text(warn_issues)}" if warn_status != "OK" else "OK - Within Limits"
         slbl = QtWidgets.QLabel(st)

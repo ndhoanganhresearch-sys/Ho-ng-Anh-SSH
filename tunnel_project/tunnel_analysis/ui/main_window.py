@@ -303,7 +303,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
         # Bottom toolbar
         st_bot = QtWidgets.QFrame()
-        st_bot.setStyleSheet("QFrame{background:#F1F5F9;border-top:1px solid #E2E8F0;padding:2px;}")
+        st_bot.setStyleSheet(
+            "QFrame{background:#F1F5F9;border-top-width:1px;border-top-style:solid;"
+            "border-top-color:#E2E8F0;padding:2px;}")
         st_bot_lay = QtWidgets.QHBoxLayout(st_bot)
         st_bot_lay.setContentsMargins(6, 2, 6, 2); st_bot_lay.setSpacing(4)
         self._btn_clear_stations = QtWidgets.QPushButton("Clear All")
@@ -3292,7 +3294,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _apply_theme(self) -> None:
         self.setStyleSheet("""
             QMainWindow, QWidget { background: #F1F5F9; color: #111827; font-family: 'Segoe UI', Arial, sans-serif; font-size: 10pt; }
-            #Sidebar { background: #FFFFFF; border-right: 1px solid #E2E8F0; }
+            #Sidebar { background: #FFFFFF; border-right-width: 1px; border-right-style: solid; border-right-color: #E2E8F0; }
             #ProductTitle { color: #0F4C81; font-size: 15pt; font-weight: 800; letter-spacing: 0.5px; }
             #LabSubtitle  { color: #64748B; font-size: 9pt; padding-bottom: 4px; }
             #Separator    { color: #E2E8F0; margin: 4px 0; }
@@ -3300,7 +3302,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             QToolButton#SectionToggle { background: #EEF4FA; border: 1px solid #D1DCEB; border-radius: 6px; padding: 6px 10px; font-weight: 600; color: #1E3A5F; text-align: left; }
             QToolButton#SectionToggle:hover   { background: #DBEAFE; border-color: #3B82F6; }
             QToolButton#SectionToggle:checked { background: #BFDBFE; border-color: #1D4ED8; }
-            QWidget#SectionContent { background: #F8FAFC; border-left: 2px solid #BFDBFE; margin-left: 10px; }
+            QWidget#SectionContent { background: #F8FAFC; border-left-width: 2px; border-left-style: solid; border-left-color: #BFDBFE; margin-left: 10px; }
             QPushButton#SubButton { background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 5px; padding: 6px 10px; text-align: left; color: #334155; font-size: 9.5pt; }
             QPushButton#SubButton:hover    { background: #EFF6FF; border-color: #3B82F6; color: #1D4ED8; }
             QPushButton#SubButton:disabled { background: #F1F5F9; color: #94A3B8; border-color: #E2E8F0; }
