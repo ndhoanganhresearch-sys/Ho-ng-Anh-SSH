@@ -362,8 +362,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
         # Target table
         self._target_table = QtWidgets.QTableWidget(0, 7)
+        self._target_table_headers_src = ["Name", "Type", "Scan", "X", "Y", "Z", "Conf"]
         self._target_table.setHorizontalHeaderLabels(
-            ["Name", "Type", "Scan", "X", "Y", "Z", "Conf"])
+            self._target_table_headers_src)
         self._target_table.horizontalHeader().setStretchLastSection(True)
         self._target_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self._target_table.setEditTriggers(QtWidgets.QAbstractItemView.DoubleClicked)
@@ -1221,7 +1222,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _slot_1_1_import(self) -> None:
         self._hdr("LiDAR Data Acquisition", "Load LAS/LAZ/PLY point-cloud data into the project database.")
-        fp, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load tunnel point-cloud data", "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
+        fp, _ = QtWidgets.QFileDialog.getOpenFileName(self, _tr("Load tunnel point-cloud data", self.current_language), "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
         if not fp: return
         max_pts = self._ask_max_points(fp)
         if max_pts is None: return
@@ -1277,9 +1278,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _slot_1_8_epochs(self) -> None:
         self._hdr("Load T0/Tn Epochs", "Load reference T0 and monitoring Tn at the start of the pipeline.")
-        fp0, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load reference epoch T0", "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
+        fp0, _ = QtWidgets.QFileDialog.getOpenFileName(self, _tr("Load reference epoch T0", self.current_language), "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
         if not fp0: return
-        fpn, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load monitoring epoch Tn", "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
+        fpn, _ = QtWidgets.QFileDialog.getOpenFileName(self, _tr("Load monitoring epoch Tn", self.current_language), "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
         if not fpn: return
         self._start_worker("1.8_epochs", lambda: self.ts_mod.load_epochs(fp0, fpn))
 
@@ -1414,7 +1415,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _slot_1_3_add_scan(self) -> None:
         self._hdr("Add Scan Station", "Load additional scan station to merge with existing scans.")
         fp, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Load Scan Station", "",
+            self, _tr("Load Scan Station", self.current_language), "",
             "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
         if not fp: return
         max_pts = self._ask_max_points(fp)
@@ -2246,9 +2247,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _slot_6_1_epochs(self) -> None:
         self._hdr("Load Time-Series Epochs", "Load reference and monitoring point-cloud epochs for deformation comparison.")
-        fp0, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load reference epoch T0", "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
+        fp0, _ = QtWidgets.QFileDialog.getOpenFileName(self, _tr("Load reference epoch T0", self.current_language), "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
         if not fp0: return
-        fpn, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load monitoring epoch", "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
+        fpn, _ = QtWidgets.QFileDialog.getOpenFileName(self, _tr("Load monitoring epoch", self.current_language), "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
         if not fpn: return
         self._start_worker("6.1_epochs", lambda: self.ts_mod.load_epochs(fp0, fpn))
 
@@ -3218,6 +3219,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._lbl_spacing.setText(_tr("Section spacing:", lang))
         self._cmb_res_mode.setItemText(0, _tr("By count", lang))
         self._cmb_res_mode.setItemText(1, _tr("By spacing (m)", lang))
+        self._sp_sections.setToolTip(_tr("Number of cross-sections along the tunnel (centerline control points). Higher = finer detail, slower.", lang))
+        self._sp_spacing.setToolTip(_tr("Target axial distance between cross-sections. The section count is derived from the measured tunnel length.", lang))
         self._auto_btn.setText(_tr("AUTO PIPELINE  (1-click full analysis)", lang))
         self._reset_btn.setText(_tr("Reset Pipeline", lang))
 
@@ -3230,6 +3233,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self.section_widget.retranslate(lambda t: _tr(t, lang))
         if hasattr(self, "dashboard_widget") and hasattr(self.dashboard_widget, "retranslate"):
             self.dashboard_widget.retranslate(lambda t: _tr(t, lang))
+        if hasattr(self, "polar_plot") and hasattr(self.polar_plot, "retranslate"):
+            self.polar_plot.retranslate(lambda t: _tr(t, lang))
+        if hasattr(self, "ts_plot") and hasattr(self.ts_plot, "retranslate"):
+            self.ts_plot.retranslate(lambda t: _tr(t, lang))
 
         # Header task title/description (retranslate from stored English source)
         self.task_title.setText(_tr(self._hdr_title_src, lang))
@@ -3252,6 +3259,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             _tr("Unit", lang), _tr("Status", lang)])
         self.meta_table.setHorizontalHeaderLabels([
             _tr("Property", lang), _tr("Value", lang)])
+        if hasattr(self, "_target_table") and hasattr(self, "_target_table_headers_src"):
+            self._target_table.setHorizontalHeaderLabels(
+                [_tr(h, lang) for h in self._target_table_headers_src])
 
         # AI assistant panel
         self.ai_prompt.setPlaceholderText(_tr("Enter a structural engineering question for the local AI assistant (Llama 3)...", lang))

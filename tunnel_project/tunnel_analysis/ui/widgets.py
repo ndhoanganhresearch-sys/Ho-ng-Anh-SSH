@@ -139,6 +139,7 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         self._sections: List[SectionGeometry] = []
         self._idx: int = 0
         self._profile: str = "Circle"
+        self._translate = lambda text: text
         self._vl_box_w  = VL_BOX_W
         self._vl_box_h  = VL_BOX_H
         self._vl_cir_r  = VL_CIR_R
@@ -273,6 +274,7 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         """Update static 2D-section widget labels when the app language changes."""
         self._anim_label = translate("Animate")
         self._stop_label = translate("Stop")
+        self._translate = translate
         self._btn_prev.setText("\u25C0 " + translate("Prev"))
         self._btn_next.setText(translate("Next") + " \u25B6")
         self._btn_reset.setText("\u27F3 " + translate("Zoom"))
@@ -448,7 +450,7 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         slbl = QtWidgets.QLabel(st)
         slbl.setStyleSheet(f"color:{bc};font-size:12pt;font-weight:bold;background:transparent;")
         sl.addWidget(slbl); lay.addWidget(sf)
-        btn = QtWidgets.QPushButton("Close")
+        btn = QtWidgets.QPushButton(self._translate("Close"))
         btn.setStyleSheet("QPushButton{background:#0F4C81;color:white;border-radius:0;padding:10px;font-weight:700;font-size:10pt;border:none;}QPushButton:hover{background:#1D4ED8;}")
         btn.clicked.connect(dlg.accept); lay.addWidget(btn)
         dlg.exec()
@@ -462,7 +464,8 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
             return
         dlg = _SectionFullscreenDialog(sg, self._profile,
                                         self._vl_box_w, self._vl_box_h,
-                                        self._vl_cir_r, parent=self)
+                                        self._vl_cir_r, translate=self._translate,
+                                        parent=self)
         dlg.exec()
 
     def _on_slider_changed(self, value: int) -> None:
@@ -980,8 +983,9 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
 class _SectionFullscreenDialog(QtWidgets.QDialog):
     """Resizable full-screen dialog for 2D cross-section."""
 
-    def __init__(self, sg, profile, vl_w, vl_h, vl_r, parent=None):
+    def __init__(self, sg, profile, vl_w, vl_h, vl_r, translate=None, parent=None):
         super().__init__(parent)
+        self._translate = translate or (lambda text: text)
         self.setWindowTitle(f"Cross-Section  |  Ch. {sg.chainage:.3f} m  |  {profile}")
         self.setWindowFlags(self.windowFlags() |
                             QtCore.Qt.WindowMaximizeButtonHint |
@@ -995,12 +999,12 @@ class _SectionFullscreenDialog(QtWidgets.QDialog):
         lbl = QtWidgets.QLabel(
             f"Chainage: {sg.chainage:.3f} m  |  Profile: {profile}")
         lbl.setStyleSheet("font-weight:bold; font-size:11pt; color:#0F172A;")
-        btn_save = QtWidgets.QPushButton("Save PNG")
+        btn_save = QtWidgets.QPushButton(self._translate("Save PNG"))
         btn_save.setStyleSheet(
             "QPushButton{background:#047857;color:white;border-radius:5px;"
             "padding:5px 14px;font-weight:600;}"
             "QPushButton:hover{background:#065F46;}")
-        btn_close = QtWidgets.QPushButton("Close")
+        btn_close = QtWidgets.QPushButton(self._translate("Close"))
         btn_close.setStyleSheet(
             "QPushButton{background:#64748B;color:white;border-radius:5px;"
             "padding:5px 14px;font-weight:600;}"
@@ -1029,19 +1033,19 @@ class _SectionFullscreenDialog(QtWidgets.QDialog):
 
             btn_save.clicked.connect(lambda: self._save_png(sg))
         else:
-            lay.addWidget(QtWidgets.QLabel("Matplotlib not available."))
+            lay.addWidget(QtWidgets.QLabel(self._translate("Matplotlib not available.")))
 
         btn_close.clicked.connect(self.accept)
 
     def _save_png(self, sg) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save Section PNG",
+            self, self._translate("Save Section PNG"),
             f"section_ch{sg.chainage:.2f}m.png",
             "PNG Images (*.png)")
         if path:
             self._fig.savefig(path, dpi=200, bbox_inches="tight",
                               facecolor="white")
-            QtWidgets.QMessageBox.information(self, "Saved", f"Saved to:\n{path}")
+            QtWidgets.QMessageBox.information(self, self._translate("Saved"), self._translate("Saved to:") + f"\n{path}")
 
 
 # ------------------------------------------------------------------------------
@@ -1051,12 +1055,21 @@ class _SectionFullscreenDialog(QtWidgets.QDialog):
 class PolarDeformationPlotWidget(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._translate = lambda text: text
         self._angles: Optional[np.ndarray] = None; self._dmap: Optional[np.ndarray] = None
         lay = QtWidgets.QVBoxLayout(self); lay.setContentsMargins(0, 0, 0, 0)
         if _MPL_OK:
             self._fig, self._ax = plt.subplots(subplot_kw={"projection":"polar"}, figsize=(4, 4))
             self._fig.patch.set_facecolor(_BG); self._canvas = FigureCanvas(self._fig); lay.addWidget(self._canvas)
-        else: lay.addWidget(QtWidgets.QLabel("Matplotlib missing."))
+        else:
+            self._missing_label = QtWidgets.QLabel("Matplotlib missing.")
+            lay.addWidget(self._missing_label)
+
+    def retranslate(self, translate: Callable[[str], str]) -> None:
+        self._translate = translate
+        if not _MPL_OK and hasattr(self, "_missing_label"):
+            self._missing_label.setText(translate("Matplotlib missing."))
+        self._redraw()
 
     def update_data(self, angles: np.ndarray, dmap: np.ndarray) -> None:
         if not _MPL_OK: return
@@ -1071,7 +1084,7 @@ class PolarDeformationPlotWidget(QtWidgets.QWidget):
             av = abs(float(mean_dr[i]))
             col = _GRN if av < 1.0 else (_YEL if av < 3.0 else _RED)
             ax.bar(ang[i], av, width=(ang[1] - ang[0]), color=col, alpha=0.85, edgecolor="none")
-        ax.set_title("Polar radial deformation dr [mm]", color=_FG, fontsize=9, pad=8)
+        ax.set_title(self._translate("Polar radial deformation dr [mm]"), color=_FG, fontsize=9, pad=8)
         ax.set_facecolor(_BG); ax.tick_params(colors=_FG, labelsize=7); ax.grid(True, color=_GRID, lw=0.6, alpha=0.75)
         ax.set_theta_zero_location("N"); ax.set_theta_direction(-1)
         self._fig.tight_layout(); self._canvas.draw_idle()
@@ -1084,7 +1097,12 @@ class PolarDeformationPlotWidget(QtWidgets.QWidget):
 class LinePlotWidget(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._translate = lambda text: text
         self.values: Optional[np.ndarray] = None; self.title = "Time-series"; self.setMinimumHeight(220)
+
+    def retranslate(self, translate: Callable[[str], str]) -> None:
+        self._translate = translate
+        self.update()
 
     def set_values(self, values: Optional[np.ndarray], title: str = "") -> None:
         self.values = None if values is None else np.asarray(values, dtype=np.float64).ravel()
@@ -1096,10 +1114,10 @@ class LinePlotWidget(QtWidgets.QWidget):
         p.fillRect(self.rect(), QtGui.QColor("#FFFFFF"))
         p.setPen(QtGui.QPen(QtGui.QColor("#CBD5E1"), 1)); p.drawRoundedRect(rc, 6, 6)
         p.setPen(QtGui.QColor("#111827")); p.setFont(QtGui.QFont("Segoe UI", 10, QtGui.QFont.Bold))
-        p.drawText(rc.adjusted(10, 6, -10, -6), QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft, self.title)
+        p.drawText(rc.adjusted(10, 6, -10, -6), QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft, self._translate(self.title))
         if self.values is None or len(self.values) < 2:
             p.setFont(QtGui.QFont("Segoe UI", 9)); p.setPen(QtGui.QColor("#64748B"))
-            p.drawText(rc, QtCore.Qt.AlignCenter, "Run Step 6.2 to generate chart."); return
+            p.drawText(rc, QtCore.Qt.AlignCenter, self._translate("Run Step 6.2 to generate chart.")); return
         pr = rc.adjusted(42, 42, -18, -34)
         p.setPen(QtGui.QPen(QtGui.QColor("#E2E8F0"), 1))
         for i in range(5):
@@ -1155,6 +1173,7 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._translate = lambda text: text
         self._params: dict = {}
         self._sections = []
         self._ref_sections = []
@@ -1168,7 +1187,7 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
         outer.setSpacing(8)
 
         # Overall status banner
-        self._banner = QtWidgets.QLabel("No data yet — run Steps 5.1–5.6 to populate the dashboard.")
+        self._banner = QtWidgets.QLabel(self._translate("No data yet — run Steps 5.1 to 5.6 to populate the dashboard."))
         self._banner.setWordWrap(True)
         self._banner.setAlignment(QtCore.Qt.AlignCenter)
         self._banner.setMinimumHeight(36)
@@ -1246,6 +1265,10 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
             translate("Chainage"), translate("Status"),
             translate("Issues"), translate("Details")])
         self._refresh_btn.setText(translate("Refresh Dashboard"))
+        for title, k_mean, _k_max, _unit in self._METRICS:
+            card = self._cards.get(k_mean)
+            if card is not None:
+                card["title_lbl"].setText(translate(title))
         self._refresh()
 
     # ------------------------------------------------------------------
@@ -1346,11 +1369,11 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
             # Format max
             if v_max is not None and np.isfinite(float(v_max)):
                 if unit == "%":
-                    max_txt = f"max: {float(v_max):.3f} {unit}"
+                    max_txt = f"{self._translate('max:')} {float(v_max):.3f} {unit}"
                 else:
-                    max_txt = f"max: {float(v_max):+.1f} {unit}"
+                    max_txt = f"{self._translate('max:')} {float(v_max):+.1f} {unit}"
             else:
-                max_txt = f"max: —  {unit}"
+                max_txt = f"{self._translate('max:')} —  {unit}"
 
             card["mean"].setText(mean_txt)
             card["max"].setText(max_txt)
@@ -1388,7 +1411,7 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
             card["mean"].setStyleSheet(
                 f"color:{mean_color};font-size:16pt;font-weight:800;background:transparent;")
             card["badge"].setStyleSheet(badge_style)
-            card["badge"].setText(status if status else "—")
+            card["badge"].setText(self._translate(status) if status else "—")
 
     def _refresh_banner(self) -> None:
         from ..common import classify_parameter
@@ -1408,29 +1431,29 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
 
         if total == 0:
             self._banner.setText(
-                "No data yet — run Steps 5.1 to 5.6 to populate the dashboard.")
+                self._translate("No data yet — run Steps 5.1 to 5.6 to populate the dashboard."))
             self._banner.setStyleSheet(
                 "QLabel{background:#F1F5F9;color:#475569;border:1px solid #CBD5E1;"
                 "border-radius:6px;padding:6px 12px;font-weight:600;font-size:10.5pt;}")
         elif n_crit > 0:
             self._banner.setText(
-                f"CRITICAL  --  {n_crit} critical metric{'s' if n_crit>1 else ''},"
-                f"  {n_caut} caution,  {n_ok} OK")
+                f"{self._translate('CRITICAL')}  --  {n_crit} {self._translate('critical metric(s)')},"
+                f"  {n_caut} {self._translate('caution')},  {n_ok} {self._translate('OK')}")
             self._banner.setStyleSheet(
                 f"QLabel{{background:{self._C_CRIT_BG};color:{self._C_CRIT};"
                 "border:2px solid #FCA5A5;border-radius:6px;padding:6px 12px;"
                 "font-weight:800;font-size:11pt;}}")
         elif n_caut > 0:
             self._banner.setText(
-                f"CAUTION  --  {n_caut} caution metric{'s' if n_caut>1 else ''},"
-                f"  {n_ok} OK")
+                f"{self._translate('CAUTION')}  --  {n_caut} {self._translate('caution metric(s)')},"
+                f"  {n_ok} {self._translate('OK')}")
             self._banner.setStyleSheet(
                 f"QLabel{{background:{self._C_CAUT_BG};color:{self._C_CAUT};"
                 "border:2px solid #FCD34D;border-radius:6px;padding:6px 12px;"
                 "font-weight:800;font-size:11pt;}}")
         else:
             self._banner.setText(
-                f"OK  --  All {n_ok} metrics within safe limits.")
+                f"{self._translate('OK')}  --  {self._translate('All metrics within safe limits.').format(n=n_ok)}")
             self._banner.setStyleSheet(
                 f"QLabel{{background:{self._C_OK_BG};color:{self._C_OK};"
                 "border:2px solid #6EE7B7;border-radius:6px;padding:6px 12px;"
@@ -1444,22 +1467,22 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
             chainages = [s.chainage for s in valid if np.isfinite(s.chainage)]
             if len(chainages) >= 2:
                 length_m = max(chainages) - min(chainages)
-                self._lbl_length.setText(f"Length: {length_m:.1f} m")
+                self._lbl_length.setText(f"{self._translate('Length:')} {length_m:.1f} m")
             else:
-                self._lbl_length.setText("Length: —")
-            self._lbl_sections.setText(f"Sections: {len(valid)}")
+                self._lbl_length.setText(f"{self._translate('Length:')} —")
+            self._lbl_sections.setText(f"{self._translate('Sections:')} {len(valid)}")
         else:
-            self._lbl_length.setText("Length: —")
-            self._lbl_sections.setText(f"Sections: {n_sec if n_sec else '—'}")
+            self._lbl_length.setText(f"{self._translate('Length:')} —")
+            self._lbl_sections.setText(f"{self._translate('Sections:')} {n_sec if n_sec else '—'}")
 
-        self._lbl_profile.setText(f"Profile: {self._profile or '—'}")
+        self._lbl_profile.setText(f"{self._translate('Profile:')} {self._profile or '—'}")
 
         # RMSE from params if available
         rmse = self._params.get("rmse_mm")
         if rmse is not None and np.isfinite(float(rmse)):
-            self._lbl_rmse.setText(f"Reg. RMSE: {float(rmse):.2f} mm")
+            self._lbl_rmse.setText(f"{self._translate('Reg. RMSE:')} {float(rmse):.2f} mm")
         else:
-            self._lbl_rmse.setText("Reg. RMSE: —")
+            self._lbl_rmse.setText(f"{self._translate('Reg. RMSE:')} —")
 
     def _refresh_alerts(self) -> None:
         tbl = self._alerts_table
@@ -1497,7 +1520,7 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
             tbl.setItem(r, 0, ch_item)
 
             bg, fg = status_colors.get(status, ("#F8FAFC", "#111827"))
-            st_item = QtWidgets.QTableWidgetItem(status)
+            st_item = QtWidgets.QTableWidgetItem(self._translate(status))
             st_item.setTextAlignment(QtCore.Qt.AlignCenter)
             st_item.setBackground(QtGui.QColor(bg))
             st_item.setForeground(QtGui.QColor(fg))
@@ -1505,7 +1528,7 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
             tbl.setItem(r, 1, st_item)
 
             n_issues = len(issues)
-            tbl.setItem(r, 2, QtWidgets.QTableWidgetItem(f"{n_issues} issue{'s' if n_issues!=1 else ''}"))
+            tbl.setItem(r, 2, QtWidgets.QTableWidgetItem(f"{n_issues} {self._translate('issue(s)')}"))
 
             detail_parts = []
             for level, label, val, unit in issues:
@@ -1515,7 +1538,7 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
         tbl.resizeColumnsToContents()
         if not alerts:
             tbl.insertRow(0)
-            msg = QtWidgets.QTableWidgetItem("No deformation alerts detected.")
+            msg = QtWidgets.QTableWidgetItem(self._translate("No deformation alerts detected."))
             msg.setForeground(QtGui.QColor(self._C_OK))
             tbl.setItem(0, 0, msg)
             tbl.setSpan(0, 0, 1, 4)
