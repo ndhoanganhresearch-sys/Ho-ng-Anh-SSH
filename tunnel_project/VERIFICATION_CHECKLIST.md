@@ -38,8 +38,9 @@ Expected WSL result should show real compression, for example token savings and 
 ## Blender Test Dataset
 
 ```powershell
-..\.venv\Scripts\python.exe -m py_compile tools\create_blender_test_dataset.py smoke_test_blender_dataset.py
+..\.venv\Scripts\python.exe -m py_compile tools\create_blender_test_dataset.py smoke_test_blender_dataset.py benchmark_blender_dataset.py
 ..\.venv\Scripts\python.exe smoke_test_blender_dataset.py
+..\.venv\Scripts\python.exe benchmark_blender_dataset.py
 ```
 
 Use `tools\create_blender_test_dataset.py` to regenerate `data\blender_test_suite` when the synthetic tunnel cases need to change. Blender must be running with the MCP bridge listening on `localhost:9876`.

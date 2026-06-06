@@ -1,0 +1,119 @@
+{
+  "dataset": "blender_test_suite",
+  "cases": {
+    "case_01_clean_reference": {
+      "geometry": {
+        "centerline_points": 48,
+        "frames": 48,
+        "sections": 48,
+        "profile": "Circle",
+        "median_radius_m": 3.9999691857362016
+      },
+      "c2c": {
+        "rmse_mm": 4.224691705403811,
+        "mean_mm": 3.369787338926167,
+        "p95_mm": 8.227671602063227,
+        "max_mm": 15.114579054674214
+      },
+      "heatmap_points": 7008,
+      "heatmap_p95_mm": 8.227671602063225,
+      "polar_sections": 48,
+      "polar_max_abs_mm": 14.20687842693269,
+      "warning_sections_40mm": 0,
+      "warning_chainage_y_minmax": []
+    },
+    "case_02_local_deformation": {
+      "geometry": {
+        "centerline_points": 48,
+        "frames": 48,
+        "sections": 48,
+        "profile": "Circle",
+        "median_radius_m": 3.9944592763755407
+      },
+      "c2c": {
+        "rmse_mm": 20.35219685532497,
+        "mean_mm": 12.016929051401913,
+        "p95_mm": 50.9470109113172,
+        "max_mm": 86.53977698145484
+      },
+      "heatmap_points": 7008,
+      "heatmap_p95_mm": 50.9470109113172,
+      "polar_sections": 48,
+      "polar_max_abs_mm": 83.45625312548543,
+      "warning_sections_40mm": 10,
+      "warning_chainage_y_minmax": [
+        -4.726611645228448,
+        4.605534570684163
+      ]
+    },
+    "case_03_noise_and_cables": {
+      "stats": {
+        "n_raw": 8068,
+        "n_clean": 7191,
+        "n_removed": 877,
+        "n_cable": 0,
+        "n_light": 0,
+        "n_person": 0,
+        "n_radial": 877,
+        "n_wall_cable": 0,
+        "component_points": {
+          "cable": [],
+          "light": [],
+          "person": []
+        }
+      },
+      "label_noise_recall": 0.8264150943396227,
+      "label_lining_retention": 0.999857305936073,
+      "raw_points": 8068,
+      "clean_points": 7191,
+      "labels_present": [
+        1,
+        2,
+        3
+      ]
+    },
+    "case_04_clearance_intrusion": {
+      "n_intruding": 1080,
+      "max_intrusion_mm": 870.2907076034536,
+      "severity": "critical",
+      "sections": 49,
+      "sections_with_intrusion": 37,
+      "precision_vs_label": 1.0,
+      "recall_vs_label": 1.0,
+      "tp": 1080,
+      "fp": 0,
+      "fn": 0
+    },
+    "case_05_curved_centerline": {
+      "geometry": {
+        "centerline_points": 48,
+        "frames": 48,
+        "sections": 48,
+        "profile": "Circle",
+        "median_radius_m": 3.9992515175719086
+      },
+      "centerline_span_xyz_m": [
+        2.03261912294876,
+        48.014957856548506,
+        0.18027821140115435
+      ]
+    },
+    "case_06_occlusion_sparse": {
+      "geometry": {
+        "centerline_points": 48,
+        "frames": 48,
+        "sections": 48,
+        "profile": "Circle",
+        "median_radius_m": 3.989055295891027
+      },
+      "centerline_span_xyz_m": [
+        0.0039019927949254874,
+        47.924524372892094,
+        0.01761944819298719
+      ]
+    }
+  },
+  "gates": [],
+  "runtime_seconds": 0.751,
+  "failures": []
+}
