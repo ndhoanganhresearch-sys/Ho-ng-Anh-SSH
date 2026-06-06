@@ -223,7 +223,6 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
             # Matplotlib navigation toolbar (zoom/pan)
             from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
             self._toolbar = NavigationToolbar2QT(self._canvas, self)
-            self._toolbar = NavigationToolbar2QT(self._canvas, self)
             self._toolbar.setStyleSheet(
                 "QToolBar{background:#1E3A5F;border-top:2px solid #0F4C81;spacing:2px;padding:2px 4px;}"
                 "QToolButton{background:#2D5A8E;border:1px solid #3B7DD8;border-radius:4px;"
@@ -231,6 +230,8 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                 "QToolButton:hover{background:#3B7DD8;border-color:#60A5FA;}"
                 "QToolButton:checked{background:#1D4ED8;border-color:#93C5FD;}")
             self._toolbar.setIconSize(QtCore.QSize(16, 16))
+            lay.addWidget(self._toolbar)
+        else:
             lay.addWidget(QtWidgets.QLabel("Matplotlib is required for 2D cross-section plotting."))
         # Epoch overlay + animation controls
         ctrl = QtWidgets.QHBoxLayout(); ctrl.setSpacing(6)
@@ -1084,6 +1085,397 @@ class LinePlotWidget(QtWidgets.QWidget):
         p.setPen(QtGui.QColor("#475569")); p.setFont(QtGui.QFont("Segoe UI", 8))
         p.drawText(pr.left(), rc.bottom() - 8, f"min {vmin:.2f}mm")
         p.drawText(pr.right() - 110, rc.bottom() - 8, f"max {vmax:.2f}mm")
+
+
+# ------------------------------------------------------------------------------
+# Analysis Summary Dashboard
+# ------------------------------------------------------------------------------
+
+class SummaryDashboardWidget(QtWidgets.QWidget):
+    """One-glance deformation summary dashboard.
+
+    Shows all key metrics (crown, convergence, eccentricity, ovality) as
+    colour-coded cards, an overall status banner, general scan info, and the
+    top-N worst section alerts.  Updated via update_params() / update_sections().
+    """
+
+    # Colours (hex strings understood by QColor).
+    _C_OK       = "#047857"   # dark green text
+    _C_OK_BG    = "#ECFDF5"
+    _C_OK_BD    = "#6EE7B7"
+    _C_CAUT     = "#B45309"   # dark amber text
+    _C_CAUT_BG  = "#FFFBEB"
+    _C_CAUT_BD  = "#FCD34D"
+    _C_CRIT     = "#DC2626"   # red text
+    _C_CRIT_BG  = "#FEF2F2"
+    _C_CRIT_BD  = "#FCA5A5"
+    _C_NONE_BG  = "#F8FAFC"
+    _C_NONE_BD  = "#CBD5E1"
+
+    # Each dashboard metric: (display title, param_key_mean, param_key_max, unit)
+    _METRICS = [
+        ("Crown Settlement",    "crown_settlement_mm",    "crown_settlement_max_mm",    "mm"),
+        ("Lateral Convergence", "lateral_convergence_mm", "lateral_convergence_max_mm", "mm"),
+        ("Eccentricity",        "eccentricity_mean_mm",   "eccentricity_max_mm",        "mm"),
+        ("Ovality",             "ovality_mean_pct",       "ovality_max_pct",            "%"),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._params: dict = {}
+        self._sections = []
+        self._ref_sections = []
+        self._profile = "Circle"
+        self._build_ui()
+
+    # ------------------------------------------------------------------
+    def _build_ui(self):
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(10, 8, 10, 8)
+        outer.setSpacing(8)
+
+        # Overall status banner
+        self._banner = QtWidgets.QLabel("No data yet — run Steps 5.1–5.6 to populate the dashboard.")
+        self._banner.setWordWrap(True)
+        self._banner.setAlignment(QtCore.Qt.AlignCenter)
+        self._banner.setMinimumHeight(36)
+        self._banner.setStyleSheet(
+            "QLabel{background:#F1F5F9;color:#475569;border:1px solid #CBD5E1;"
+            "border-radius:6px;padding:6px 12px;font-weight:600;font-size:10.5pt;}")
+        outer.addWidget(self._banner)
+
+        # Metric card grid (2 x 2)
+        card_grid = QtWidgets.QGridLayout()
+        card_grid.setSpacing(8)
+        self._cards = {}
+        for idx, (title, k_mean, k_max, unit) in enumerate(self._METRICS):
+            card = self._make_card(title, unit)
+            self._cards[k_mean] = card
+            card_grid.addWidget(card["frame"], idx // 2, idx % 2)
+        outer.addLayout(card_grid)
+
+        # General info row
+        info_frame = QtWidgets.QFrame()
+        info_frame.setStyleSheet(
+            "QFrame{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;padding:4px;}")
+        info_lay = QtWidgets.QHBoxLayout(info_frame)
+        info_lay.setContentsMargins(10, 6, 10, 6)
+        info_lay.setSpacing(20)
+        self._lbl_profile  = self._info_label("Profile: —")
+        self._lbl_sections = self._info_label("Sections: —")
+        self._lbl_length   = self._info_label("Length: —")
+        self._lbl_rmse     = self._info_label("Reg. RMSE: —")
+        for lbl in (self._lbl_profile, self._lbl_sections,
+                    self._lbl_length, self._lbl_rmse):
+            info_lay.addWidget(lbl)
+        info_lay.addStretch()
+        outer.addWidget(info_frame)
+
+        # Section alerts table (worst 8)
+        alerts_box = QtWidgets.QGroupBox("Section Alerts (worst 8)")
+        alerts_box.setStyleSheet(
+            "QGroupBox{font-weight:600;color:#1E3A5F;border:1px solid #CBD5E1;"
+            "border-radius:6px;margin-top:8px;padding-top:4px;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:10px;}")
+        alerts_lay = QtWidgets.QVBoxLayout(alerts_box)
+        alerts_lay.setContentsMargins(4, 4, 4, 4)
+        self._alerts_table = QtWidgets.QTableWidget(0, 4)
+        self._alerts_table.setHorizontalHeaderLabels(
+            ["Chainage", "Status", "Issues", "Details"])
+        self._alerts_table.horizontalHeader().setStretchLastSection(True)
+        self._alerts_table.verticalHeader().setVisible(False)
+        self._alerts_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self._alerts_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self._alerts_table.setMinimumHeight(120)
+        self._alerts_table.setMaximumHeight(200)
+        self._alerts_table.setStyleSheet(
+            "QTableWidget{border:none;font-size:9pt;}"
+            "QTableWidget::item{padding:3px 6px;}"
+            "QHeaderView::section{background:#E2E8F0;color:#334155;padding:4px;"
+            "font-weight:600;font-size:8.5pt;border:none;border-bottom:1px solid #CBD5E1;}")
+        alerts_lay.addWidget(self._alerts_table)
+        outer.addWidget(alerts_box)
+
+        # Refresh button
+        refresh_btn = QtWidgets.QPushButton("Refresh Dashboard")
+        refresh_btn.setStyleSheet(
+            "QPushButton{background:#1D4ED8;color:white;border:none;border-radius:6px;"
+            "padding:6px 16px;font-weight:700;}"
+            "QPushButton:hover{background:#2563EB;}")
+        refresh_btn.clicked.connect(self._refresh)
+        outer.addWidget(refresh_btn, 0, QtCore.Qt.AlignRight)
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _info_label(text: str) -> QtWidgets.QLabel:
+        lbl = QtWidgets.QLabel(text)
+        lbl.setStyleSheet(
+            "color:#1E3A5F;font-size:9pt;font-weight:600;background:transparent;")
+        return lbl
+
+    @staticmethod
+    def _make_card(title: str, unit: str) -> dict:
+        """Return a dict with references to the card's sub-widgets."""
+        frame = QtWidgets.QFrame()
+        frame.setMinimumHeight(90)
+        frame.setStyleSheet(
+            "QFrame{background:#F8FAFC;border:1px solid #CBD5E1;"
+            "border-radius:8px;padding:4px;}")
+        lay = QtWidgets.QVBoxLayout(frame)
+        lay.setContentsMargins(12, 8, 12, 8)
+        lay.setSpacing(4)
+
+        lbl_title = QtWidgets.QLabel(title)
+        lbl_title.setStyleSheet("color:#475569;font-size:9pt;font-weight:600;background:transparent;")
+
+        lbl_mean = QtWidgets.QLabel("—")
+        lbl_mean.setStyleSheet("color:#111827;font-size:16pt;font-weight:800;background:transparent;")
+        lbl_mean.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+
+        lbl_max = QtWidgets.QLabel(f"max: —  {unit}")
+        lbl_max.setStyleSheet("color:#64748B;font-size:8.5pt;background:transparent;")
+
+        lbl_badge = QtWidgets.QLabel("—")
+        lbl_badge.setAlignment(QtCore.Qt.AlignCenter)
+        lbl_badge.setFixedHeight(20)
+        lbl_badge.setStyleSheet(
+            "background:#E2E8F0;color:#64748B;border-radius:4px;"
+            "font-size:8pt;font-weight:700;padding:1px 6px;")
+
+        lay.addWidget(lbl_title)
+        lay.addWidget(lbl_mean)
+        lay.addWidget(lbl_max)
+        lay.addWidget(lbl_badge)
+
+        return {
+            "frame": frame, "unit": unit,
+            "mean": lbl_mean, "max": lbl_max,
+            "badge": lbl_badge, "title_lbl": lbl_title,
+        }
+
+    # ------------------------------------------------------------------
+    def update_params(self, params: dict) -> None:
+        """Update metric cards from a parameter dict (from _show_params)."""
+        self._params.update(params)
+        self._refresh()
+
+    def update_sections(self, sections, ref_sections=None, profile: str = "Circle") -> None:
+        """Update section alerts table."""
+        self._sections = sections or []
+        self._ref_sections = ref_sections or []
+        self._profile = profile
+        self._refresh()
+
+    def clear(self) -> None:
+        """Reset to empty state."""
+        self._params = {}
+        self._sections = []
+        self._ref_sections = []
+        self._refresh()
+
+    # ------------------------------------------------------------------
+    def _refresh(self) -> None:
+        """Rebuild all cards and alerts from current data."""
+        self._refresh_cards()
+        self._refresh_banner()
+        self._refresh_info()
+        self._refresh_alerts()
+
+    def _refresh_cards(self) -> None:
+        from ..common import classify_parameter
+        for idx, (title, k_mean, k_max, unit) in enumerate(self._METRICS):
+            card = self._cards.get(k_mean)
+            if card is None:
+                continue
+            v_mean = self._params.get(k_mean)
+            v_max  = self._params.get(k_max)
+            status = classify_parameter(k_mean, v_mean) if v_mean is not None else ""
+
+            # Format mean
+            if v_mean is not None and np.isfinite(float(v_mean)):
+                if unit == "%":
+                    mean_txt = f"{float(v_mean):.3f} {unit}"
+                else:
+                    mean_txt = f"{float(v_mean):+.1f} {unit}"
+            else:
+                mean_txt = "—"
+
+            # Format max
+            if v_max is not None and np.isfinite(float(v_max)):
+                if unit == "%":
+                    max_txt = f"max: {float(v_max):.3f} {unit}"
+                else:
+                    max_txt = f"max: {float(v_max):+.1f} {unit}"
+            else:
+                max_txt = f"max: —  {unit}"
+
+            card["mean"].setText(mean_txt)
+            card["max"].setText(max_txt)
+
+            # Status badge colours
+            if status == "CRITICAL":
+                bg, bd, fg = self._C_CRIT_BG, self._C_CRIT_BD, self._C_CRIT
+                badge_style = (f"background:{self._C_CRIT};color:white;border-radius:4px;"
+                               "font-size:8pt;font-weight:700;padding:1px 6px;")
+                frame_style = (f"QFrame{{background:{self._C_CRIT_BG};border:2px solid {self._C_CRIT_BD};"
+                               "border-radius:8px;padding:4px;}}")
+                mean_color = self._C_CRIT
+            elif status == "CAUTION":
+                bg, bd, fg = self._C_CAUT_BG, self._C_CAUT_BD, self._C_CAUT
+                badge_style = (f"background:{self._C_CAUT};color:white;border-radius:4px;"
+                               "font-size:8pt;font-weight:700;padding:1px 6px;")
+                frame_style = (f"QFrame{{background:{self._C_CAUT_BG};border:2px solid {self._C_CAUT_BD};"
+                               "border-radius:8px;padding:4px;}}")
+                mean_color = self._C_CAUT
+            elif status == "OK":
+                bg, bd, fg = self._C_OK_BG, self._C_OK_BD, self._C_OK
+                badge_style = (f"background:{self._C_OK};color:white;border-radius:4px;"
+                               "font-size:8pt;font-weight:700;padding:1px 6px;")
+                frame_style = (f"QFrame{{background:{self._C_OK_BG};border:2px solid {self._C_OK_BD};"
+                               "border-radius:8px;padding:4px;}}")
+                mean_color = self._C_OK
+            else:
+                badge_style = ("background:#E2E8F0;color:#64748B;border-radius:4px;"
+                               "font-size:8pt;font-weight:700;padding:1px 6px;")
+                frame_style = (f"QFrame{{background:{self._C_NONE_BG};border:1px solid {self._C_NONE_BD};"
+                               "border-radius:8px;padding:4px;}}")
+                mean_color = "#111827"
+
+            card["frame"].setStyleSheet(frame_style)
+            card["mean"].setStyleSheet(
+                f"color:{mean_color};font-size:16pt;font-weight:800;background:transparent;")
+            card["badge"].setStyleSheet(badge_style)
+            card["badge"].setText(status if status else "—")
+
+    def _refresh_banner(self) -> None:
+        from ..common import classify_parameter
+        n_crit = sum(
+            1 for (_, k, _, _) in self._METRICS
+            if classify_parameter(k, self._params.get(k)) == "CRITICAL"
+        )
+        n_caut = sum(
+            1 for (_, k, _, _) in self._METRICS
+            if classify_parameter(k, self._params.get(k)) == "CAUTION"
+        )
+        n_ok = sum(
+            1 for (_, k, _, _) in self._METRICS
+            if classify_parameter(k, self._params.get(k)) == "OK"
+        )
+        total = n_crit + n_caut + n_ok
+
+        if total == 0:
+            self._banner.setText(
+                "No data yet — run Steps 5.1 to 5.6 to populate the dashboard.")
+            self._banner.setStyleSheet(
+                "QLabel{background:#F1F5F9;color:#475569;border:1px solid #CBD5E1;"
+                "border-radius:6px;padding:6px 12px;font-weight:600;font-size:10.5pt;}")
+        elif n_crit > 0:
+            self._banner.setText(
+                f"CRITICAL  --  {n_crit} critical metric{'s' if n_crit>1 else ''},"
+                f"  {n_caut} caution,  {n_ok} OK")
+            self._banner.setStyleSheet(
+                f"QLabel{{background:{self._C_CRIT_BG};color:{self._C_CRIT};"
+                "border:2px solid #FCA5A5;border-radius:6px;padding:6px 12px;"
+                "font-weight:800;font-size:11pt;}}")
+        elif n_caut > 0:
+            self._banner.setText(
+                f"CAUTION  --  {n_caut} caution metric{'s' if n_caut>1 else ''},"
+                f"  {n_ok} OK")
+            self._banner.setStyleSheet(
+                f"QLabel{{background:{self._C_CAUT_BG};color:{self._C_CAUT};"
+                "border:2px solid #FCD34D;border-radius:6px;padding:6px 12px;"
+                "font-weight:800;font-size:11pt;}}")
+        else:
+            self._banner.setText(
+                f"OK  --  All {n_ok} metrics within safe limits.")
+            self._banner.setStyleSheet(
+                f"QLabel{{background:{self._C_OK_BG};color:{self._C_OK};"
+                "border:2px solid #6EE7B7;border-radius:6px;padding:6px 12px;"
+                "font-weight:800;font-size:11pt;}}")
+
+    def _refresh_info(self) -> None:
+        n_sec = len(self._sections)
+        valid = [s for s in self._sections if s.pts_2d is not None]
+
+        if valid:
+            chainages = [s.chainage for s in valid if np.isfinite(s.chainage)]
+            if len(chainages) >= 2:
+                length_m = max(chainages) - min(chainages)
+                self._lbl_length.setText(f"Length: {length_m:.1f} m")
+            else:
+                self._lbl_length.setText("Length: —")
+            self._lbl_sections.setText(f"Sections: {len(valid)}")
+        else:
+            self._lbl_length.setText("Length: —")
+            self._lbl_sections.setText(f"Sections: {n_sec if n_sec else '—'}")
+
+        self._lbl_profile.setText(f"Profile: {self._profile or '—'}")
+
+        # RMSE from params if available
+        rmse = self._params.get("rmse_mm")
+        if rmse is not None and np.isfinite(float(rmse)):
+            self._lbl_rmse.setText(f"Reg. RMSE: {float(rmse):.2f} mm")
+        else:
+            self._lbl_rmse.setText("Reg. RMSE: —")
+
+    def _refresh_alerts(self) -> None:
+        tbl = self._alerts_table
+        tbl.setRowCount(0)
+        if not self._sections:
+            return
+
+        # Gather all sections with their status and sort by severity then ch.
+        alerts = []
+        ref_map = {}
+        for rs in self._ref_sections:
+            ref_map[round(rs.chainage, 3)] = rs
+
+        for sg in self._sections:
+            ref = ref_map.get(round(sg.chainage, 3))
+            status, issues = section_warning_status(sg, ref)
+            if status != "OK":
+                alerts.append((status, sg.chainage, issues))
+
+        # Sort: CRITICAL first, then by chainage descending within level
+        alerts.sort(key=lambda x: (0 if x[0] == "CRITICAL" else 1, -x[1]))
+        alerts = alerts[:8]   # cap at 8
+
+        status_colors = {
+            "CRITICAL": (self._C_CRIT_BG, self._C_CRIT),
+            "CAUTION":  (self._C_CAUT_BG, self._C_CAUT),
+        }
+
+        for status, chainage, issues in alerts:
+            r = tbl.rowCount()
+            tbl.insertRow(r)
+
+            ch_item = QtWidgets.QTableWidgetItem(f"Ch {chainage:.2f} m")
+            ch_item.setTextAlignment(QtCore.Qt.AlignCenter)
+            tbl.setItem(r, 0, ch_item)
+
+            bg, fg = status_colors.get(status, ("#F8FAFC", "#111827"))
+            st_item = QtWidgets.QTableWidgetItem(status)
+            st_item.setTextAlignment(QtCore.Qt.AlignCenter)
+            st_item.setBackground(QtGui.QColor(bg))
+            st_item.setForeground(QtGui.QColor(fg))
+            f = st_item.font(); f.setBold(True); st_item.setFont(f)
+            tbl.setItem(r, 1, st_item)
+
+            n_issues = len(issues)
+            tbl.setItem(r, 2, QtWidgets.QTableWidgetItem(f"{n_issues} issue{'s' if n_issues!=1 else ''}"))
+
+            detail_parts = []
+            for level, label, val, unit in issues:
+                detail_parts.append(f"{label}: {val:+.1f} {unit}" if isinstance(val, float) else f"{label}: {val}")
+            tbl.setItem(r, 3, QtWidgets.QTableWidgetItem("  |  ".join(detail_parts)))
+
+        tbl.resizeColumnsToContents()
+        if not alerts:
+            tbl.insertRow(0)
+            msg = QtWidgets.QTableWidgetItem("No deformation alerts detected.")
+            msg.setForeground(QtGui.QColor(self._C_OK))
+            tbl.setItem(0, 0, msg)
+            tbl.setSpan(0, 0, 1, 4)
 
 
 # ------------------------------------------------------------------------------

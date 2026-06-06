@@ -15,7 +15,8 @@ from ..ifc_exporter import TunnelIFCExporter
 from ..target_detector import TargetDetector, Target
 from ..rag_ai import TunnelRAGAssistant
 from .widgets import (CollapsibleSection, MatplotlibSectionWidget, PolarDeformationPlotWidget,
-                      LinePlotWidget, section_warning_status, section_warning_text)
+                      LinePlotWidget, SummaryDashboardWidget,
+                      section_warning_status, section_warning_text)
 from .i18n_v4 import tr as _tr
 from translations import get_available_languages
 from language_switcher import LanguageSwitcher
@@ -140,6 +141,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle("Tunnel Analysis v4.0 (r1) - CBNU Smart Structure Lab")
         self.resize(1720, 1000)
+        self.setAcceptDrops(True)   # drag & drop point-cloud files from Explorer
 
         self.context   = PipelineContext()
         self.base_mod  = BaseLayer()
@@ -177,8 +179,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._task_dialog = None           # TaskProgressDialog while a worker runs
         self._task_start_ms: int = 0       # QDateTime msecs when current task began
         self._auto_running: bool = False  # True while AUTO PIPELINE is driving steps
-        self._ai_tab_idx:   int = 5
-        self._section_tab_idx: int = 3
+        self._ai_tab_idx:   int = 0   # overwritten in _build_ui via addTab return value
+        self._section_tab_idx: int = 0  # overwritten in _build_ui via addTab return value
         self._sections: List[CollapsibleSection] = []
         self._hdr_title_src = "Tunnel Analysis v4.0"
         self._hdr_desc_src  = "Select a structural analysis workflow from the sidebar."
@@ -225,6 +227,15 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
         self.results_text = QtWidgets.QPlainTextEdit(); self.results_text.setReadOnly(True)
         self.right_tabs.addTab(self.results_text, "Results Log")
+
+        # ── Analysis Summary Dashboard ──────────────────────────────────────
+        # Single-glance overview: colour-coded metric cards (crown / convergence
+        # / eccentricity / ovality), overall status banner, and a top-8 section
+        # alert list.  Updated automatically whenever _show_params() or the
+        # 5.7_sections dispatch fires.
+        self.dashboard_widget = SummaryDashboardWidget()
+        self._dashboard_tab_idx = self.right_tabs.addTab(
+            self.dashboard_widget, "Summary Dashboard")
 
         # Parameters table: unit-aware values grouped by theme with a status
         # column (OK/CAUTION/CRITICAL), fed by _fill_param_table via _show_params.
@@ -380,7 +391,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._ts_tab_idx = self.right_tabs.addTab(self.ts_plot, "Time-Series Plot")
 
         self.section_widget = MatplotlibSectionWidget()
-        self.right_tabs.addTab(self.section_widget, "2D Cross-Section")
+        self._section_tab_idx = self.right_tabs.addTab(self.section_widget, "2D Cross-Section")
 
         self.polar_plot = PolarDeformationPlotWidget()
         self.right_tabs.addTab(self.polar_plot, "Polar Deformation")
@@ -398,7 +409,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         ai_lay.addWidget(self.ai_send)
         self._ai_report_lbl = QtWidgets.QLabel(_tr("AI analysis report:", self.current_language))
         ai_lay.addWidget(self._ai_report_lbl); ai_lay.addWidget(self.ai_resp, 1)
-        self.right_tabs.addTab(ai_panel, "AI Engineering Assistant")
+        self._ai_tab_idx = self.right_tabs.addTab(ai_panel, "AI Engineering Assistant")
 
         if CORE_FEATURES_ONLY:
             self._hide_non_core_tabs()
@@ -432,6 +443,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         pf_lay = QtWidgets.QHBoxLayout(pf_frame)
         self._profile_combo = QtWidgets.QComboBox()
         self._profile_combo.addItems(TUNNEL_PROFILES)
+        # Track whether the user manually picked a profile, so the one-time
+        # auto-detect (in _slot_5_7_sections) does not override a deliberate
+        # choice. _profile_setting_programmatically guards programmatic updates
+        # from being mistaken for a user action.
+        self._profile_user_set = False
+        self._profile_setting_programmatically = False
         self._profile_combo.currentTextChanged.connect(self._on_profile_changed)
         pf_lay.addWidget(self._profile_combo); out.addWidget(pf_frame)
         if CORE_FEATURES_ONLY:
@@ -610,6 +627,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _on_profile_changed(self, text: str) -> None:
         self.context.tunnel_profile = text
+        # A change the user made by hand pins the choice; programmatic updates
+        # (the auto-detect default) do not.
+        if not self._profile_setting_programmatically:
+            self._profile_user_set = True
 
     def _hide_non_core_tabs(self) -> None:
         """Hide advanced output tabs while keeping their widgets and tab
@@ -983,6 +1004,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         elif key in ("5.1_settlement", "5.2_convergence", "5.5_ovality", "5.6_eccentricity"):
             self.context.parameters.update(result); self._show_params(result)
 
+        elif key == "auto_params":
+            # AUTO PIPELINE step 6/6: all four deformation metrics combined.
+            self.context.parameters.update(result)
+            self._show_params(result)
+
         elif key == "5.3b_hausdorff":
             pts, dist_mm, colors = result
             self.context.heatmap_scalars = dist_mm
@@ -1059,6 +1085,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                     "Red = critical deformation/clearance, amber = caution.")
         elif key == "5.7_sections":
             sections: List[SectionGeometry] = result; self.context.sections = sections
+            # Reflect the profile actually used (auto-detected in the worker /
+            # auto-pipeline) back into the dropdown so the UI shows the truth.
+            if hasattr(self, "_profile_combo") and self.context.tunnel_profile:
+                self._profile_setting_programmatically = True
+                self._profile_combo.setCurrentText(self.context.tunnel_profile)
+                self._profile_setting_programmatically = False
             self._section_ref_sections = []
             self.section_widget.set_sections(sections, profile=self.context.tunnel_profile, vl_box_w=self._sp_vl_w.value(), vl_box_h=self._sp_vl_h.value(), vl_cir_r=self._sp_vl_r.value())
             try: self.section_widget.section_changed.disconnect()
@@ -1084,6 +1116,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 except Exception as e:
                     self._log(f"T0 overlay: {e}")
             self.right_tabs.setCurrentIndex(self._section_tab_idx)
+            # Push section data to dashboard (section alerts list).
+            ref_secs = getattr(self, "_section_ref_sections", []) or []
+            self.dashboard_widget.update_sections(
+                sections, ref_secs, profile=self.context.tunnel_profile or "Circle")
             valid = [s for s in sections if s.pts_2d is not None]
             self._log(_tr("--- 2D technical cross-section analysis ---", self.current_language))
             self._log(f"  Total section slices analyzed along the alignment: {len(sections)}")
@@ -1188,6 +1224,54 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         max_pts = self._ask_max_points(fp)
         if max_pts is None: return
         self._start_worker("1.1_import", lambda: self.base_mod.load_scan(fp, max_points=max_pts))
+
+    # ------------------------------------------------------------------ #
+    # Drag & drop: drop a point-cloud file from Explorer to load it.
+    # First file -> import (1.1); subsequent files -> add station (1.3).
+    # ------------------------------------------------------------------ #
+    _PC_EXTS = (".las", ".laz", ".ply", ".txt", ".xyz", ".pts", ".csv", ".asc")
+
+    @classmethod
+    def _is_pc_file(cls, fp: str) -> bool:
+        return bool(fp) and fp.lower().endswith(cls._PC_EXTS)
+
+    def dragEnterEvent(self, e) -> None:
+        md = e.mimeData()
+        if md.hasUrls() and any(self._is_pc_file(u.toLocalFile()) for u in md.urls()):
+            e.acceptProposedAction()
+        else:
+            e.ignore()
+
+    def dragMoveEvent(self, e) -> None:
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
+        else:
+            e.ignore()
+
+    def dropEvent(self, e) -> None:
+        paths = [u.toLocalFile() for u in e.mimeData().urls() if self._is_pc_file(u.toLocalFile())]
+        if not paths:
+            e.ignore(); return
+        e.acceptProposedAction()
+        if self.worker_thread is not None:
+            self._log(_tr("Busy: wait for the current task to finish before dropping a file.", self.current_language))
+            return
+        fp = paths[0]
+        import pathlib
+        name = pathlib.Path(fp).name
+        if len(paths) > 1:
+            self._log(f"Multiple files dropped; loading '{name}'. Drop the rest one at a time to add stations.")
+        max_pts = self._ask_max_points(fp)
+        if max_pts is None:
+            return
+        if len(self.context.scans) == 0:
+            self._hdr("LiDAR Data Acquisition (drag & drop)",
+                      "Loaded by drag & drop: " + name)
+            self._start_worker("1.1_import", lambda: self.base_mod.load_scan(fp, max_points=max_pts))
+        else:
+            self._hdr("Add Scan Station (drag & drop)",
+                      "Added by drag & drop: " + name)
+            self._start_worker("1.3_add_scan", lambda: self.base_mod.load_scan(fp, max_points=max_pts))
 
     def _slot_1_8_epochs(self) -> None:
         self._hdr("Load T0/Tn Epochs", "Load reference T0 and monitoring Tn at the start of the pipeline.")
@@ -1867,6 +1951,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 self.plotter.render()
             except Exception: pass
         self.results_text.clear()
+        self.dashboard_widget.clear()
         self.pt_label.setText("Points: --")
         self.sb_pts.setText("Points: --")
         self.sb_msg.setText(_tr("Pipeline reset. Raw scans preserved.", self.current_language))
@@ -2136,6 +2221,17 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if CORE_FEATURES_ONLY:
             self.context.tunnel_profile = self.par_mod.detect_profile(self.context)
             self._log(_tr("Auto-detected tunnel profile: {p}", self.current_language).format(p=self.context.tunnel_profile))
+        elif not self._profile_user_set:
+            # Full mode: auto-detect once and pre-select the dropdown so the
+            # default matches the real shape (Circle/Box/Box 2-cell/U-type).
+            # The user can still override; a manual pick disables this.
+            detected = self.par_mod.detect_profile(self.context)
+            self._profile_setting_programmatically = True
+            self._profile_combo.setCurrentText(detected)
+            self._profile_setting_programmatically = False
+            self.context.tunnel_profile = detected
+            self._log(_tr("Auto-detected tunnel profile: {p}", self.current_language).format(p=detected)
+                      + "  (" + _tr("override in 'Tunnel Profile Type'", self.current_language) + ")")
         else:
             self.context.tunnel_profile = self._profile_combo.currentText()
         self._auto_set_clearance()
@@ -3013,7 +3109,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 self.results_text.appendPlainText(f"  {label}: {text}{tag}")
         self.results_text.appendPlainText("----------------------------")
         self._fill_param_table(params)
-        self.right_tabs.setCurrentIndex(0)
+        # Push to Summary Dashboard (auto-switch to it for quick review).
+        self.dashboard_widget.update_params(params)
+        self.right_tabs.setCurrentIndex(self._dashboard_tab_idx)
 
     def _update_meta(self, b: PointCloudBundle) -> None:
         rows = list(b.metadata.items()); self.meta_table.setRowCount(len(rows))
@@ -3067,7 +3165,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.task_desc.setText(_tr(self._hdr_desc_src, lang))
 
         # Right-panel tab titles
-        tab_titles = ["Results Log", "Scan Database", "Stations", "Targets",
+        tab_titles = ["Results Log", "Summary Dashboard", "Parameters",
+                      "Scan Database", "Stations", "Targets",
                       "Time-Series Plot", "2D Cross-Section", "Polar Deformation",
                       "AI Engineering Assistant"]
         for i in range(self.right_tabs.count()):
