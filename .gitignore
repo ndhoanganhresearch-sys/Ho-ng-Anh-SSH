@@ -72,3 +72,6 @@ _ref_*/
 
 # Keep package markers (the _*.py rule above also matches __init__.py)
 !**/__init__.py
+
+# Local Claude/Codex agent state
+.claude/
