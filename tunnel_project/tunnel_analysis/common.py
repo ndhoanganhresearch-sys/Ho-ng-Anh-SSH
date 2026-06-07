@@ -11,6 +11,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 # ------------------------------------------------------------------------------
 os.environ.setdefault("QT_API", "pyside6")
 os.environ.setdefault("MPLBACKEND", "QtAgg")
+os.environ.setdefault("VTK_SILENCE_GET_VOID_POINTER_WARNINGS", "1")
 os.environ["VTK_TK_WIDGET_PATH"] = ""
 os.environ["VTK_DISABLE_TK_WIDGET"] = "1"
 
@@ -42,15 +43,15 @@ try:
 except ImportError:
     py4dgeo = None
 
+pv = None
+
 try:
-    import pyvista as pv
-    if hasattr(pv, "set_qt_api"):
-        try:
-            pv.set_qt_api("pyside6")
-        except Exception:
-            pass
-except ImportError:
-    pv = None
+    import vtk
+    vtk.vtkObject.GlobalWarningDisplayOff()
+    if hasattr(vtk, "vtkLogger"):
+        vtk.vtkLogger.SetStderrVerbosity(vtk.vtkLogger.VERBOSITY_OFF)
+except Exception:
+    vtk = None
 
 # Qt is required for the GUI, but the numeric analysis core (geometry,
 # registration, timeseries, ...) is pure NumPy/SciPy and must stay importable
@@ -59,11 +60,11 @@ except ImportError:
 QT_IMPORT_ERROR: Optional[str] = None
 try:
     from PySide6 import QtCore, QtGui, QtWidgets
-    from pyvistaqt import QtInteractor
+    QtInteractor = None  # lazy-loaded by the GUI viewport to keep tests headless
 except ImportError as _exc:
     QtCore = QtGui = QtWidgets = QtInteractor = None  # type: ignore[assignment]
     QT_IMPORT_ERROR = (
-        "PySide6 / pyvistaqt required.\n"
+        "PySide6 required.\n"
         "pip install PySide6 pyvista pyvistaqt vtk laspy open3d scipy matplotlib"
     )
 
@@ -241,7 +242,17 @@ def make_vertex_cloud(
     intensity: Optional[np.ndarray] = None,
     colors_raw: Optional[np.ndarray] = None,
 ) -> "pv.PolyData":
-    if pv is None: raise RuntimeError("PyVista not installed.")
+    global pv
+    if pv is None:
+        try:
+            import pyvista as _pv
+            pv = _pv
+            try:
+                pv.global_theme.silence_errors = True
+            except Exception:
+                pass
+        except ImportError as exc:
+            raise RuntimeError("PyVista not installed.") from exc
     xyz = np.ascontiguousarray(validate_xyz(pts)[:, :3], dtype=np.float64)
     n = len(xyz)
     cloud = pv.PolyData()

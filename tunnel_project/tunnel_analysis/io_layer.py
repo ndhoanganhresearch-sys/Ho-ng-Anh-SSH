@@ -18,8 +18,8 @@ def _read_las(fp: str, max_points: int = MAX_POINTS_DEFAULT) -> PointCloudBundle
     las = laspy.read(fp)
     total = len(las.x)
 
-    # Always defined, regardless of which branch runs below, so the
-    # make_vertex_cloud(...) call cannot hit an unbound 'colors'.
+    # Always defined, regardless of which branch runs below, so metadata and
+    # optional rendering channels stay row-aligned.
     colors = None
     has_rgb = all(hasattr(las, c) for c in ("red", "green", "blue"))
 
@@ -53,9 +53,8 @@ def _read_las(fp: str, max_points: int = MAX_POINTS_DEFAULT) -> PointCloudBundle
 
     pts = np.vstack([x, y, z]).T.astype(np.float64)
     pts = validate_xyz(pts, Path(fp).name)
-    cloud = make_vertex_cloud(pts, intensity=intensity, colors_raw=colors)
     return PointCloudBundle(
-        points=pts, intensity=intensity, colors_raw=colors, path=fp, cloud=cloud,
+        points=pts, intensity=intensity, colors_raw=colors, path=fp, cloud=None,
         metadata={
             "format": Path(fp).suffix.lower(),
             "point_count": int(len(pts)),
@@ -105,9 +104,8 @@ def _read_ply(fp: str) -> PointCloudBundle:
             pts = np.column_stack([table[fn[i]] for i in xyz_i]).astype(np.float64)
             col = np.column_stack([table[fn[i]] for i in ci]).astype(np.float64) if ci else None
     pts = validate_xyz(pts, path.name)
-    cloud = make_vertex_cloud(pts, colors_raw=col)
     return PointCloudBundle(
-        points=pts, colors_raw=col, path=fp, cloud=cloud,
+        points=pts, colors_raw=col, path=fp, cloud=None,
         metadata={"format": ".ply", "point_count": int(len(pts)),
                   "bounds_min": pts.min(0).tolist(), "bounds_max": pts.max(0).tolist(),
                   "has_intensity": False, "has_colors": col is not None},
@@ -199,7 +197,6 @@ def _read_txt(fp: str, max_points: int = MAX_POINTS_DEFAULT) -> PointCloudBundle
         if colors is not None: colors = colors[finite]
         if labels is not None: labels = labels[finite]
     pts = validate_xyz(pts, path.name)
-    cloud = make_vertex_cloud(pts, intensity=intensity, colors_raw=colors)
     meta = {
         "format": path.suffix.lower(),
         "columns": int(ncol),
@@ -216,7 +213,7 @@ def _read_txt(fp: str, max_points: int = MAX_POINTS_DEFAULT) -> PointCloudBundle
         "has_labels": labels is not None,
     }
     bundle = PointCloudBundle(
-        points=pts, intensity=intensity, colors_raw=colors, path=fp, cloud=cloud,
+        points=pts, intensity=intensity, colors_raw=colors, path=fp, cloud=None,
         metadata=meta,
     )
     if labels is not None:

@@ -723,6 +723,17 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             # re-issuing render_window.Render() and pins the GPU, making the
             # app appear to hang (the repeated KeyboardInterrupt seen in
             # render). We render on-demand after each _render_* call instead.
+            global QtInteractor
+            if QtInteractor is None:
+                try:
+                    import vtk
+                    vtk.vtkObject.GlobalWarningDisplayOff()
+                    if hasattr(vtk, "vtkLogger"):
+                        vtk.vtkLogger.SetStderrVerbosity(vtk.vtkLogger.VERBOSITY_OFF)
+                except Exception:
+                    pass
+                from pyvistaqt import QtInteractor as _QtInteractor
+                QtInteractor = _QtInteractor
             self.plotter = QtInteractor(self.vp_frame, auto_update=False); self.plotter.set_background("#F8FAFC")
             self.vp_layout.addWidget(self.plotter, 1); self.plotter.add_axes(color="#111827")
             self.plotter.show_bounds(color="#94A3B8", grid="front", location="outer", font_size=8)
