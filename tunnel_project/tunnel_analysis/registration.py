@@ -26,6 +26,116 @@ class RegistrationLayer:
         if pts is None or len(context.scans) < 2: return float("nan")
         return self._rmse(validate_xyz(pts), validate_xyz(context.scans[0].points))
 
+    def register_epochs(
+        self, context: PipelineContext, ref_index: int = 0,
+        min_targets: int = 3, max_match_dist: float = 2.0,
+        detect_max_points: int = 200_000,
+    ) -> Dict:
+        """Register the monitoring epoch (Tn) onto the reference epoch (T0).
+
+        Solves the field problem: T0 and Tn are scanned from DIFFERENT setups,
+        so their coordinate frames differ. This finds the rigid transform that
+        brings Tn into T0's frame so deformation can be measured per section.
+
+        Auto-selects the method (the caller need not know in advance):
+
+          • **Target-based** — if >= ``min_targets`` fixed markers (reflectors /
+            checkerboards / intensity peaks) are detected and matched in BOTH
+            epochs, the transform is computed by rigid SVD from the markers
+            alone. Markers do not deform, so this NEVER absorbs the tunnel's
+            deformation into the alignment. Preferred for deformation work.
+
+          • **ICP fallback** — when no markers are present, a coarse anchor /
+            GROR alignment followed by surface ICP. Note: full-cloud ICP can
+            slightly absorb a large localized deformation into the transform;
+            it is fine when the deformation is a small fraction of the cloud.
+
+        T0 = ``scans[ref_index]`` (kept fixed). Tn = the active scan (or the
+        other scan when active == reference). Returns a dict::
+
+            {"points": Nx3 aligned Tn, "rmse_mm": float,
+             "method": "target"|"icp", "n_targets": int}
+
+        The aligned points are also stored in ``context.registered_points`` so
+        downstream steps (centerline / sections / deformation) use the aligned
+        monitoring cloud automatically.
+        """
+        if len(context.scans) < 2:
+            raise RuntimeError("register_epochs: need >= 2 epochs (T0 + Tn).")
+        ref_index = max(0, min(ref_index, len(context.scans) - 1))
+        tgt_scan = context.scans[ref_index]                       # T0 reference
+        # Source = active monitoring scan; if active IS the reference, take the other.
+        src_scan = context.active_scan
+        if src_scan is None or src_scan is tgt_scan:
+            other = 1 if ref_index == 0 else 0
+            src_scan = context.scans[other]
+        src = validate_xyz(src_scan.points)
+        tgt = validate_xyz(tgt_scan.points)
+
+        # ── 1) Try target-based rigid registration (no deformation absorption)
+        T = None
+        n_matched = 0
+        try:
+            from .target_detector import TargetDetector
+            from .models import PointCloudBundle as _PCB
+            det = TargetDetector()
+
+            def _decim(pts, inten):
+                if len(pts) > detect_max_points:
+                    step = len(pts) // detect_max_points + 1
+                    return pts[::step], (inten[::step] if inten is not None else None)
+                return pts, inten
+
+            s_pts, s_int = _decim(src, src_scan.intensity)
+            t_pts, t_int = _decim(tgt, tgt_scan.intensity)
+            src_targets = det.detect_all(_PCB(points=s_pts, intensity=s_int), scan_idx=1)
+            tgt_targets = det.detect_all(_PCB(points=t_pts, intensity=t_int), scan_idx=0)
+            matches = det.match_targets(src_targets, tgt_targets,
+                                        max_dist=max_match_dist, centroid_align=True)
+            if len(matches) >= min_targets:
+                sc = np.array([m[0].center for m in matches], dtype=np.float64)  # Tn
+                tc = np.array([m[1].center for m in matches], dtype=np.float64)  # T0
+                # _horn_svd(src, tgt) -> T maps src(Tn) -> tgt(T0).
+                T, _rmse_t = det._horn_svd(sc, tc)
+                n_matched = len(matches)
+        except Exception as exc:
+            warnings.warn(f"register_epochs: target path skipped ({exc})")
+            T = None
+
+        if T is not None:
+            ones = np.ones((len(src), 1))
+            aligned = (T @ np.hstack([src, ones]).T).T[:, :3]
+            rmse = self._rmse(aligned, tgt)
+            method = "target"
+        else:
+            # ── 2) ICP fallback (coarse anchor/GROR + TRIMMED ICP) ───────────
+            # Trimmed ICP rejects the deformed region from the fit so the
+            # transform is driven by the stable lining and the deformation is
+            # preserved (full-cloud ICP would absorb it).
+            #
+            # DIVERGENCE GUARD: on a long, near-symmetric tunnel ICP can slide
+            # along the axis and end up worse than the input. So we evaluate
+            # {as-is, coarse, trimmed-ICP} and keep whichever has the SMALLEST
+            # residual to T0 — the result is never worse than doing nothing.
+            candidates = [(src, self._rmse(src, tgt))]
+            try:
+                coarse = self._coarse_align(
+                    src, tgt, src_intensity=src_scan.intensity,
+                    tgt_intensity=tgt_scan.intensity)
+                candidates.append((coarse, self._rmse(coarse, tgt)))
+                icp, icp_rmse = self._trimmed_icp(coarse, tgt)
+                candidates.append((icp, icp_rmse))
+            except Exception as exc:
+                warnings.warn(f"register_epochs: ICP fallback failed ({exc})")
+            aligned, rmse = min(candidates, key=lambda c: c[1]
+                                if np.isfinite(c[1]) else float("inf"))
+            method = "icp"
+
+        aligned = validate_xyz(aligned)
+        context.registered_points = aligned
+        return {"points": aligned, "rmse_mm": float(rmse),
+                "method": method, "n_targets": int(n_matched)}
+
 
     def merge_scans(self, context: PipelineContext) -> Tuple[np.ndarray, List[float]]:
         """Merge all loaded scan stations into one point cloud.
@@ -159,6 +269,59 @@ class RegistrationLayer:
             if np.linalg.norm(new - est) < 1e-7: est = new; break
             est = new
         return est
+
+    @staticmethod
+    def _rigid_svd(src: np.ndarray, tgt: np.ndarray) -> np.ndarray:
+        """Best-fit rigid 4x4 mapping src -> tgt (Horn/Kabsch, no scale)."""
+        sc = src.mean(0); tc = tgt.mean(0)
+        H = (src - sc).T @ (tgt - tc)
+        U, _S, Vt = np.linalg.svd(H)
+        R = Vt.T @ U.T
+        if np.linalg.det(R) < 0:
+            Vt[-1] *= -1; R = Vt.T @ U.T
+        T = np.eye(4); T[:3, :3] = R; T[:3, 3] = tc - R @ sc
+        return T
+
+    def _trimmed_icp(self, src: np.ndarray, tgt: np.ndarray,
+                     keep_frac: float = 0.80, iters: int = 25
+                     ) -> Tuple[np.ndarray, float]:
+        """Trimmed ICP (TrICP) — rigid alignment that does NOT absorb deformation.
+
+        Standard ICP fits ALL correspondences, so a deformed region pulls the
+        transform and the measured deformation shrinks (observed: a 60 mm crown
+        settlement collapsed to ~16 mm after full-cloud ICP). TrICP instead
+        rejects the worst ``1-keep_frac`` residuals each iteration — the
+        deformed lining becomes an "outlier" and is excluded from the fit, so
+        the transform is driven by the STABLE majority and the deformation is
+        preserved for measurement.
+
+        Returns (aligned_src, rmse_mm) where rmse is over the kept inliers.
+        """
+        try:
+            from scipy.spatial import cKDTree
+        except Exception:
+            return self._icp(src, tgt)
+        tree = cKDTree(tgt)
+        cur = np.asarray(src, dtype=np.float64).copy()
+        keep_frac = float(np.clip(keep_frac, 0.4, 0.98))
+        prev_rmse = np.inf
+        for _ in range(iters):
+            d, idx = tree.query(cur, k=1, workers=-1)
+            thr = np.quantile(d, keep_frac)
+            m = d <= max(thr, 1e-9)
+            if int(m.sum()) < 10:
+                break
+            T = self._rigid_svd(cur[m], tgt[idx[m]])
+            ones = np.ones((len(cur), 1))
+            cur = (T @ np.hstack([cur, ones]).T).T[:, :3]
+            rmse = float(np.sqrt(np.mean(d[m] ** 2)))
+            if abs(prev_rmse - rmse) < 1e-6:
+                break
+            prev_rmse = rmse
+        d, idx = tree.query(cur, k=1, workers=-1)
+        thr = np.quantile(d, keep_frac); m = d <= max(thr, 1e-9)
+        rmse_mm = float(np.sqrt(np.mean(d[m] ** 2))) * 1e3 if m.any() else float("nan")
+        return cur, rmse_mm
 
     def _icp(self, src: np.ndarray, tgt: np.ndarray) -> Tuple[np.ndarray, float]:
         if small_gicp is not None and len(src) >= 20 and len(tgt) >= 20:

@@ -1,6 +1,22 @@
 import os
+import sys
 import warnings
 import logging
+
+# ── Isolate from Microsoft Store Python user-site ───────────────────────────
+# The MS Store Python injects its per-user site-packages
+# (…\LocalCache\local-packages\Python312\site-packages) onto sys.path even
+# inside a venv in some launch contexts (e.g. an IDE "Run" button). That folder
+# can hold a DIFFERENT numpy (e.g. 2.4.3) than the venv's (2.4.6); loading that
+# numpy against the venv's scipy is an ABI mismatch and triggers a
+# RecursionError while importing scipy.stats (via py4dgeo). Prune those entries
+# BEFORE anything imports numpy (vtk below pulls it in). The venv's own
+# "…\.venv\Lib\site-packages" does NOT contain "local-packages", so it stays.
+_before = len(sys.path)
+sys.path[:] = [p for p in sys.path if "local-packages" not in p.replace("/", "\\").lower()]
+if len(sys.path) != _before:
+    os.environ["PYTHONNOUSERSITE"] = "1"   # belt-and-suspenders for child procs
+    sys.modules.pop("numpy", None)         # ensure a clean (re)import from venv
 
 # Suppress VTK/PyVista warning spam
 os.environ["VTK_SILENCE_GET_VOID_POINTER_WARNINGS"] = "1"

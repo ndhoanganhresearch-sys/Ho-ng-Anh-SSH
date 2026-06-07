@@ -74,6 +74,13 @@ class PreprocessingLayer:
             dn = self._np_voxel(pts, voxel_size)
         dn = validate_xyz(dn, "voxel")
         c  = dn.mean(0)
+        # Recenter to the local origin ONLY for a single scan (helps numerical
+        # stability of PCA/centerline on large field coordinates). With 2+ scans
+        # (T0/Tn epochs or stations) recentering just ONE scan would shift it away
+        # from the others and break their spatial overlap — keep the loaded frame
+        # so registration can align them.
+        if len(context.scans) >= 2:
+            return dn, c
         return dn - c, c
 
 

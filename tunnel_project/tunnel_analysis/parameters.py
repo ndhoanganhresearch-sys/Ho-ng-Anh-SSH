@@ -21,6 +21,32 @@ class ParameterExtractionLayer:
             return default
         return float(np.clip(np.nanmedian(finite_diffs) * 0.55, default, 0.5))
 
+    @staticmethod
+    def _has_t0_reference(context: PipelineContext) -> bool:
+        """True when a T0 reference (scans[0]) is usable for deformation.
+
+        Mirrors the section/eccentricity comparison logic so crown settlement
+        and horizontal convergence stay CONSISTENT with the rest of the UI:
+        the reference is conventionally scans[0] and the monitoring epoch is
+        ``working_points`` (registered/normalized cloud after processing).
+
+        A previous check required ``active_index > 0``, which broke when the
+        monitoring cloud lives in registered/normalized_points while
+        active_index stayed at 0 — sections compared fine but crown/convergence
+        fell back to single-scan ("Cần T0"). This helper accepts that case.
+
+        Returns False only when there is no second scan, no frames, or the
+        working cloud IS the reference itself (active_index 0 with no processed
+        cloud) — i.e. nothing to compare against.
+        """
+        if len(context.scans) < 2 or not context.frenet_frames:
+            return False
+        # A distinct monitoring cloud exists if we are not sitting on scans[0],
+        # or processing produced a registered/normalized working cloud.
+        return (context.active_index != 0
+                or context.registered_points is not None
+                or context.normalized_points is not None)
+
     def calc_arch_settlement(self, context: PipelineContext) -> Dict[str, float]:
         """Crown settlement dv per PDF 3.5.
         Per-section: find crown point (max B-direction) in each Frenet section.
@@ -32,8 +58,7 @@ class ParameterExtractionLayer:
         """
         pts_n = self._req(context, "5.1")
         eps   = self._section_epsilon(context)
-        has_ref = (len(context.scans) >= 2 and context.active_index > 0
-                   and context.frenet_frames)
+        has_ref = self._has_t0_reference(context)
 
         dv_list: List[float] = []
         crown_n_list: List[float] = []
@@ -48,16 +73,20 @@ class ParameterExtractionLayer:
                 sl_n   = pts_n[mask_n]
                 if len(sl_n) < 5: continue
                 d_n    = sl_n - C
-                # Crown = max projection onto B (upward direction)
+                # Crown = highest projection onto B (upward direction).
+                # Use the 99th percentile, NOT max(): a single stray point in
+                # the slab corrupts max() and inflated crown delta to ~1.2 m on
+                # real data (33/80 sections affected). p99 is the robust crown
+                # height and matches the ground-truth crown within mm.
                 b_proj_n = d_n @ B
-                crown_n  = float(b_proj_n.max())
+                crown_n  = float(np.percentile(b_proj_n, 99))
                 crown_n_list.append(crown_n)
                 if has_ref and pts_0 is not None:
                     mask_0 = np.abs((pts_0 - C) @ T) < eps
                     sl_0   = pts_0[mask_0]
                     if len(sl_0) >= 5:
                         b_proj_0 = (sl_0 - C) @ B
-                        crown_0  = float(b_proj_0.max())
+                        crown_0  = float(np.percentile(b_proj_0, 99))
                         crown_0_list.append(crown_0)
                         # Positive = downward settlement (crown lower at Tn).
                         dv_list.append((crown_0 - crown_n) * 1e3)
@@ -90,8 +119,7 @@ class ParameterExtractionLayer:
         """
         pts_n = self._req(context, "5.2")
         eps   = self._section_epsilon(context)
-        has_ref = (len(context.scans) >= 2 and context.active_index > 0
-                   and context.frenet_frames)
+        has_ref = self._has_t0_reference(context)
 
         dh_list: List[float] = []
         w_n_list: List[float] = []
@@ -104,14 +132,16 @@ class ParameterExtractionLayer:
                 sl_n   = pts_n[mask_n]
                 if len(sl_n) < 5: continue
                 n_proj_n = (sl_n - C) @ N
-                w_n = float(n_proj_n.max() - n_proj_n.min())
+                # Robust width via p99-p1 (NOT max-min): stray points otherwise
+                # inflate the span the same way they corrupt crown settlement.
+                w_n = float(np.percentile(n_proj_n, 99) - np.percentile(n_proj_n, 1))
                 w_n_list.append(w_n)
                 if has_ref and pts_0 is not None:
                     mask_0 = np.abs((pts_0 - C) @ T) < eps
                     sl_0   = pts_0[mask_0]
                     if len(sl_0) >= 5:
                         n_proj_0 = (sl_0 - C) @ N
-                        w_0 = float(n_proj_0.max() - n_proj_0.min())
+                        w_0 = float(np.percentile(n_proj_0, 99) - np.percentile(n_proj_0, 1))
                         dh_list.append((w_0 - w_n) * 1e3)
 
         if not w_n_list:
@@ -139,7 +169,7 @@ class ParameterExtractionLayer:
         Fallback: Z-deviation from median (single-scan geometry).
         """
         pts = self._req(context, "5.3")
-        has_ref = len(context.scans) >= 2 and context.active_index > 0
+        has_ref = self._has_t0_reference(context)
         if has_ref and cKDTree is not None:
             try:
                 ref = validate_xyz(context.scans[0].points)
@@ -216,7 +246,7 @@ class ParameterExtractionLayer:
         edges = np.linspace(-np.pi, np.pi, num_bins + 1)
         angles = 0.5 * (edges[:-1] + edges[1:])
         epsilon = self._section_epsilon(context)
-        has_ref = len(context.scans) >= 2 and context.active_index > 0
+        has_ref = self._has_t0_reference(context)
         pts_0 = validate_xyz(context.scans[0].points) if has_ref else None
         sc: List[np.ndarray] = []; dm: List[np.ndarray] = []
         for fr in context.frenet_frames:
@@ -281,6 +311,42 @@ class ParameterExtractionLayer:
         if not ov: return {"ovality_mean_pct": float("nan"), "ovality_max_pct": float("nan")}
         return {"ovality_mean_pct": float(np.mean(ov)), "ovality_max_pct": float(np.max(ov))}
 
+    @staticmethod
+    def _fit_circle_center(x, y):
+        """Least-squares (Kasa) circle centre of 2D points — robust to the
+        asymmetric sampling a thick slab produces on a curved tunnel. Falls back
+        to the centroid if the fit is degenerate."""
+        x = np.asarray(x, dtype=np.float64); y = np.asarray(y, dtype=np.float64)
+        if len(x) < 8:
+            return float(np.mean(x)) if len(x) else 0.0, float(np.mean(y)) if len(y) else 0.0
+        A = np.column_stack([x, y, np.ones_like(x)])
+        b = x * x + y * y
+        try:
+            sol, *_ = np.linalg.lstsq(A, b, rcond=None)
+            cx = sol[0] / 2.0; cy = sol[1] / 2.0
+            if not (np.isfinite(cx) and np.isfinite(cy)):
+                raise ValueError
+            return float(cx), float(cy)
+        except Exception:
+            return float(np.mean(x)), float(np.mean(y))
+
+    @staticmethod
+    def _moving_median(v, frac: float = 0.10):
+        """Robust smooth baseline: moving median with an odd window ~frac of the
+        series. Tracks the slow curve/centreline bias while ignoring local
+        eccentric-defect spikes (so defects survive as deviations)."""
+        v = np.asarray(v, dtype=np.float64)
+        n = len(v)
+        if n < 5:
+            return np.full(n, float(np.median(v)) if n else 0.0)
+        w = max(5, int(n * frac) | 1)        # odd window
+        half = w // 2
+        out = np.empty(n, dtype=np.float64)
+        for i in range(n):
+            lo = max(0, i - half); hi = min(n, i + half + 1)
+            out[i] = np.median(v[lo:hi])
+        return out
+
     def calc_eccentricity(self, context: PipelineContext,
                           design_centers: Optional[np.ndarray] = None) -> Dict[str, float]:
         """Eccentricity e = |C_meas - C_design| per PDF 3.5.
@@ -302,7 +368,7 @@ class ParameterExtractionLayer:
             # Use single design center repeated for all sections
             dc = np.asarray(context.design_center, dtype=np.float64)
             d_centers = np.tile(dc, (len(context.frenet_frames), 1))
-        elif len(context.scans) >= 2 and context.active_index > 0:
+        elif self._has_t0_reference(context):
             # Use T0 section centers per Frenet frame as design reference
             try:
                 pts_0 = validate_xyz(context.scans[0].points)
@@ -336,27 +402,64 @@ class ParameterExtractionLayer:
                 np.linalg.norm(np.diff(cl, axis=0), axis=1))]).tolist()
         else:
             chainages = list(range(len(context.frenet_frames)))
-        for i, fr in enumerate(context.frenet_frames):
-            C, T, N, B = fr["center"], fr["T"], fr["N"], fr["B"]
-            mask = np.abs((pts - C) @ T) < eps
-            sl = pts[mask]
-            if len(sl) < 10: continue
-            d = sl - C; xf = d @ N; yf = d @ B
-            # measured center in 3D
-            C_meas = C + float(np.mean(xf)) * N + float(np.mean(yf)) * B
-            # design center
-            if d_centers is not None and i < len(d_centers):
-                C_des = d_centers[i]
-            else:
-                C_des = C  # fallback: frenet center = design
-            ecc_mm = float(np.linalg.norm(C_meas - C_des)) * 1e3
-            ec.append(ecc_mm)
-            ec_per_section.append({
-                "chainage": float(chainages[i]),
-                "eccentricity_mm": ecc_mm,
-                "C_meas": C_meas.tolist(),
-                "C_design": C_des.tolist(),
-            })
+        if d_centers is not None:
+            # ── T0 / design reference: e = |C_meas - C_design| (unchanged) ──
+            for i, fr in enumerate(context.frenet_frames):
+                C, T, N, B = fr["center"], fr["T"], fr["N"], fr["B"]
+                sl = pts[np.abs((pts - C) @ T) < eps]
+                if len(sl) < 10: continue
+                d = sl - C; xf = d @ N; yf = d @ B
+                C_meas = C + float(np.mean(xf)) * N + float(np.mean(yf)) * B
+                C_des = d_centers[i] if i < len(d_centers) else C
+                ecc_mm = float(np.linalg.norm(C_meas - C_des)) * 1e3
+                ec.append(ecc_mm)
+                ec_per_section.append({"chainage": float(chainages[i]),
+                    "eccentricity_mm": ecc_mm, "C_meas": C_meas.tolist(),
+                    "C_design": C_des.tolist()})
+        else:
+            # ── Single scan, no design: robust circle-fit centre + detrend ──
+            # The slab centroid is biased on a CURVED tunnel (thick slab catches
+            # asymmetric points) and the extracted centreline does not perfectly
+            # track the true tube centre, so a centred curved tunnel reports fake
+            # eccentricity (~hundreds of mm). Fix: (1) use a least-squares CIRCLE
+            # centre per section (robust to asymmetric sampling), (2) take the
+            # design axis to be the MOVING-MEDIAN of those centres along chainage
+            # (the smooth tube axis), and report the LOCAL deviation. A centred
+            # tunnel → ~0; a local eccentric defect still stands out.
+            rows = []   # (i, C, N, B, cx, cy)
+            n_fr = len(context.frenet_frames)
+            # The B-spline centreline is extrapolated near the ends, so a few
+            # end frames are unreliable and would spike the eccentricity (a
+            # tunnel-mouth artifact, not real eccentricity). Trim a small
+            # proportional end zone (~3%); tunnel portals are routinely excluded.
+            k_end = max(2, n_fr // 30)
+            for i, fr in enumerate(context.frenet_frames):
+                if i < k_end or i >= n_fr - k_end:
+                    continue
+                C, T, N, B = fr["center"], fr["T"], fr["N"], fr["B"]
+                sl = pts[np.abs((pts - C) @ T) < eps]
+                if len(sl) < 10: continue
+                d = sl - C; xf = d @ N; yf = d @ B
+                # Skip INCOMPLETE rings (occluded arcs): a partial ring gives an
+                # unreliable circle centre. Require coverage of most of 360 deg.
+                ang = np.arctan2(yf, xf)
+                bins = np.unique(np.floor((ang + np.pi) / (2 * np.pi) * 24).astype(int))
+                if len(bins) < 17:        # < ~70% of 24 angular sectors covered
+                    continue
+                cx, cy = self._fit_circle_center(xf, yf)
+                rows.append((i, C, N, B, cx, cy))
+            if rows:
+                cxs = np.array([r[4] for r in rows]); cys = np.array([r[5] for r in rows])
+                base_x = self._moving_median(cxs); base_y = self._moving_median(cys)
+                for k, (i, C, N, B, cx, cy) in enumerate(rows):
+                    dx = cx - base_x[k]; dy = cy - base_y[k]
+                    ecc_mm = float(np.hypot(dx, dy)) * 1e3
+                    C_meas = C + cx * N + cy * B
+                    C_des  = C + base_x[k] * N + base_y[k] * B
+                    ec.append(ecc_mm)
+                    ec_per_section.append({"chainage": float(chainages[i]),
+                        "eccentricity_mm": ecc_mm, "C_meas": C_meas.tolist(),
+                        "C_design": C_des.tolist()})
         if not ec:
             return {"eccentricity_mean_mm": float("nan"), "eccentricity_max_mm": float("nan")}
         ref = "T0_comparison" if (d_centers is not None and design_centers is None) else               "design_input" if design_centers is not None else "frenet_center"
@@ -622,10 +725,16 @@ class ParameterExtractionLayer:
         return "Circle"
 
     def compute_all_sections(
-        self, context: PipelineContext, vl_box_w: float, vl_box_h: float, vl_cir_r: float, epsilon: float = 0.05
+        self, context: PipelineContext, vl_box_w: float, vl_box_h: float, vl_cir_r: float, epsilon: float = None
     ) -> List[SectionGeometry]:
         pts = self._req(context, "5.7")
         if not context.frenet_frames: raise RuntimeError("Centerline frames missing.")
+        # Adaptive slab half-thickness: a fixed 5 cm slab every ~0.8 m section
+        # spacing captures only ~12% of axial positions, leaving most sections
+        # empty (pts_2d=None). Use _section_epsilon so slabs tile the axis —
+        # this mirrors calc_arch_settlement, which already uses it.
+        if epsilon is None:
+            epsilon = self._section_epsilon(context)
         profile = context.tunnel_profile
         sections: List[SectionGeometry] = []
         cl = context.centerline

@@ -36,13 +36,33 @@ DISPLAY_MAX_POINTS = 600_000
 # Sidebar sub-actions kept in core mode, keyed by the step code at the start
 # of each button label (e.g. "4.3b"). Edit this set to fine-tune the scope.
 CORE_STEP_CODES = {
-    "1.1", "1.2", "1.3", "1.4", "1.8",                # acquire + merge stations / epochs
+    "1.1", "1.3",                                     # acquire: import + add scan (1.2 viewport auto-inits; 1.4 merge / 1.8 epochs hidden)
     "2.1", "2.5",                                     # preprocessing (2.5 = all-in-one denoise)
-    "3.1", "3.2", "3.3",                              # registration + RMSE
-    "4.1", "4.3b", "4.4",                             # centerline + section frames
-    "5.1", "5.2", "5.3", "5.5", "5.6", "5.8",          # deformation parameters
+    "3.0",                                            # epoch auto-align (includes anchor+ICP and reports RMSE)
+    "4.3b",                                           # B-spline centerline (builds its own section frames; 4.4 hidden)
+    "5.1", "5.2", "5.5", "5.6",                       # deformation parameters (5.3/5.8 3D maps hidden — redundant)
     "6.1", "6.2", "6.3",                              # 4D time-series
-    "7.1", "7.1b", "7.1c", "7.2",                     # BIM export (IFC4 + IFC4X3 + components) + AI assistant
+    "7.1c", "7.2",                                    # BIM export (IFC + components = most complete) + AI assistant
+    "8.1", "8.2", "8.3",                              # export results: CSV / Excel / PDF report
+}
+
+# Clean, gap-free DISPLAY numbering for the core sidebar. Filtering still uses
+# the stable unique IDs in CORE_STEP_CODES (so hidden buttons sharing a number
+# never reappear); only the visible label's leading number is rewritten, after
+# filtering, for a tidy 1.1, 1.2, 2.1, 2.2 … sequence. Keys = stable ID, values
+# = display number. Descriptions are untouched (i18n keys mirror these).
+CORE_DISPLAY_RENUMBER = {
+    "1.3": "1.2",     # Add scan station
+    "2.5": "2.2",     # Auto denoise
+    "3.0": "3.1",     # Auto-align T0/Tn
+    "4.3b": "4.1",    # B-spline centerline
+    "5.5": "5.3",     # Ovality
+    "5.6": "5.4",     # Eccentricity
+    "7.1c": "7.1",    # IFC export
+    "8.1": "7.2",     # CSV export  (moved from section 8 into section 7)
+    "8.2": "7.3",     # Excel report
+    "8.3": "7.4",     # PDF report
+    "7.2": "7.5",     # AI assistant (last in the merged section)
 }
 
 # Output tabs hidden in core mode, matched by their English source title.
@@ -423,19 +443,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.ts_plot = LinePlotWidget()
         self._ts_tab_idx = self.right_tabs.addTab(self.ts_plot, "Time-Series Plot")
 
-        # ── 2D Section + Tổng Quan (combined split tab) ─────────────────────
-        # The Summary Dashboard sits to the RIGHT of the 2D cross-section plot
-        # so both views are visible simultaneously without switching tabs.
         self.section_widget = MatplotlibSectionWidget()
-        _sec_dash_split = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
-        _sec_dash_split.addWidget(self.section_widget)
-        _sec_dash_split.addWidget(self.dashboard_widget)
-        _sec_dash_split.setSizes([620, 340])
-        _sec_dash_split.setChildrenCollapsible(False)
-        self._section_tab_idx = self.right_tabs.addTab(
-            _sec_dash_split, "Mặt Cắt 2D + Tổng Quan")
-        # Dashboard is now inside the section tab — keep the index in sync.
-        self._dashboard_tab_idx = self._section_tab_idx
 
         self.polar_plot = PolarDeformationPlotWidget()
         self.right_tabs.addTab(self.polar_plot, "Polar Deformation")
@@ -454,6 +462,15 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._ai_report_lbl = QtWidgets.QLabel(_tr("AI analysis report:", self.current_language))
         ai_lay.addWidget(self._ai_report_lbl); ai_lay.addWidget(self.ai_resp, 1)
         self._ai_tab_idx = self.right_tabs.addTab(ai_panel, "AI Engineering Assistant")
+
+        # ── Last two tabs: 2D Cross-Section then Summary Dashboard ──────────
+        # Placed adjacent at the end so the user reviews the 2D section and the
+        # overall summary side-by-side in the tab bar (2D = second-to-last,
+        # Summary Dashboard = very last).
+        self._section_tab_idx = self.right_tabs.addTab(
+            self.section_widget, "Mặt Cắt 2D")
+        self._dashboard_tab_idx = self.right_tabs.addTab(
+            self.dashboard_widget, "Bảng Tổng Quan")
 
         if CORE_FEATURES_ONLY:
             self._hide_non_core_tabs()
@@ -610,6 +627,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 ("2.6  Extract lining (density-variation)", self._slot_2_6_density_lining),
             ]),
             (3, "Registration and synchronization", "Reg.", [
+                ("3.0  Auto-align T0/Tn epochs (target or ICP)", self._slot_3_0_register_epochs),
                 ("3.1  Anchor translation", self._slot_3_1_anchor),
                 ("3.2  Fine surface ICP", self._slot_3_2_icp),
                 ("3.3  Calculate RMSE", self._slot_3_3_rmse),
@@ -638,23 +656,34 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 ("6.2  M3C2 deformation map T0→Tn", self._slot_6_3_m3c2),
                 ("6.3  Plot 2D Technical Section T0/Tn", self._slot_5_7_sections),
             ]),
-            (7, "BIM and AI", "BIM/AI", [
+            (7, "BIM, reporting and AI", "BIM/Out", [
                 ("7.1  Export IFC package", self._slot_7_1_ifc),
                 ("7.1b Export IFC4X3 (IfcAlignment)", self._slot_7_1b_ifc_alignment),
                 ("7.1c Export IFC + components (cables/lights)", self._slot_7_1c_ifc_components),
-                ("7.2  Query structural AI assistant", self._slot_7_2_query_ai),
-            ]),
-            (8, "Export and reporting", "Out.", [
                 ("8.1  Export section CSV", self._slot_8_1_csv),
                 ("8.2  Export Excel report", self._slot_8_2_excel),
                 ("8.3  Export PDF report", self._slot_8_3_pdf),
+                ("7.2  Query structural AI assistant", self._slot_7_2_query_ai),
+            ]),
+            (8, "Web dashboard", "Web", [
                 ("8.4  Open web dashboard", self._slot_8_4_web),
             ]),
         ]
         for step, title_s, tag, buttons in SECTIONS:
             if CORE_FEATURES_ONLY:
-                buttons = [(label, slot) for (label, slot) in buttons
-                           if label.split()[0] in CORE_STEP_CODES]
+                # Filter by stable ID, then rewrite the leading number for a
+                # clean gap-free display sequence (no namespace collision).
+                kept = []
+                for label, slot in buttons:
+                    code = label.split()[0]
+                    if code not in CORE_STEP_CODES:
+                        continue
+                    new_code = CORE_DISPLAY_RENUMBER.get(code)
+                    if new_code:
+                        desc = label.split(None, 1)[1] if len(label.split(None, 1)) > 1 else ""
+                        label = f"{new_code}  {desc}"
+                    kept.append((label, slot))
+                buttons = kept
                 if not buttons:
                     continue
             sec = CollapsibleSection(title_s, step, tag)
@@ -739,15 +768,14 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.worker_thread = None; self.worker = None; self._btns_enabled(True); self.sb_prog.setValue(0)
 
     def _show_task_dialog(self, key: str) -> None:
-        """Show a progress dialog only if the task is likely to run a while,
-        so quick operations don't flash a dialog. Skipped during AUTO mode
-        (the sidebar button already reports per-step progress)."""
+        """Show the elapsed-time / ETA progress dialog for EVERY manual feature
+        (the 1.5 s threshold was removed on request, so even quick tasks show a
+        timer). Still skipped during AUTO mode — the sidebar button reports
+        per-step progress there and 7 popups would just flash."""
         self._close_task_dialog()
         if self._auto_running:
             return
         eta = self._estimate_eta_seconds(key)
-        if eta < 1.5:
-            return
         title = _tr("Processing: {key}", self.current_language).format(key=key)
         try:
             self._task_dialog = TaskProgressDialog(
@@ -941,7 +969,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         elif key == "2.1_voxel":
             pts, centroid = result; self.context.normalized_points = pts
             raw_n = len(self.context.active_scan.points) if self.context.active_scan else len(pts)
-            self._render_pts(pts, "2.1 Voxel Grid Filter", "#3B82F6")
+            if len(self.context.scans) >= 2:
+                # Keep all stations (T0+Tn) visible; active uses the voxelized cloud.
+                self._render_all_stations(active_pts=pts, title="2.1 Voxel Grid Filter (all stations)")
+            else:
+                self._render_pts(pts, "2.1 Voxel Grid Filter", "#3B82F6")
             self.pt_label.setText(f"Points: {len(pts):,}"); self.sb_pts.setText(f"Points: {len(pts):,}")
             self._log(f"Voxel downsampling complete: {len(pts):,}/{raw_n:,} points retained; centroid shifted to local origin {np.round(centroid, 3).tolist()}.")
 
@@ -1004,6 +1036,22 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             noise_pts = np.asarray(stats.get("noise_pts", np.empty((0, 3))), dtype=np.float64)
             if self._auto_running:
                 self._render_pts(pts, "2.5 Auto Denoise - Clean lining (auto)", "#0EA5E9")
+            elif len(self.context.scans) >= 2:
+                # Keep T0+Tn both visible AND still show the removed noise (red)
+                # for the active station so denoising stays inspectable.
+                self._render_all_stations(active_pts=pts,
+                    title="2.2 Auto Denoise (all stations) | removed = red")
+                if noise_pts is not None and len(noise_pts) > 0:
+                    try:
+                        nd = noise_pts
+                        if len(nd) > DISPLAY_MAX_POINTS:
+                            nd = nd[::int(np.ceil(len(nd) / DISPLAY_MAX_POINTS))]
+                        self.plotter.add_mesh(make_vertex_cloud(nd), color="#DC2626",
+                            style="points", point_size=3.0, render_points_as_spheres=True,
+                            name="removed", reset_camera=False)
+                        self.plotter.render()
+                    except Exception:
+                        pass
             else:
                 self._render_filter_result(pts, noise_pts,
                     "2.5 Auto Denoise | lining=blue, removed=red")
@@ -1011,6 +1059,29 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self.sb_pts.setText(f"Points: {len(pts):,}")
             self._log(f"Auto denoise: {stats.get('n_clean', len(pts)):,}/{stats.get('n_raw', len(pts)):,} kept, {stats.get('n_removed', 0):,} removed.")
             self._log(f"  Cable={stats.get('n_cable', 0)} Light={stats.get('n_light', 0)} Person/Vehicle={stats.get('n_person', 0)} Radial={stats.get('n_radial', 0)}")
+
+        elif key == "epoch_register":
+            # AUTO PIPELINE step 2b: align Tn onto T0 (different scanner setups).
+            if result is None:
+                self._log("Epoch alignment: single scan — skipped (no T0/Tn to align).")
+            else:
+                self.context.registered_points = np.asarray(result["points"], dtype=np.float64)
+                method_vi = ("điểm mốc cố định" if result["method"] == "target"
+                             else "ICP cắt tỉa (trimmed)")
+                self._log(f"Căn chỉnh T0/Tn: phương pháp = {method_vi}  |  "
+                          f"RMSE = {result['rmse_mm']:.2f} mm")
+                if result["method"] == "target":
+                    self._log(f"  {result['n_targets']} điểm mốc khớp — biến dạng KHÔNG bị triệt tiêu.")
+                else:
+                    self._log("  Không thấy mốc → trimmed ICP (khớp trên vùng ổn định, giữ biến dạng cục bộ).")
+                self.sb_rmse.setText(f"RMSE: {result['rmse_mm']:.2f} mm")
+                # Manual run: show the aligned monitoring cloud overlaid on T0.
+                if not self._auto_running:
+                    try:
+                        self._render_pts(self.context.registered_points,
+                                         "3.0 Tn aligned to T0 (registered)", "#10B981")
+                    except Exception:
+                        pass
 
         elif key == "2.6_density_lining":
             pts, stats = result
@@ -1565,6 +1636,15 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._hdr("Lining Extraction by Label", "Keep structural lining classes from the per-point semantic label (FY387/STSD); interior objects are dropped. Auto-detects lining classes by shell radius when none are specified.")
         self._start_worker("2.3b_lining_label", lambda: self.pre_mod.extract_lining_by_label(self.context))
 
+    def _slot_3_0_register_epochs(self) -> None:
+        self._hdr("Auto-align T0/Tn epochs",
+                  "Đưa lần đo Tn về cùng hệ tọa độ với T0. Tự dùng điểm mốc cố định "
+                  "(không triệt tiêu biến dạng) nếu phát hiện ≥3 mốc, nếu không thì trimmed ICP.")
+        if len(self.context.scans) < 2:
+            self._log("Cần ≥2 lần đo (T0 + Tn) để căn chỉnh. Dùng '1.8 Load T0 and Tn epochs' trước.")
+            return
+        self._start_worker("epoch_register", lambda: self.reg_mod.register_epochs(self.context))
+
     def _slot_3_1_anchor(self) -> None:
         self._hdr("Target Anchor Translation", "Apply the initial target-based translation alignment.")
         self._start_worker("3.1_anchor", lambda: self.reg_mod.anchor_translation(self.context))
@@ -1605,6 +1685,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
              "Step 1/6: Voxel downsampling..."),
             ("2.5_auto_denoise", lambda: self.pre_mod.auto_denoise(self.context),
              "Step 2/6: Smart noise removal (cables, lights, people, wall cables)..."),
+            ("epoch_register",  lambda: self._auto_register_epochs(),
+             "Step 2b: Align T0/Tn epochs (auto target/ICP)..."),
             ("4.1_centerline",  lambda: self.geo_mod.extract_centerline(self.context, section_count=self._resolve_section_count()),
              "Step 3/6: Centerline extraction..."),
             ("4.3b_bspline",    lambda: self.geo_mod.extract_centerline_bspline(self.context, section_count=self._resolve_section_count()),
@@ -1628,6 +1710,19 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         else:
             w, h, r = self._sp_vl_w.value(), self._sp_vl_h.value(), self._sp_vl_r.value()
         return self.par_mod.compute_all_sections(self.context, vl_box_w=w, vl_box_h=h, vl_cir_r=r)
+
+    def _auto_register_epochs(self):
+        """AUTO PIPELINE epoch-alignment step.
+
+        When 2+ epochs are loaded (T0 + Tn from different scanner setups), align
+        Tn onto T0 so deformation is measured in a common frame. Auto-uses fixed
+        markers when present (no deformation absorption), else trimmed ICP.
+        Returns None (no-op) for a single scan so single-epoch runs are
+        unaffected.
+        """
+        if len(self.context.scans) < 2:
+            return None
+        return self.reg_mod.register_epochs(self.context)
 
     def _auto_extract_params(self) -> Dict:
         par = self.par_mod
@@ -2635,6 +2730,44 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 break
 
 
+    def _render_all_stations(self, active_pts=None, title: str = None) -> None:
+        """Render EVERY scan station as a coloured cloud (keeps T0+Tn both
+        visible through preprocessing). The active scan uses ``active_pts`` (the
+        just-processed cloud) when given, others use their raw points.
+        """
+        if self.plotter is None or not self.context.scans:
+            return
+        self.plotter.clear(); self.plotter.set_background("#F8FAFC")
+        for i, sc in enumerate(self.context.scans):
+            try:
+                if i == self.context.active_index and active_pts is not None:
+                    pts = validate_xyz(active_pts)
+                else:
+                    pts = validate_xyz(sc.points)
+                n = len(pts)
+                if n > DISPLAY_MAX_POINTS:
+                    pts = pts[::int(np.ceil(n / DISPLAY_MAX_POINTS))]
+                color = self._station_colors[i % len(self._station_colors)]
+                self.plotter.add_mesh(make_vertex_cloud(pts), color=color,
+                    style="points", point_size=2.2, render_points_as_spheres=False,
+                    name=f"station_pts_{i}", reset_camera=False)
+                center = pts.mean(axis=0)
+                lbl = "S" + str(i + 1) + (" (Ref/T0)" if i == 0 else "")
+                self.plotter.add_point_labels([center], [lbl], font_size=11,
+                    text_color=color, bold=True, show_points=True,
+                    point_color=color, point_size=12,
+                    name=f"station_label_{i}", reset_camera=False)
+            except Exception as e:
+                self._log(f"Station {i+1} render: {e}")
+        if title:
+            try:
+                self.plotter.add_text(title, position="upper_left", font_size=11,
+                                      color="#111827", name="ttl")
+            except Exception:
+                pass
+        self.plotter.add_axes(color="#111827")
+        self.plotter.reset_camera(); self.plotter.render()
+
     def _render_station_markers(self) -> None:
         """Render colored sphere + label for each scan station on 3D viewport."""
         if self.plotter is None: return
@@ -2951,9 +3084,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         """
         if self.plotter is None:
             return
+        # Remove only our own HUD actor. Use a single actor so it can never
+        # collide with the step-title text ("ttl") at upper_left.
         try:
-            self.plotter.remove_actor("_hud_status")
-            self.plotter.remove_actor("_hud_metrics")
+            self.plotter.remove_actor("_hud_panel")
         except Exception:
             pass
 
@@ -2973,42 +3107,30 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         else:
             n_crit = n_caut = 0
 
+        # The whole panel is coloured by the overall severity so the status
+        # line stands out without needing a separate (colliding) actor.
         if n_crit > 0:
-            status_txt   = f"NGUY HIEM — {n_crit} mat cat nguy hiem"
-            status_color = "red"
+            status_txt   = f"[!] NGUY HIEM — {n_crit} mat cat nguy hiem"
+            panel_color  = "red"
         elif n_caut > 0:
-            status_txt   = f"CHU Y — {n_caut} mat cat can theo doi"
-            status_color = "yellow"
+            status_txt   = f"[*] CHU Y — {n_caut} mat cat can theo doi"
+            panel_color  = "yellow"
         elif n_sec > 0:
-            status_txt   = f"AN TOAN — {n_sec} mat cat binh thuong"
-            status_color = "green"
+            status_txt   = f"[OK] AN TOAN — {n_sec} mat cat binh thuong"
+            panel_color  = "#34D399"
         else:
             status_txt   = "Chua co du lieu mat cat"
-            status_color = "white"
+            panel_color  = "white"
 
-        try:
-            self.plotter.add_text(
-                status_txt,
-                position="upper_left",
-                font_size=10,
-                color=status_color,
-                font="courier",
-                name="_hud_status",
-                shadow=True,
-            )
-        except Exception:
-            pass
+        # ── Build one combined panel (status + metrics) at upper_right ─────
+        lines = [status_txt, "-" * max(len(status_txt), 24)]
 
-        # ── Metric summary (upper-right) ──────────────────────────────────
-        lines = []
-        # Eccentricity
         ecc = p.get("eccentricity_mean_mm")
         if ecc is not None and np.isfinite(float(ecc)):
             st = classify_parameter("eccentricity_mean_mm", ecc)
             marker = "(!)" if st == "CRITICAL" else "(*)" if st == "CAUTION" else "   "
             lines.append(f"{marker} Lech tam: {float(ecc):+.1f} mm")
 
-        # Crown settlement
         cr = p.get("crown_settlement_mm")
         cr_ref = p.get("settlement_reference", "")
         if cr is not None and np.isfinite(float(cr)) and cr_ref not in _SINGLE_SCAN:
@@ -3018,30 +3140,29 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         elif cr_ref in _SINGLE_SCAN:
             lines.append("   Lun dinh: Can T0")
 
-        # Ovality
         oval = p.get("ovality_mean_pct")
         if oval is not None and np.isfinite(float(oval)):
             st = classify_parameter("ovality_mean_pct", oval)
             marker = "(!)" if st == "CRITICAL" else "(*)" if st == "CAUTION" else "   "
             lines.append(f"{marker} Do oval: {float(oval):.3f} %")
 
-        # Section count
         if n_sec:
-            lines.append(f"   Mat cat: {n_sec}  |  RMSE: {p.get('rmse_mm', '—')}")
+            rmse = p.get("rmse_mm")
+            rmse_txt = f"{rmse:.1f}" if isinstance(rmse, (int, float)) else "—"
+            lines.append(f"   Mat cat: {n_sec}  |  RMSE: {rmse_txt}")
 
-        if lines:
-            try:
-                self.plotter.add_text(
-                    "\n".join(lines),
-                    position="upper_right",
-                    font_size=9,
-                    color="white",
-                    font="courier",
-                    name="_hud_metrics",
-                    shadow=True,
-                )
-            except Exception:
-                pass
+        try:
+            self.plotter.add_text(
+                "\n".join(lines),
+                position="upper_right",
+                font_size=9,
+                color=panel_color,
+                font="courier",
+                name="_hud_panel",
+                shadow=True,
+            )
+        except Exception:
+            pass
 
         try:
             self.plotter.render()

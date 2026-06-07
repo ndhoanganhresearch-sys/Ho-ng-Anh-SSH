@@ -1,0 +1,70 @@
+{
+  "dataset": "full_test",
+  "created_by": "tools/create_full_test_dataset.py (pure NumPy, no Blender)",
+  "purpose": "Curved ~1 km tunnel, 4 clear defect spots \u2014 self-test everything.",
+  "units": "meters",
+  "columns": "x y z nx ny nz intensity label",
+  "labels": {
+    "1": "lining",
+    "2": "outlier",
+    "3": "cable"
+  },
+  "tunnel": {
+    "radius_m": 3.0,
+    "length_m": 1000.0,
+    "curve_radius_m": 2500.0,
+    "grade": 0.004,
+    "ring_spacing_m": 0.6,
+    "shape": "curved (horizontal arc + grade)"
+  },
+  "targets": {
+    "count": 5,
+    "chainages_m": [
+      120.0,
+      320.0,
+      520.0,
+      720.0,
+      920.0
+    ],
+    "type": "sphere 0.0725 m, intensity 0.95"
+  },
+  "defect_spots": [
+    {
+      "chainage_m": 200,
+      "type": "crown settlement",
+      "crown_mm": -60
+    },
+    {
+      "chainage_m": 450,
+      "type": "sidewall convergence",
+      "per_side_mm": -50
+    },
+    {
+      "chainage_m": 700,
+      "type": "noise (cable + outlier blob)",
+      "cable_pts": 140,
+      "outlier_pts": 30
+    },
+    {
+      "chainage_m": 900,
+      "type": "combined crown+convergence",
+      "crown_mm": -45,
+      "per_side_mm": -45
+    }
+  ],
+  "tn_frame_offset": {
+    "note": "same geodetic frame as T0 (survey-controlled); no offset"
+  },
+  "files": [
+    {
+      "name": "T0_full.las / .txt",
+      "role": "reference (clean)",
+      "points": 150570
+    },
+    {
+      "name": "Tn_full.las / .txt",
+      "role": "monitoring (4 defects + displaced)",
+      "points": 150740
+    }
+  ]
+}

@@ -109,21 +109,38 @@ def classify_sections(sections, ref_sections=None):
             statuses[i][0] = level
         statuses[i][1].append((level, label, value, unit))
 
-    def local_flags(values, caution_abs, critical_abs, floor, label, unit):
+    def local_flags(values, caution_abs, critical_abs, floor, label, unit,
+                    local_gate=True):
+        """Flag sections exceeding caution/critical absolute thresholds.
+
+        local_gate=True  (dEcc / dOval / single-scan metrics): also require the
+          value to be a LOCAL anomaly (v >= median + 3·MAD). This suppresses a
+          uniform systematic offset (e.g. a registration-induced eccentricity
+          bias) from painting the whole tunnel — the user's earlier complaint.
+
+        local_gate=False (dW / dH / dR — direct differential dimension changes
+          vs T0): flag on the ABSOLUTE threshold alone. A registration error
+          does not change a measured width/radius, so a large dW/dR is real
+          deformation and must be flagged even when it spans a wide band (where
+          the local gate would otherwise raise the baseline into the deformed
+          range and suppress a genuine CRITICAL — observed: dW=-63mm, dR=-27mm
+          went undetected on the complex test dataset).
+        """
         arr = np.asarray(values, dtype=np.float64)
         mag = np.abs(arr)
         finite = np.isfinite(mag)
         if not finite.any():
             return
-        vals = mag[finite]
-        med  = float(np.nanmedian(vals))
-        mad  = float(np.nanmedian(np.abs(vals - med)))
-        robust_sigma = 1.4826 * mad
-        local_thr = med + max(3.0 * robust_sigma, floor)
+        if local_gate:
+            vals = mag[finite]
+            med  = float(np.nanmedian(vals))
+            mad  = float(np.nanmedian(np.abs(vals - med)))
+            robust_sigma = 1.4826 * mad
+            local_thr = med + max(3.0 * robust_sigma, floor)
         for i, v in enumerate(mag):
             if not np.isfinite(v):
                 continue
-            is_local = n < 6 or v >= local_thr
+            is_local = (not local_gate) or n < 6 or v >= local_thr
             if v >= critical_abs and is_local:
                 add(i, "CRITICAL", label, float(arr[i]), unit)
             elif v >= caution_abs and is_local:
@@ -146,7 +163,9 @@ def classify_sections(sections, ref_sections=None):
                 b = getattr(ref, attr, float("nan")) if ref is not None else float("nan")
                 deltas.append(
                     (a - b) * 1e3 if np.isfinite(a) and np.isfinite(b) else float("nan"))
-            local_flags(deltas, 10.0, 25.0, 10.0, lbl, "mm")
+            # dW/dH/dR are direct dimension changes vs T0 → absolute threshold
+            # (no local gate): a large width/radius change is real deformation.
+            local_flags(deltas, 10.0, 25.0, 10.0, lbl, "mm", local_gate=False)
 
         d_oval, d_ecc = [], []
         for i, sec in enumerate(sections):
@@ -710,6 +729,11 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         self._anim_timer.timeout.connect(self._anim_step)
         self._anim_alpha = 0.0; self._anim_dir = 1
         self._ref_sections: List[SectionGeometry] = []
+        # Per-section (status, issues) from classify_sections — the SAME robust
+        # intra-dataset classifier used by the chainage ruler, 3D markers and
+        # dashboard. Computed in _update_warn_track so the 2D banner/title agree
+        # with every other view (avoids "2D says CRITICAL but ruler shows OK").
+        self._section_statuses: list = []
         ctrl.addWidget(self._chk_overlay)
         ctrl.addWidget(self._btn_anim)
         ctrl.addWidget(self._lbl_deform_scale)
@@ -754,6 +778,7 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
     def set_ref_sections(self, sections) -> None:
         self._ref_sections = sections
         self._update_warn_track()
+        self._update_deform_controls_enabled()
         self._refresh()
 
     # ------------------------------------------------------------------
@@ -773,9 +798,13 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         """
         if not self._sections:
             self._warn_track.set_marks([])
+            self._section_statuses = []
             return
         n = len(self._sections)
         statuses = classify_sections(self._sections, self._ref_sections)
+        # Cache for the 2D banner / title / info-dialog so they agree with the
+        # ruler, 3D markers and dashboard (single source of truth).
+        self._section_statuses = statuses
         marks = []
         for i, (status, issues) in enumerate(statuses):
             if status == "OK":
@@ -789,6 +818,21 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
             label = f"Ch {self._sections[i].chainage:.2f}m  [{status}]\n{detail}"
             marks.append((frac, color, label, i))
         self._warn_track.set_marks(marks)
+
+    def _status_for_idx(self, idx: int):
+        """(status, issues) for section *idx* from the shared classifier.
+
+        Falls back to per-section section_warning_status only if the cached
+        list is missing/stale (e.g. before _update_warn_track has run).
+        """
+        if 0 <= idx < len(self._section_statuses):
+            return self._section_statuses[idx]
+        sg = self._sections[idx] if 0 <= idx < len(self._sections) else None
+        ref = (self._ref_sections[idx]
+               if 0 <= idx < len(self._ref_sections) else None)
+        if sg is None:
+            return "OK", []
+        return section_warning_status(sg, ref)
 
     def _toggle_animation(self, checked: bool) -> None:
         if checked:
@@ -864,8 +908,11 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
             if not self._sections:
                 return
             sg = self._sections[self._idx]
+        # T0 reference for the current section (None when no epoch loaded).
+        # Restored: the dialog uses ref_sg throughout (delta_mm, title, mode).
         ref_sg = getattr(self, "_current_ref_sg", None)
-        warn_status, warn_issues = section_warning_status(sg, ref_sg)
+        # Consistent with ruler/3D/dashboard via the shared classifier.
+        warn_status, warn_issues = self._status_for_idx(self._idx)
         tr = self._translate
 
         def finite(value: float) -> bool:
@@ -1053,20 +1100,76 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         super().keyPressEvent(event)
 
     def set_sections(self, sections: List[SectionGeometry], profile: str, vl_box_w: float, vl_box_h: float, vl_cir_r: float) -> None:
-        self._sections = sections; self._idx = 0; self._profile = profile
+        self._sections = sections; self._profile = profile
         self._vl_box_w = vl_box_w; self._vl_box_h = vl_box_h; self._vl_cir_r = vl_cir_r
+        # Land on the FIRST section that actually has 2D points, so the user
+        # never opens onto an empty (occluded/sparse) slice. Falls back to 0.
+        self._idx = self._first_drawable_index(sections)
         if hasattr(self, "_slider_ch") and sections:
             self._slider_ch.setRange(0, len(sections) - 1)
-            self._slider_ch.setValue(0)
+            self._slider_ch.blockSignals(True)
+            self._slider_ch.setValue(self._idx)
+            self._slider_ch.blockSignals(False)
         self._ref_sections = []          # clear stale ref until set_ref_sections called
         self._update_warn_track()
+        self._update_deform_controls_enabled()
         self._refresh()
 
-    def _draw_empty(self) -> None:
+    def _update_deform_controls_enabled(self) -> None:
+        """Enable the T0/Tn-only controls (visual scale, animation, overlay)
+        only when a T0 reference is loaded.
+
+        "Phóng đại nhìn" amplifies the Tn-vs-T0 deviation; with a single scan
+        there is no T0 to compare against, so the control would silently do
+        nothing. Disabling it (with an explanatory tooltip) makes that clear
+        instead of looking broken.
+        """
+        has_ref = bool(self._ref_sections)
+        tip_on  = self._translate("Visual-only deformation magnification for "
+                                  "T0/Tn overlay and animation. Measurements stay real.")
+        tip_off = self._translate("Cần tải T0 (2 lần đo) để phóng đại biến dạng "
+                                  "Tn so với T0.")
+        for w in (getattr(self, "_sp_deform_scale", None),
+                  getattr(self, "_btn_anim", None),
+                  getattr(self, "_chk_overlay", None),
+                  getattr(self, "_lbl_deform_scale", None)):
+            if w is None:
+                continue
+            w.setEnabled(has_ref)
+            w.setToolTip(tip_on if has_ref else tip_off)
+        # Stop any running animation if the reference went away.
+        if not has_ref and hasattr(self, "_btn_anim") and self._btn_anim.isChecked():
+            self._btn_anim.setChecked(False)
+
+    @staticmethod
+    def _first_drawable_index(sections) -> int:
+        """Index of the first section with ≥4 valid 2D points (else 0)."""
+        for i, sg in enumerate(sections or []):
+            if sg.pts_2d is not None and len(sg.pts_2d) >= 4:
+                return i
+        return 0
+
+    def _draw_empty(self, reason: str = None) -> None:
         if not _MPL_OK: return
         ax = self._ax; ax.clear(); ax.set_facecolor(_BG)
-        ax.text(0.5, 0.5, "Run Step 6.3: Plot 2D Technical Section\nto display tunnel cross-sections and engineering dimensions.",
-                ha="center", va="center", color=_FG, fontsize=11, transform=ax.transAxes)
+        if reason:
+            msg = reason
+            col = "#D97706"   # amber: data exists but this slice is sparse
+        elif self._sections:
+            # Sections are loaded but the current one has no usable points.
+            n_draw = sum(1 for s in self._sections
+                         if s.pts_2d is not None and len(s.pts_2d) >= 4)
+            msg = (f"Mặt cắt này không đủ điểm để vẽ\n"
+                   f"(vùng khuất/thưa điểm).\n\n"
+                   f"{n_draw}/{len(self._sections)} mặt cắt có dữ liệu — "
+                   f"dùng nút ◀ ▶ hoặc thanh trượt để xem.")
+            col = "#D97706"
+        else:
+            msg = ("Run Step 6.3: Plot 2D Technical Section\n"
+                   "to display tunnel cross-sections and engineering dimensions.")
+            col = _FG
+        ax.text(0.5, 0.5, msg, ha="center", va="center",
+                color=col, fontsize=11, transform=ax.transAxes)
         for s in ax.spines.values(): s.set_color(_GRID)
         ax.tick_params(colors=_FG); self._canvas.draw_idle()
 
@@ -1087,7 +1190,7 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
             ref_sg_info = self._ref_sections[self._idx]
         # Update warning banner for current section
         if hasattr(self, "_warn_banner"):
-            _ws, _wi = section_warning_status(sg, ref_sg_info)
+            _ws, _wi = self._status_for_idx(self._idx)
             if _ws == "CRITICAL":
                 self._warn_banner.setText(
                     f"  CRITICAL  —  Ch {sg.chainage:.2f} m  —  {section_warning_text(_wi, limit=3)}")
@@ -1116,7 +1219,9 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         ax = self._ax
         ax.clear()
         warn_ref_sg = ref_sg if ref_sg is not None else getattr(self, "_current_ref_sg", None)
-        warn_status, warn_issues = section_warning_status(sg, warn_ref_sg)
+        # Use the shared classifier result so the 2D banner/border agrees with
+        # the ruler / 3D markers / dashboard (consistent CRITICAL/CAUTION/OK).
+        warn_status, warn_issues = self._status_for_idx(self._idx)
 
         # ── Background & grid ──────────────────────────────────────────────
         ax.set_facecolor("#FFFFFF")
