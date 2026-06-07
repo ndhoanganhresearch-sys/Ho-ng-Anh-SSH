@@ -1,0 +1,66 @@
+{
+  "dataset": "version_02_complex_warning",
+  "created_by": "tools/create_blender_step6_t1_tn_datasets.py",
+  "purpose": "Local critical deformation with occlusion, clutter, outliers, and clearance intrusion.",
+  "units": "meters",
+  "columns": "x y z r g b",
+  "axis": "Y / chainage",
+  "base_radius_m": 3.2,
+  "length_m": 64.0,
+  "files": [
+    {
+      "name": "T1_step6_reference.txt",
+      "role": "T1/reference",
+      "header": false,
+      "points": 25409
+    },
+    {
+      "name": "Tn_step6_monitoring.txt",
+      "role": "Tn/monitoring",
+      "header": true,
+      "points": 25791
+    },
+    {
+      "name": "Tn_step6_monitoring_labels.txt",
+      "role": "Tn labels helper",
+      "header": true,
+      "points": 25791,
+      "columns": "x y z r g b label"
+    }
+  ],
+  "ground_truth": {
+    "expected_warning": true,
+    "expected_level": "CRITICAL",
+    "expected_chainage_m": [
+      20.0,
+      34.0
+    ],
+    "secondary_warning_chainage_m": [
+      41.0,
+      50.0
+    ],
+    "crown_settlement_mm": -90.0,
+    "sidewall_convergence_per_side_mm": -65.0,
+    "clearance_intrusion": true,
+    "contains_cable_like_clutter": true,
+    "contains_random_outliers": true,
+    "contains_occlusion_band": true,
+    "labels": {
+      "structure": 1,
+      "outlier": 2,
+      "cable": 3,
+      "clearance": 4
+    },
+    "visual_scale_recommended": 10
+  },
+  "step6_parameters_under_test": [
+    "dW",
+    "dH",
+    "dR",
+    "dOval",
+    "dEcc",
+    "clearance_min",
+    "M3C2/C2C distance_mm",
+    "Visual scale"
+  ]
+}

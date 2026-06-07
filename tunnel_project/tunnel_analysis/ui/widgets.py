@@ -73,6 +73,102 @@ def section_warning_status(sg: SectionGeometry, ref_sg: SectionGeometry = None):
     return status, issues
 
 
+def classify_sections(sections, ref_sections=None):
+    """Classify every section as OK / CAUTION / CRITICAL.
+
+    Uses **robust intra-dataset statistics** so it works even when no T0
+    reference is available (single-scan case):
+
+    • Always checks ``clearance_violation`` (CRITICAL).
+    • With ref_sections: compares delta W1/H1/radius_fit/ovality/eccentricity
+      vs T0 and applies ``local_flags`` to detect local anomalies.
+    • Without ref_sections: applies ``local_flags`` directly on absolute
+      ovality and eccentricity values so locally-anomalous sections are
+      flagged even in a single-scan workflow.
+
+    Returns a list of ``(status, issues)`` tuples, one per section.
+    ``status`` is "OK", "CAUTION", or "CRITICAL".
+    ``issues`` is a list of ``(level, label, value, unit)`` tuples.
+
+    This is the single source-of-truth used by the 2D warning track,
+    chainage ruler, 3D markers and dashboard alerts so all views stay
+    consistent.
+    """
+    if not sections:
+        return []
+
+    n = len(sections)
+    statuses = [["OK", []] for _ in sections]
+    ref_list = ref_sections or []
+
+    def add(i, level, label, value, unit):
+        cur = statuses[i][0]
+        if level == "CRITICAL" or cur == "OK":
+            statuses[i][0] = level
+        elif level == "CAUTION" and cur != "CRITICAL":
+            statuses[i][0] = level
+        statuses[i][1].append((level, label, value, unit))
+
+    def local_flags(values, caution_abs, critical_abs, floor, label, unit):
+        arr = np.asarray(values, dtype=np.float64)
+        mag = np.abs(arr)
+        finite = np.isfinite(mag)
+        if not finite.any():
+            return
+        vals = mag[finite]
+        med  = float(np.nanmedian(vals))
+        mad  = float(np.nanmedian(np.abs(vals - med)))
+        robust_sigma = 1.4826 * mad
+        local_thr = med + max(3.0 * robust_sigma, floor)
+        for i, v in enumerate(mag):
+            if not np.isfinite(v):
+                continue
+            is_local = n < 6 or v >= local_thr
+            if v >= critical_abs and is_local:
+                add(i, "CRITICAL", label, float(arr[i]), unit)
+            elif v >= caution_abs and is_local:
+                add(i, "CAUTION",  label, float(arr[i]), unit)
+
+    # ── Clearance violation (always) ─────────────────────────────────────
+    for i, sec in enumerate(sections):
+        if sec.clearance_violation:
+            val = (sec.min_clearance_dist * 1e3
+                   if np.isfinite(sec.min_clearance_dist) else float("nan"))
+            add(i, "CRITICAL", "clearance", val, "mm")
+
+    if ref_list:
+        # ── T0 comparison ────────────────────────────────────────────────
+        for lbl, attr in (("dW", "W1"), ("dH", "H1"), ("dR", "radius_fit")):
+            deltas = []
+            for i, sec in enumerate(sections):
+                ref = ref_list[i] if i < len(ref_list) else None
+                a = getattr(sec, attr, float("nan"))
+                b = getattr(ref, attr, float("nan")) if ref is not None else float("nan")
+                deltas.append(
+                    (a - b) * 1e3 if np.isfinite(a) and np.isfinite(b) else float("nan"))
+            local_flags(deltas, 10.0, 25.0, 10.0, lbl, "mm")
+
+        d_oval, d_ecc = [], []
+        for i, sec in enumerate(sections):
+            ref = ref_list[i] if i < len(ref_list) else None
+            d_oval.append(
+                sec.ovality - ref.ovality
+                if ref is not None and np.isfinite(sec.ovality) and np.isfinite(ref.ovality)
+                else float("nan"))
+            d_ecc.append(
+                sec.eccentricity - ref.eccentricity
+                if ref is not None and np.isfinite(sec.eccentricity) and np.isfinite(ref.eccentricity)
+                else float("nan"))
+        local_flags(d_oval, 0.5, 1.0, 0.35, "dOval", "%")
+        local_flags(d_ecc, 10.0, 25.0, 15.0, "dEcc",  "mm")
+    else:
+        # ── Single-scan: absolute local anomaly detection ─────────────────
+        local_flags([s.ovality     for s in sections], 0.5, 1.0,  0.35, "ovality",     "%")
+        local_flags([s.eccentricity for s in sections], 10.0, 25.0, 15.0, "eccentricity", "mm")
+
+    return [(st[0], st[1]) for st in statuses]
+
+
 def section_warning_text(issues, limit: int = 3) -> str:
     if not issues:
         return "OK"
@@ -129,7 +225,11 @@ class ChainageRulerWidget(QtWidgets.QWidget):
     # ── Public API ─────────────────────────────────────────────────────────
 
     def set_sections(self, sections, ref_sections=None) -> None:
-        """Populate ruler from SectionGeometry list (Tn) and optional T0."""
+        """Populate ruler from SectionGeometry list (Tn) and optional T0.
+
+        Uses ``classify_sections()`` so the ruler is always consistent with
+        the 2D warning track and 3D flag-pole markers.
+        """
         if not sections:
             self._sections = []; self._seg_colors = []; self._marks = []
             self._fracs = []; self._min_ch = self._max_ch = 0.0
@@ -141,22 +241,21 @@ class ChainageRulerWidget(QtWidgets.QWidget):
         self._sections = sections
         self._fracs = [(c - self._min_ch) / span for c in chs]
 
-        ref_map = {}
-        if ref_sections:
-            ref_map = {round(rs.chainage, 3): rs for rs in ref_sections}
+        # Use the shared classifier so all views stay in sync.
+        statuses = classify_sections(sections, ref_sections or [])
 
         seg_colors = []
         marks = []
-        for i, sg in enumerate(sections):
-            ref = ref_map.get(round(sg.chainage, 3)) or sg
-            ws, wi = section_warning_status(sg, ref)
+        for i, (ws, wi) in enumerate(statuses):
             if ws == "CRITICAL":
                 seg_colors.append("#DC2626")
-                tip = f"CRITICAL  Ch {sg.chainage:.1f} m"
+                detail = section_warning_text(wi, limit=2) if wi else "CRITICAL"
+                tip = f"CRITICAL  Ch {sections[i].chainage:.1f} m\n{detail}"
                 marks.append((self._fracs[i], "#DC2626", tip, i))
             elif ws == "CAUTION":
                 seg_colors.append("#D97706")
-                tip = f"CAUTION  Ch {sg.chainage:.1f} m"
+                detail = section_warning_text(wi, limit=2) if wi else "CAUTION"
+                tip = f"CAUTION  Ch {sections[i].chainage:.1f} m\n{detail}"
                 marks.append((self._fracs[i], "#D97706", tip, i))
             else:
                 seg_colors.append("#1E3A5F")   # OK → dark blue (barely visible)
@@ -667,16 +766,18 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
             self._refresh()
 
     def _update_warn_track(self) -> None:
-        """Rebuild the warning track dots from current sections + ref_sections."""
+        """Rebuild the warning track dots from current sections + ref_sections.
+
+        Uses ``classify_sections()`` — the same classifier as the chainage
+        ruler and 3D markers — so all three views are always consistent.
+        """
         if not self._sections:
             self._warn_track.set_marks([])
             return
         n = len(self._sections)
-        ref_map = {round(rs.chainage, 3): rs for rs in self._ref_sections}
+        statuses = classify_sections(self._sections, self._ref_sections)
         marks = []
-        for i, sg in enumerate(self._sections):
-            ref = ref_map.get(round(sg.chainage, 3))
-            status, issues = section_warning_status(sg, ref)
+        for i, (status, issues) in enumerate(statuses):
             if status == "OK":
                 continue
             frac = i / max(n - 1, 1)
@@ -685,7 +786,7 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                 detail = section_warning_text(issues, limit=2)
             except Exception:
                 detail = status
-            label = f"Ch {sg.chainage:.2f}m  [{status}]\n{detail}"
+            label = f"Ch {self._sections[i].chainage:.2f}m  [{status}]\n{detail}"
             marks.append((frac, color, label, i))
         self._warn_track.set_marks(marks)
 
@@ -1629,10 +1730,10 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
 
     # Each dashboard metric: (display title, param_key_mean, param_key_max, unit)
     _METRICS = [
-        ("Crown Settlement",    "crown_settlement_mm",    "crown_settlement_max_mm",    "mm"),
-        ("Lateral Convergence", "lateral_convergence_mm", "lateral_convergence_max_mm", "mm"),
-        ("Eccentricity",        "eccentricity_mean_mm",   "eccentricity_max_mm",        "mm"),
-        ("Ovality",             "ovality_mean_pct",       "ovality_max_pct",            "%"),
+        ("Lún đỉnh hầm",       "crown_settlement_mm",    "crown_settlement_max_mm",    "mm"),
+        ("Hội tụ ngang",        "lateral_convergence_mm", "lateral_convergence_max_mm", "mm"),
+        ("Lệch tâm",            "eccentricity_mean_mm",   "eccentricity_max_mm",        "mm"),
+        ("Độ oval",             "ovality_mean_pct",       "ovality_max_pct",            "%"),
     ]
 
     def __init__(self, parent=None):
@@ -1642,6 +1743,9 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
         self._sections = []
         self._ref_sections = []
         self._profile = "Circle"
+        # Keys whose values come from single-scan geometry (not true T0 deformation).
+        # These cards show a "Cần T0" warning instead of a misleading number.
+        self._single_scan_keys: set = set()
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -1801,6 +1905,20 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
         self._params = {}
         self._sections = []
         self._ref_sections = []
+        self._single_scan_keys = set()
+        self._refresh()
+
+    def set_reference_flags(self, single_scan_keys) -> None:
+        """Mark metric keys whose values come from single-scan geometry (no T0).
+
+        Cards for these keys show "— Cần T0" instead of a misleading number.
+        Call this whenever new parameters are loaded.
+
+        Example::
+            dashboard.set_reference_flags({"crown_settlement_mm",
+                                            "crown_settlement_max_mm"})
+        """
+        self._single_scan_keys = set(single_scan_keys)
         self._refresh()
 
     # ------------------------------------------------------------------
@@ -1817,6 +1935,26 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
             card = self._cards.get(k_mean)
             if card is None:
                 continue
+
+            # ── Single-scan: metric is geometry, NOT real deformation ──────
+            if k_mean in self._single_scan_keys:
+                card["mean"].setText("— Cần T0")
+                card["max"].setText("tải 2 scan để so sánh")
+                card["badge"].setText("?")
+                card["badge"].setStyleSheet(
+                    "background:#94A3B8;color:white;border-radius:4px;"
+                    "font-size:8pt;font-weight:700;padding:1px 6px;")
+                card["frame"].setStyleSheet(
+                    "QFrame{background:#F8FAFC;border:1px dashed #94A3B8;"
+                    "border-radius:8px;padding:4px;}")
+                card["mean"].setStyleSheet(
+                    "color:#94A3B8;font-size:13pt;font-weight:700;background:transparent;")
+                card["frame"].setToolTip(
+                    "Chỉ số này cần dữ liệu T0 (scan tham chiếu) để tính chính xác.\n"
+                    "Hãy tải scan T0 rồi chạy lại pipeline.\n"
+                    "Giá trị hiện tại là tọa độ tuyệt đối — không phải biến dạng thực.")
+                continue  # skip threshold classification for this card
+
             v_mean = self._params.get(k_mean)
             v_max  = self._params.get(k_max)
             status = classify_parameter(k_mean, v_mean) if v_mean is not None else ""
@@ -1841,6 +1979,7 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
 
             card["mean"].setText(mean_txt)
             card["max"].setText(max_txt)
+            card["frame"].setToolTip("")   # clear any previous tooltip
 
             # Status badge colours
             if status == "CRITICAL":
@@ -1955,14 +2094,10 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
             return
 
         # Gather all sections with their status and sort by severity then ch.
+        # Uses classify_sections() — same classifier as ruler/2D-track/3D markers.
         alerts = []
-        ref_map = {}
-        for rs in self._ref_sections:
-            ref_map[round(rs.chainage, 3)] = rs
-
-        for sg in self._sections:
-            ref = ref_map.get(round(sg.chainage, 3))
-            status, issues = section_warning_status(sg, ref)
+        statuses = classify_sections(self._sections, self._ref_sections)
+        for sg, (status, issues) in zip(self._sections, statuses):
             if status != "OK":
                 alerts.append((status, sg.chainage, issues))
 

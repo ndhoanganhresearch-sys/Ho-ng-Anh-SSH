@@ -16,7 +16,7 @@ from ..target_detector import TargetDetector, Target
 from ..rag_ai import TunnelRAGAssistant
 from .widgets import (CollapsibleSection, MatplotlibSectionWidget, PolarDeformationPlotWidget,
                       LinePlotWidget, SummaryDashboardWidget, ChainageRulerWidget,
-                      section_warning_status, section_warning_text)
+                      classify_sections, section_warning_status, section_warning_text)
 from .i18n_v4 import tr as _tr
 from translations import get_available_languages
 from language_switcher import LanguageSwitcher
@@ -237,13 +237,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.right_tabs.addTab(self.results_text, "Results Log")
 
         # ── Analysis Summary Dashboard ──────────────────────────────────────
-        # Single-glance overview: colour-coded metric cards (crown / convergence
-        # / eccentricity / ovality), overall status banner, and a top-8 section
-        # alert list.  Updated automatically whenever _show_params() or the
-        # 5.7_sections dispatch fires.
+        # Created here (early) so it can be embedded into the 2D section tab.
+        # NOT added to right_tabs as a standalone tab — see the 2D section block.
         self.dashboard_widget = SummaryDashboardWidget()
-        self._dashboard_tab_idx = self.right_tabs.addTab(
-            self.dashboard_widget, "Summary Dashboard")
+        self._dashboard_tab_idx = 0   # will be updated when the section tab is added
 
         # Parameters table: unit-aware values grouped by theme with a status
         # column (OK/CAUTION/CRITICAL), fed by _fill_param_table via _show_params.
@@ -426,8 +423,19 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.ts_plot = LinePlotWidget()
         self._ts_tab_idx = self.right_tabs.addTab(self.ts_plot, "Time-Series Plot")
 
+        # ── 2D Section + Tổng Quan (combined split tab) ─────────────────────
+        # The Summary Dashboard sits to the RIGHT of the 2D cross-section plot
+        # so both views are visible simultaneously without switching tabs.
         self.section_widget = MatplotlibSectionWidget()
-        self._section_tab_idx = self.right_tabs.addTab(self.section_widget, "2D Cross-Section")
+        _sec_dash_split = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        _sec_dash_split.addWidget(self.section_widget)
+        _sec_dash_split.addWidget(self.dashboard_widget)
+        _sec_dash_split.setSizes([620, 340])
+        _sec_dash_split.setChildrenCollapsible(False)
+        self._section_tab_idx = self.right_tabs.addTab(
+            _sec_dash_split, "Mặt Cắt 2D + Tổng Quan")
+        # Dashboard is now inside the section tab — keep the index in sync.
+        self._dashboard_tab_idx = self._section_tab_idx
 
         self.polar_plot = PolarDeformationPlotWidget()
         self.right_tabs.addTab(self.polar_plot, "Polar Deformation")
@@ -1199,6 +1207,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 self._chainage_ruler.set_sections(sections, _ruler_ref)
                 if sections:
                     self._chainage_ruler.set_current(sections[0].chainage)
+            # Update 3D status HUD now that sections are known.
+            self._update_3d_status_hud(self.context.parameters)
             # Overlay coloured warning rings on 3D viewport.
             self._render_warning_markers(sections, ref_secs)
             valid = [s for s in sections if s.pts_2d is not None]
@@ -2932,6 +2942,112 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
         self.plotter.render()
 
+    def _update_3d_status_hud(self, params: dict = None) -> None:
+        """Overlay a compact status HUD on the 3D viewport.
+
+        Shows overall tunnel health, key metric values, and section summary
+        directly on the 3D plotter so the user never has to switch tabs to
+        see the most important numbers.
+        """
+        if self.plotter is None:
+            return
+        try:
+            self.plotter.remove_actor("_hud_status")
+            self.plotter.remove_actor("_hud_metrics")
+        except Exception:
+            pass
+
+        from ..common import classify_parameter
+        _SINGLE_SCAN = {"single_scan_global", "single_scan_per_section"}
+        p = params or {}
+
+        # ── Overall status ────────────────────────────────────────────────
+        sections = self.context.sections or []
+        ref_secs = getattr(self, "_section_ref_sections", []) or []
+        n_sec = len(sections)
+
+        if sections:
+            sec_statuses = classify_sections(sections, ref_secs)
+            n_crit = sum(1 for s, _ in sec_statuses if s == "CRITICAL")
+            n_caut = sum(1 for s, _ in sec_statuses if s == "CAUTION")
+        else:
+            n_crit = n_caut = 0
+
+        if n_crit > 0:
+            status_txt   = f"NGUY HIEM — {n_crit} mat cat nguy hiem"
+            status_color = "red"
+        elif n_caut > 0:
+            status_txt   = f"CHU Y — {n_caut} mat cat can theo doi"
+            status_color = "yellow"
+        elif n_sec > 0:
+            status_txt   = f"AN TOAN — {n_sec} mat cat binh thuong"
+            status_color = "green"
+        else:
+            status_txt   = "Chua co du lieu mat cat"
+            status_color = "white"
+
+        try:
+            self.plotter.add_text(
+                status_txt,
+                position="upper_left",
+                font_size=10,
+                color=status_color,
+                font="courier",
+                name="_hud_status",
+                shadow=True,
+            )
+        except Exception:
+            pass
+
+        # ── Metric summary (upper-right) ──────────────────────────────────
+        lines = []
+        # Eccentricity
+        ecc = p.get("eccentricity_mean_mm")
+        if ecc is not None and np.isfinite(float(ecc)):
+            st = classify_parameter("eccentricity_mean_mm", ecc)
+            marker = "(!)" if st == "CRITICAL" else "(*)" if st == "CAUTION" else "   "
+            lines.append(f"{marker} Lech tam: {float(ecc):+.1f} mm")
+
+        # Crown settlement
+        cr = p.get("crown_settlement_mm")
+        cr_ref = p.get("settlement_reference", "")
+        if cr is not None and np.isfinite(float(cr)) and cr_ref not in _SINGLE_SCAN:
+            st = classify_parameter("crown_settlement_mm", cr)
+            marker = "(!)" if st == "CRITICAL" else "(*)" if st == "CAUTION" else "   "
+            lines.append(f"{marker} Lun dinh: {float(cr):+.1f} mm")
+        elif cr_ref in _SINGLE_SCAN:
+            lines.append("   Lun dinh: Can T0")
+
+        # Ovality
+        oval = p.get("ovality_mean_pct")
+        if oval is not None and np.isfinite(float(oval)):
+            st = classify_parameter("ovality_mean_pct", oval)
+            marker = "(!)" if st == "CRITICAL" else "(*)" if st == "CAUTION" else "   "
+            lines.append(f"{marker} Do oval: {float(oval):.3f} %")
+
+        # Section count
+        if n_sec:
+            lines.append(f"   Mat cat: {n_sec}  |  RMSE: {p.get('rmse_mm', '—')}")
+
+        if lines:
+            try:
+                self.plotter.add_text(
+                    "\n".join(lines),
+                    position="upper_right",
+                    font_size=9,
+                    color="white",
+                    font="courier",
+                    name="_hud_metrics",
+                    shadow=True,
+                )
+            except Exception:
+                pass
+
+        try:
+            self.plotter.render()
+        except Exception:
+            pass
+
     def _slot_chainage_ruler_jump(self, idx: int) -> None:
         """Jump to section *idx* when user clicks on the chainage ruler."""
         sections = self.context.sections
@@ -2963,19 +3079,18 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             try: self.plotter.remove_actor(nm)
             except Exception: pass
 
-        ref_map = {round(rs.chainage, 3): rs for rs in (ref_sections or [])}
+        # Accumulate per-level geometry.
+        # Use classify_sections() — same classifier as ruler/2D-track/dashboard.
+        sec_statuses = classify_sections(sections, ref_sections or [])
 
-        # Accumulate per-level geometry
         data: dict = {
             "CRITICAL": {"stems": [], "tops": [], "labels": [], "color": "#DC2626"},
             "CAUTION":  {"stems": [], "tops": [], "labels": [], "color": "#D97706"},
         }
 
-        for i, sg in enumerate(sections):
-            ref    = ref_map.get(round(sg.chainage, 3))
-            status, issues = section_warning_status(sg, ref)
+        for i, (status, issues) in enumerate(sec_statuses):
             if status not in data: continue
-
+            sg = sections[i]
             fr = frames[min(i, len(frames) - 1)]
             C  = np.asarray(fr["center"], dtype=np.float64)
             B  = np.asarray(fr["B"],      dtype=np.float64)   # vertical-up axis
@@ -3438,9 +3553,20 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 self.results_text.appendPlainText(f"  {label}: {text}{tag}")
         self.results_text.appendPlainText("----------------------------")
         self._fill_param_table(params)
-        # Push to Summary Dashboard (auto-switch to it for quick review).
+        # Push to Summary Dashboard — also flag single-scan keys so the dashboard
+        # can show "Cần T0" instead of a misleading absolute-geometry value.
         self.dashboard_widget.update_params(params)
+        _SINGLE_SCAN = {"single_scan_global", "single_scan_per_section"}
+        _single_keys: set = set()
+        if params.get("settlement_reference")  in _SINGLE_SCAN:
+            _single_keys.update({"crown_settlement_mm", "crown_settlement_max_mm"})
+        if params.get("convergence_reference") in _SINGLE_SCAN:
+            _single_keys.update({"lateral_convergence_mm", "lateral_convergence_max_mm"})
+        self.dashboard_widget.set_reference_flags(_single_keys)
+        # Switch to the combined Mặt Cắt + Tổng Quan tab.
         self.right_tabs.setCurrentIndex(self._dashboard_tab_idx)
+        # Update 3D HUD with the new status information.
+        self._update_3d_status_hud(params)
 
     def _update_meta(self, b: PointCloudBundle) -> None:
         rows = list(b.metadata.items()); self.meta_table.setRowCount(len(rows))
