@@ -21,7 +21,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from .common import format_parameter
-from .models import PipelineContext, PointCloudBundle
+from .models import PipelineContext
 from .io_layer import BaseLayer
 from .preprocessing import PreprocessingLayer
 from .geometry import GeometricLayer
