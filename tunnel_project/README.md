@@ -44,13 +44,15 @@ Use the stable smoke gate before committing changes:
 .\verify_quick.ps1
 ```
 
-For Step 6 / T0-Tn deformation work, also run:
+For Step 6 / T0-Tn deformation work, run the focused regression gate:
 
 ```powershell
-..\.venv\Scripts\python.exe test_deformation_groundtruth.py
-..\.venv\Scripts\python.exe test_step6_evaluation.py
-..\.venv\Scripts\python.exe test_pipeline_end_to_end.py
+.\verify_step6.ps1
 ```
+
+The script covers T0-reference detection, epoch registration, curved-tunnel
+eccentricity, ground-truth deformation, 2D/3D section consistency, and the
+end-to-end auto pipeline.
 
 ## Core Workflow
 
