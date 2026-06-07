@@ -2,7 +2,7 @@
 # Python 3.12. Install: pip install -r requirements.txt
 
 # Core numerics
-numpy==2.4.3
+numpy==2.4.6
 scipy==1.17.1
 
 # Point-cloud I/O and processing
@@ -35,7 +35,7 @@ ifcopenshell==0.8.5
 scikit-learn==1.8.0
 
 # Local AI assistant / dashboards (rag_ai.py, digital_twin.py)
-requests==2.32.5
+requests==2.34.2
 # Optional context compression for AI prompts (headroom_adapter.py).
 # Full Headroom native compression is installed in WSL via .venv-headroom:
 #   pip install "headroom-ai[mcp,proxy,code]==0.23.0"

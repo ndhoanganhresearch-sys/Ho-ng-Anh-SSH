@@ -1,0 +1,24 @@
+﻿# Snapshot of the currently verified Windows runtime environment.
+#
+# `requirements.txt` remains the install target. This file documents the exact
+# versions observed in the working venv when the quick/deformation tests passed,
+# so dependency drift is visible during reproducibility checks.
+
+numpy==2.4.6
+scipy==1.17.1
+laspy==2.7.0
+lazrs==0.8.1
+open3d==0.19.0
+small_gicp==1.0.0
+py4dgeo==0.7.0
+PySide6==6.11.0
+pyvista==0.48.0
+pyvistaqt==0.11.4
+vtk==9.3.1
+matplotlib==3.10.8
+pandas==3.0.3
+seaborn==0.13.2
+openpyxl==3.1.5
+ifcopenshell==0.8.5
+scikit-learn==1.8.0
+requests==2.34.2
