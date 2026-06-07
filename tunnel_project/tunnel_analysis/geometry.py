@@ -212,7 +212,16 @@ class GeometricLayer:
         # noticeably curved, refine once by re-slicing perpendicular to the
         # LOCAL tangent (Frenet) and re-fitting the spline.
         if self._is_curved(cl):
-            cl = self._refine_centerline_tangent(pts, cl, section_count, smooth_factor)
+            refined = self._refine_centerline_tangent(pts, cl, section_count, smooth_factor)
+            # Keep the refinement ONLY if it brings the axis closer to the true
+            # tube centre. On some curved scans the single pass (driven by the
+            # straight-PCA bootstrap frames) diverges and pushes the axis ~0.2 m
+            # off, inflating eccentricity; the guard reverts to the bootstrap
+            # there. (Verified: full_test 1 km arc — refine 13.8mm vs bootstrap
+            # 8.5mm mean eccentricity, so bootstrap is kept.)
+            if (refined is not cl and
+                    self._axis_offset_metric(pts, refined) < self._axis_offset_metric(pts, cl)):
+                cl = refined
         return cl, self._frenet(cl)
 
     @staticmethod
@@ -233,16 +242,32 @@ class GeometricLayer:
         length = float(t.max() - t.min()) + 1e-9
         return (perp / length) > tol_ratio
 
+    def _axis_offset_metric(self, pts: np.ndarray, cl: np.ndarray) -> float:
+        """Median lateral distance from each slice's fitted centre to the
+        centreline point — how well the axis tracks the true tube centre.
+        Lower is better; used to accept a refinement only if it helps."""
+        frames = self._frenet(cl)
+        eps = self._axial_eps(cl)
+        offs = []
+        for fr in frames:
+            C, T, N, B = fr["center"], fr["T"], fr["N"], fr["B"]
+            sl = pts[np.abs((pts - C) @ T) < eps]
+            if len(sl) < MIN_SLICE_POINTS:
+                continue
+            ctr = self._slice_center(sl, T)
+            offs.append(float(np.hypot((ctr - C) @ N, (ctr - C) @ B)))
+        return float(np.median(offs)) if offs else float("inf")
+
     def _refine_centerline_tangent(self, pts: np.ndarray, cl: np.ndarray,
                                    section_count: int, smooth_factor: float) -> np.ndarray:
-        """One refinement pass: re-slice perpendicular to the local tangent.
+        """One refinement pass: re-slice perpendicular to the local tangent and
+        re-fit the geometric centres, then re-spline. Returns the refined axis,
+        or the original when it cannot produce enough centres (always safe).
 
-        For each frame of the current centerline, take points within an
-        adaptive half-thickness of the plane orthogonal to the LOCAL tangent T
-        and re-fit the geometric centre (LSQ circle + guard). The refit centres
-        are de-spiked and re-splined. Returns the refined centerline, or the
-        original when the refinement cannot produce enough centres (so it is
-        always safe).
+        NOTE: the CALLER must keep this result only if it actually reduces the
+        axis-to-tube-centre offset (see ``_axis_offset_metric``) — on some
+        curved scans a single pass driven by the straight-PCA bootstrap frames
+        diverges and makes the axis worse, not better.
         """
         try:
             from scipy.interpolate import splev, splprep
@@ -253,8 +278,7 @@ class GeometricLayer:
         refit = []
         for fr in frames:
             C, T = fr["center"], fr["T"]
-            mask = np.abs((pts - C) @ T) < eps
-            sl = pts[mask]
+            sl = pts[np.abs((pts - C) @ T) < eps]
             if len(sl) < MIN_SLICE_POINTS:
                 continue
             refit.append(self._slice_center(sl, T))

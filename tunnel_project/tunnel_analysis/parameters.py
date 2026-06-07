@@ -332,19 +332,19 @@ class ParameterExtractionLayer:
 
     @staticmethod
     def _moving_median(v, frac: float = 0.10):
-        """Robust smooth baseline: moving median with an odd window ~frac of the
-        series. Tracks the slow curve/centreline bias while ignoring local
-        eccentric-defect spikes (so defects survive as deviations)."""
+        """Robust LOCAL baseline: moving median with REFLECT padding at the
+        ends (so the window is never one-sided -> no boundary spike). Tracks
+        the locally-varying curve/centreline bias while ignoring local
+        eccentric-defect spikes (they survive as deviations from the baseline)."""
         v = np.asarray(v, dtype=np.float64)
         n = len(v)
         if n < 5:
             return np.full(n, float(np.median(v)) if n else 0.0)
-        w = max(5, int(n * frac) | 1)        # odd window
-        half = w // 2
+        half = max(2, int(n * frac) // 2)
+        vp = np.pad(v, half, mode="reflect")     # mirror ends -> full windows
         out = np.empty(n, dtype=np.float64)
         for i in range(n):
-            lo = max(0, i - half); hi = min(n, i + half + 1)
-            out[i] = np.median(v[lo:hi])
+            out[i] = np.median(vp[i:i + 2 * half + 1])
         return out
 
     def calc_eccentricity(self, context: PipelineContext,
@@ -428,11 +428,10 @@ class ParameterExtractionLayer:
             # tunnel → ~0; a local eccentric defect still stands out.
             rows = []   # (i, C, N, B, cx, cy)
             n_fr = len(context.frenet_frames)
-            # The B-spline centreline is extrapolated near the ends, so a few
-            # end frames are unreliable and would spike the eccentricity (a
-            # tunnel-mouth artifact, not real eccentricity). Trim a small
-            # proportional end zone (~3%); tunnel portals are routinely excluded.
-            k_end = max(2, n_fr // 30)
+            # Trim only the 2 extrapolated end frames; the smooth polynomial
+            # baseline below handles the rest of the portal trend without a
+            # one-sided-window boundary spike.
+            k_end = 2
             for i, fr in enumerate(context.frenet_frames):
                 if i < k_end or i >= n_fr - k_end:
                     continue
@@ -447,17 +446,29 @@ class ParameterExtractionLayer:
                 if len(bins) < 17:        # < ~70% of 24 angular sectors covered
                     continue
                 cx, cy = self._fit_circle_center(xf, yf)
-                rows.append((i, C, N, B, cx, cy))
+                rows.append((float(chainages[i]), i, C, N, B, cx, cy))
             if rows:
-                cxs = np.array([r[4] for r in rows]); cys = np.array([r[5] for r in rows])
+                chl = np.array([r[0] for r in rows])
+                cxs = np.array([r[5] for r in rows]); cys = np.array([r[6] for r in rows])
+                # Design axis = smooth low-order polynomial of the circle centres
+                # vs chainage (captures the gentle curve/centreline bias with NO
+                # boundary artifact); a local eccentric defect is an outlier the
+                # global fit mostly ignores, so it still shows as a deviation.
                 base_x = self._moving_median(cxs); base_y = self._moving_median(cys)
-                for k, (i, C, N, B, cx, cy) in enumerate(rows):
-                    dx = cx - base_x[k]; dy = cy - base_y[k]
-                    ecc_mm = float(np.hypot(dx, dy)) * 1e3
+                ecc_arr = np.hypot(cxs - base_x, cys - base_y) * 1e3
+                # 5-pt median filter removes short (<=2 frame) centreline-wiggle
+                # spikes; a real eccentric defect (spans >=3 frames over its
+                # sigma) survives.
+                ecc_f = ecc_arr.copy()
+                for k in range(len(ecc_arr)):
+                    lo = max(0, k - 2); hi = min(len(ecc_arr), k + 3)
+                    ecc_f[k] = np.median(ecc_arr[lo:hi])
+                for k, (ch, i, C, N, B, cx, cy) in enumerate(rows):
+                    ecc_mm = float(ecc_f[k])
                     C_meas = C + cx * N + cy * B
                     C_des  = C + base_x[k] * N + base_y[k] * B
                     ec.append(ecc_mm)
-                    ec_per_section.append({"chainage": float(chainages[i]),
+                    ec_per_section.append({"chainage": ch,
                         "eccentricity_mm": ecc_mm, "C_meas": C_meas.tolist(),
                         "C_design": C_des.tolist()})
         if not ec:

@@ -137,6 +137,28 @@ data python cusor/
 
 ---
 
+## 📌 Tóm tắt phiên gần nhất (đọc trước khi tiếp tục)
+
+**Tính năng đã thêm/sửa trong phiên này:**
+- **ChainageRulerWidget** (`widgets.py`): thanh lý trình full-width dưới viewport, tam giác cảnh báo đỏ/vàng, click nhảy mặt cắt.
+- **`classify_sections()` (nguồn chân lý chung)**: ruler + 2D track + 3D markers + dashboard + 2D banner dùng CHUNG hàm này → cảnh báo nhất quán. dW/dH/dR dùng ngưỡng tuyệt đối, dEcc/dOval giữ local-gate.
+- **`register_epochs()` (`registration.py`)**: căn chỉnh T0/Tn đo từ vị trí khác — tự dùng mốc cầu (SVD, không triệt tiêu biến dạng) nếu ≥3 mốc, không thì trimmed-ICP. Có divergence-guard. Nút "3.0/3.1 Auto-align T0/Tn".
+- **Sidebar gọn lại**: ẩn nút trùng qua `CORE_STEP_CODES`, đánh số hiển thị liền mạch qua `CORE_DISPLAY_RENUMBER` (giữ ID lọc ổn định), gộp Export (8.x) vào mục 7. i18n VN/KO cập nhật.
+- **Bộ test all-in-one**: `data/full_test/` (T0_full + Tn_full, .las + .txt) — hầm CONG ~1km, 4 vị trí lỗi (lún 200m, hội tụ 450m, nhiễu 700m, kết hợp 900m) + 5 mốc. **BỊ gitignore** → chạy `tools/create_full_test_dataset.py` để tái tạo.
+- **Fix eccentricity hầm cong + centerline guard** (chi tiết trong bug list dưới).
+
+**Trạng thái hiện tại**: 14/14 test suite PASS. Nhánh `feature/m3c2-gicp-integration`.
+
+**Lệnh test nhanh** (từ `tunnel_project/`, `$env:PYTHONUTF8="1"`):
+`..\.venv\Scripts\python.exe test_full_dataset.py` (end-to-end) · `test_step6_evaluation.py` · `test_deformation_groundtruth.py` (benchmark).
+
+**Tồn đọng đã biết (có workaround, không blocker)**:
+- Ecc max ~245mm trên hầm CONG 1-scan (centerline lệch ~180mm khỏi tâm ống) → **luôn load T0+Tn** để ecc chính xác (bias triệt tiêu).
+- Cảnh báo có thể nổi ở 2 đầu hầm cong/dài (artifact portal).
+- `sg.eccentricity` (Info dialog/2D) còn cách cũ; chỉ card dashboard (calc_eccentricity) được detrend.
+
+---
+
 ## 🐛 Lịch sử bug đã fix
 
 - **rag_ai.py dead-code (line 184)** — ✅ đã fix: hàm `query()` giờ chỉ còn 1 `return` duy nhất, gộp `rag_note` + `optimized.note`.
@@ -154,3 +176,7 @@ data python cusor/
 - **run_tunnel_analysis.py user-site leak** — ✅ đã fix: MS Store Python inject user-site (numpy 2.4.3) vào venv (numpy 2.4.6) → RecursionError lúc import scipy.stats. Prune `local-packages` khỏi sys.path đầu file.
 - **registration.py register_epochs (mới)** — ✅ thêm: căn chỉnh T0/Tn đo từ vị trí khác → tự dùng điểm mốc cố định (SVD cứng, không triệt tiêu biến dạng) nếu phát hiện ≥3 mốc; không thì trimmed ICP (`_trimmed_icp` loại vùng residual cao → giữ biến dạng cục bộ, full ICP làm mất ~75%). Wire vào AUTO PIPELINE (bước 2b) khi có ≥2 epochs. Test: test_register_epochs 8/8 (mốc + ICP + biến dạng giữ nguyên).
 - **UI nút "3.0 Auto-align T0/Tn epochs"** — ✅ thêm: phơi bày register_epochs thành nút riêng ở section 3 (Registration), dùng key dispatch `epoch_register`. Thêm "3.0" vào CORE_STEP_CODES. Lưu ý: xoay quanh trục hầm (roll) với hầm tròn là bất khả quan sát → cần mốc; xoay quanh trục đứng (yaw) + tịnh tiến thì ICP khôi phục được. Test end-to-end: test_pipeline_end_to_end 16/16 (Tn lệch hệ tọa độ vẫn khớp, gap 2.1m→0.07m).
+- **registration.py register_epochs divergence guard** — ✅ thêm: ICP trượt 233m trên hầm dài gần đối xứng → chọn kết quả tốt nhất theo RMSE trong {nguyên bản, coarse, trimmed-ICP}, không bao giờ tệ hơn đầu vào.
+- **preprocessing.py voxel recenter đa trạm** — ✅ fix: voxel chỉ recenter khi 1 scan; ≥2 scan giữ khung tọa độ (T0/Tn không bị tách ~20m). Render lại cả 2 trạm sau 2.1/2.5 (giữ điểm nhiễu đỏ).
+- **parameters.py calc_eccentricity hầm cong** — ✅ fix (đầu tư): eccentricity 1-scan trên hầm cong báo giả ~452mm (B-spline centerline lệch tâm ống). Nhánh fallback (no-T0): tâm fit vòng tròn (Kasa, robust với sampling lệch) + detrend bằng moving-median reflect-pad + median filter + bỏ portal → **mean 452→10mm**. Nhánh T0 (test GT) giữ nguyên. CÒN LẠI: max ~245mm do centerline lệch ~180mm khỏi tâm ống cong (giới hạn tracking — cần viết lại centerline từ gốc, rủi ro cao). Verify: test_deformation_groundtruth 6/6 vẫn pass.
+- **geometry.py _refine_centerline_tangent guard** — ✅ fix: bước refine tiếp tuyến (chạy khi hầm cong) thực ra làm centerline TỆ HƠN trên vài data cong (offset 24mm→204mm, do frame bootstrap PCA thẳng). Thêm `_axis_offset_metric` + guard trong extract_centerline_bspline: chỉ giữ refine nếu GIẢM offset tâm, không thì giữ bootstrap. Chỉ chạy khi cong → hầm thẳng (GT/step6) không đụng. Verify regression: GT 6/6, sections radius 2.750m, clearance precision/recall 1.00, step6 10/10, consistency 12/12, end-to-end 16/16 — pass hết.
