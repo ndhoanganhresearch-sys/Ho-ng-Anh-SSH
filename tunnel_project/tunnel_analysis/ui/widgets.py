@@ -89,6 +89,249 @@ def section_warning_text(issues, limit: int = 3) -> str:
         parts.append(f"+{len(issues) - limit} more")
     return ", ".join(parts)
 
+class ChainageRulerWidget(QtWidgets.QWidget):
+    """Full-width chainage ruler always visible below the viewport.
+
+    • Draws the entire tunnel chainage range as a horizontal track.
+    • CRITICAL positions → red filled triangles (▼) above the track.
+    • CAUTION positions  → amber filled triangles (▼) above the track.
+    • Section segments coloured by worst status in that zone.
+    • Current section position → thin white vertical indicator line.
+    • Click anywhere to jump to the nearest section.
+    """
+
+    jumped = QtCore.Signal(int)   # emits section index
+
+    _H_TOTAL  = 50
+    _H_TRI    = 10    # height of triangle above track
+    _H_TRACK  = 14    # track band height
+    _H_LABEL  = 16    # chainage label row height
+    _ML       = 52    # left margin (for min-ch label)
+    _MR       = 52    # right margin
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(self._H_TOTAL)
+        self.setMinimumWidth(200)
+        self.setMouseTracking(True)
+        self.setCursor(QtCore.Qt.PointingHandCursor)
+        self.setToolTip("Thanh lý trình — Click để nhảy đến mặt cắt  |  "
+                        "▼ Đỏ = CRITICAL  ▼ Vàng = CAUTION")
+
+        self._min_ch:   float       = 0.0
+        self._max_ch:   float       = 0.0
+        self._sections: list        = []    # SectionGeometry list
+        self._seg_colors: list      = []    # per-section status color hex
+        self._marks:    list        = []    # (frac, color, tooltip, idx) — warnings only
+        self._fracs:    list        = []    # fraction for every section
+        self._cur_frac: float       = -1.0  # current position indicator
+
+    # ── Public API ─────────────────────────────────────────────────────────
+
+    def set_sections(self, sections, ref_sections=None) -> None:
+        """Populate ruler from SectionGeometry list (Tn) and optional T0."""
+        if not sections:
+            self._sections = []; self._seg_colors = []; self._marks = []
+            self._fracs = []; self._min_ch = self._max_ch = 0.0
+            self._cur_frac = -1.0; self.update(); return
+
+        chs = [s.chainage for s in sections]
+        self._min_ch = min(chs); self._max_ch = max(chs)
+        span = max(self._max_ch - self._min_ch, 1e-6)
+        self._sections = sections
+        self._fracs = [(c - self._min_ch) / span for c in chs]
+
+        ref_map = {}
+        if ref_sections:
+            ref_map = {round(rs.chainage, 3): rs for rs in ref_sections}
+
+        seg_colors = []
+        marks = []
+        for i, sg in enumerate(sections):
+            ref = ref_map.get(round(sg.chainage, 3)) or sg
+            ws, wi = section_warning_status(sg, ref)
+            if ws == "CRITICAL":
+                seg_colors.append("#DC2626")
+                tip = f"CRITICAL  Ch {sg.chainage:.1f} m"
+                marks.append((self._fracs[i], "#DC2626", tip, i))
+            elif ws == "CAUTION":
+                seg_colors.append("#D97706")
+                tip = f"CAUTION  Ch {sg.chainage:.1f} m"
+                marks.append((self._fracs[i], "#D97706", tip, i))
+            else:
+                seg_colors.append("#1E3A5F")   # OK → dark blue (barely visible)
+
+        self._seg_colors = seg_colors
+        self._marks = marks
+        self.update()
+
+    def set_current(self, chainage: float) -> None:
+        """Move the current-position indicator to the given chainage."""
+        if self._max_ch > self._min_ch:
+            self._cur_frac = (chainage - self._min_ch) / (self._max_ch - self._min_ch)
+        else:
+            self._cur_frac = -1.0
+        self.update()
+
+    def clear(self) -> None:
+        self.set_sections([])
+
+    # ── Painting ───────────────────────────────────────────────────────────
+
+    def paintEvent(self, event):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        W, H = self.width(), self.height()
+        ML, MR = self._ML, self._MR
+        TW = max(W - ML - MR, 1)  # track width
+
+        track_y = self._H_TRI + 2
+        track_h = self._H_TRACK
+        label_y = track_y + track_h + 4
+
+        # ── Background ──────────────────────────────────────────────────
+        p.fillRect(0, 0, W, H, QtGui.QColor("#1E293B"))
+
+        # ── Section segments ────────────────────────────────────────────
+        if self._sections:
+            n = len(self._fracs)
+            for i, frac in enumerate(self._fracs):
+                x = ML + int(frac * TW)
+                # segment width = half gap to neighbours
+                prev_x = ML + int(self._fracs[i - 1] * TW) if i > 0 else ML
+                next_x = ML + int(self._fracs[i + 1] * TW) if i < n - 1 else ML + TW
+                seg_left = (x + prev_x) // 2
+                seg_right = (x + next_x) // 2
+                sw = max(seg_right - seg_left, 2)
+                qc = QtGui.QColor(self._seg_colors[i])
+                qc.setAlpha(200)
+                p.fillRect(seg_left, track_y, sw, track_h, qc)
+        else:
+            # Empty track
+            p.fillRect(ML, track_y, TW, track_h, QtGui.QColor("#1E3A5F"))
+
+        # Track border
+        p.setPen(QtGui.QPen(QtGui.QColor("#334155"), 1))
+        p.setBrush(QtCore.Qt.NoBrush)
+        p.drawRect(ML, track_y, TW, track_h)
+
+        # ── Warning triangles ────────────────────────────────────────────
+        for frac, color, _tip, _idx in self._marks:
+            cx = ML + int(frac * TW)
+            cx = max(ML + 5, min(ML + TW - 5, cx))
+            tri_top_y = 1
+            tri_bot_y = track_y
+            half = 6
+            path = QtGui.QPainterPath()
+            path.moveTo(cx - half, tri_top_y)
+            path.lineTo(cx + half, tri_top_y)
+            path.lineTo(cx,        tri_bot_y)
+            path.closeSubpath()
+            p.setBrush(QtGui.QColor(color))
+            p.setPen(QtGui.QPen(QtGui.QColor(color).darker(140), 1))
+            p.drawPath(path)
+
+        # ── Current position indicator ───────────────────────────────────
+        if 0.0 <= self._cur_frac <= 1.0:
+            cx = ML + int(self._cur_frac * TW)
+            p.setPen(QtGui.QPen(QtGui.QColor("#FFFFFF"), 2))
+            p.drawLine(cx, track_y - 1, cx, track_y + track_h + 1)
+            # Small blue circle at top of track
+            p.setBrush(QtGui.QColor("#38BDF8"))
+            p.setPen(QtCore.Qt.NoPen)
+            p.drawEllipse(cx - 4, track_y - 5, 8, 8)
+
+        # ── Tick marks + labels ──────────────────────────────────────────
+        if self._max_ch > self._min_ch:
+            import math as _math
+            span = self._max_ch - self._min_ch
+            for iv in [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]:
+                if span / iv <= 18:
+                    interval = iv; break
+            else:
+                interval = 1000
+            font_sm = QtGui.QFont("Segoe UI", 7)
+            p.setFont(font_sm)
+            p.setPen(QtGui.QColor("#64748B"))
+            fm = QtGui.QFontMetrics(font_sm)
+            start = _math.ceil(self._min_ch / interval) * interval
+            ch = start
+            while ch <= self._max_ch + 1e-6:
+                frac = (ch - self._min_ch) / span
+                x = ML + int(frac * TW)
+                p.setPen(QtGui.QPen(QtGui.QColor("#475569"), 1))
+                p.drawLine(x, track_y + track_h, x, track_y + track_h + 3)
+                lbl = f"{ch:.0f}m"
+                lw = fm.horizontalAdvance(lbl)
+                p.setPen(QtGui.QColor("#94A3B8"))
+                p.drawText(x - lw // 2, label_y + fm.ascent(), lbl)
+                ch += interval
+
+        # ── Min / max chainage labels ────────────────────────────────────
+        font_b = QtGui.QFont("Segoe UI", 7, QtGui.QFont.Bold)
+        p.setFont(font_b)
+        p.setPen(QtGui.QColor("#CBD5E1"))
+        fm2 = QtGui.QFontMetrics(font_b)
+        lbl_min = f"Ch {self._min_ch:.1f}m"
+        lbl_max = f"Ch {self._max_ch:.1f}m"
+        mid_y = track_y + track_h // 2 + fm2.ascent() // 2
+        p.drawText(2, mid_y, lbl_min)
+        p.drawText(W - fm2.horizontalAdvance(lbl_max) - 2, mid_y, lbl_max)
+
+        p.end()
+
+    # ── Mouse ───────────────────────────────────────────────────────────
+
+    def mouseMoveEvent(self, event):
+        px = event.x()
+        tip = self._tip_at(px)
+        if tip:
+            QtWidgets.QToolTip.showText(event.globalPos(), tip, self)
+        elif self._max_ch > self._min_ch:
+            frac = self._px_to_frac(px)
+            if 0.0 <= frac <= 1.0:
+                ch = self._min_ch + frac * (self._max_ch - self._min_ch)
+                QtWidgets.QToolTip.showText(
+                    event.globalPos(), f"Ch {ch:.1f} m", self)
+        else:
+            QtWidgets.QToolTip.hideText()
+
+    def mousePressEvent(self, event):
+        if event.button() != QtCore.Qt.LeftButton:
+            return
+        px = event.x()
+        # Check warning marker hit first
+        idx = self._mark_idx_at(px)
+        if idx >= 0:
+            self.jumped.emit(idx); return
+        # Otherwise jump to nearest section
+        if self._fracs:
+            frac = self._px_to_frac(px)
+            nearest = min(range(len(self._fracs)),
+                          key=lambda i: abs(self._fracs[i] - frac))
+            self.jumped.emit(nearest)
+
+    # ── Helpers ─────────────────────────────────────────────────────────
+
+    def _px_to_frac(self, px: int) -> float:
+        TW = max(self.width() - self._ML - self._MR, 1)
+        return (px - self._ML) / TW
+
+    def _tip_at(self, px: int) -> str:
+        TW = max(self.width() - self._ML - self._MR, 1)
+        for frac, _c, tip, _i in self._marks:
+            if abs(self._ML + int(frac * TW) - px) <= 9:
+                return tip
+        return ""
+
+    def _mark_idx_at(self, px: int) -> int:
+        TW = max(self.width() - self._ML - self._MR, 1)
+        for frac, _c, _t, idx in self._marks:
+            if abs(self._ML + int(frac * TW) - px) <= 9:
+                return idx
+        return -1
+
+
 class CollapsibleSection(QtWidgets.QWidget):
     def __init__(self, title: str, step: int, tag: str, parent=None):
         super().__init__(parent)
@@ -352,12 +595,27 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         self._btn_anim.setCheckable(True)
         self._btn_anim.setToolTip("Animate deformation T0 -> Tn")
         self._btn_anim.toggled.connect(self._toggle_animation)
+        self._lbl_deform_scale = QtWidgets.QLabel("Visual scale")
+        self._lbl_deform_scale.setStyleSheet("color:#334155;font-size:8.5pt;font-weight:600;")
+        self._sp_deform_scale = QtWidgets.QDoubleSpinBox()
+        self._sp_deform_scale.setRange(1.0, 100.0)
+        self._sp_deform_scale.setDecimals(0)
+        self._sp_deform_scale.setSingleStep(5.0)
+        self._sp_deform_scale.setValue(10.0)
+        self._sp_deform_scale.setSuffix("x")
+        self._sp_deform_scale.setFixedWidth(72)
+        self._sp_deform_scale.setToolTip("Visual-only deformation magnification for T0/Tn overlay and animation. Measurements stay real.")
+        self._sp_deform_scale.valueChanged.connect(self._refresh)
         self._anim_timer = QtCore.QTimer()
         self._anim_timer.setInterval(80)
         self._anim_timer.timeout.connect(self._anim_step)
         self._anim_alpha = 0.0; self._anim_dir = 1
         self._ref_sections: List[SectionGeometry] = []
-        ctrl.addWidget(self._chk_overlay); ctrl.addWidget(self._btn_anim); ctrl.addStretch()
+        ctrl.addWidget(self._chk_overlay)
+        ctrl.addWidget(self._btn_anim)
+        ctrl.addWidget(self._lbl_deform_scale)
+        ctrl.addWidget(self._sp_deform_scale)
+        ctrl.addStretch()
         lay.addLayout(ctrl)
         self._info_label = QtWidgets.QLabel("Run Step 6.3 to display section parameters.")
         self._info_label.setWordWrap(True)
@@ -387,6 +645,8 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         self._chk_overlay.setToolTip(translate("Overlay reference epoch T0 on current section"))
         self._btn_anim.setText(("⏹ " + self._stop_label) if self._btn_anim.isChecked() else ("▶ " + self._anim_label))
         self._btn_anim.setToolTip(translate("Animate deformation T0 -> Tn"))
+        self._lbl_deform_scale.setText(translate("Visual scale"))
+        self._sp_deform_scale.setToolTip(translate("Visual-only deformation magnification for T0/Tn overlay and animation. Measurements stay real."))
         if hasattr(self, "_mpl_missing_label"):
             self._mpl_missing_label.setText(translate("Matplotlib is required for 2D cross-section plotting."))
         if not self._sections:
@@ -451,6 +711,50 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         self._ax.autoscale()
         self._ax.set_aspect("equal", adjustable="box")
         self._canvas.draw_idle()
+
+    def _visual_deformation_scale(self) -> float:
+        if hasattr(self, "_sp_deform_scale"):
+            return max(1.0, float(self._sp_deform_scale.value()))
+        return 1.0
+
+    def _amplify_points_for_display(self, pts2d: np.ndarray, ref_sg, alpha: float) -> tuple[np.ndarray, bool]:
+        """Return visual-only amplified Tn points against T0 by polar radius.
+
+        There is no point-to-point correspondence between section clouds, so the
+        display approximation compares Tn radius to the median T0 radius at the
+        same polar angle. This makes small mm-level deformation visible without
+        changing any measured section parameters.
+        """
+        scale = self._visual_deformation_scale()
+        if scale <= 1.0 or ref_sg is None or ref_sg.pts_2d is None or len(ref_sg.pts_2d) < 16:
+            return pts2d, False
+        ref = np.asarray(ref_sg.pts_2d, dtype=np.float64)
+        ref = ref[np.isfinite(ref).all(axis=1)]
+        pts = np.asarray(pts2d, dtype=np.float64)
+        if len(ref) < 16 or len(pts) < 4:
+            return pts2d, False
+
+        n_bins = 720
+        theta_ref = (np.arctan2(ref[:, 1], ref[:, 0]) + 2.0 * np.pi) % (2.0 * np.pi)
+        r_ref = np.hypot(ref[:, 0], ref[:, 1])
+        bins = np.floor(theta_ref / (2.0 * np.pi) * n_bins).astype(np.int64)
+        med = np.full(n_bins, np.nan, dtype=np.float64)
+        for b in np.unique(bins):
+            med[b] = float(np.nanmedian(r_ref[bins == b]))
+        good = np.flatnonzero(np.isfinite(med))
+        if len(good) < 8:
+            return pts2d, False
+        x_good = np.r_[good - n_bins, good, good + n_bins]
+        y_good = np.r_[med[good], med[good], med[good]]
+
+        theta = (np.arctan2(pts[:, 1], pts[:, 0]) + 2.0 * np.pi) % (2.0 * np.pi)
+        r = np.hypot(pts[:, 0], pts[:, 1])
+        pos = theta / (2.0 * np.pi) * n_bins
+        r0 = np.interp(pos, x_good, y_good)
+        scale_eff = 1.0 + (scale - 1.0) * max(0.0, min(1.0, float(alpha)))
+        r_vis = r0 + (r - r0) * scale_eff
+        out = np.column_stack([r_vis * np.cos(theta), r_vis * np.sin(theta)])
+        return out, True
 
     def _show_info_dialog(self) -> None:
         """Show section parameters grouped by engineering purpose."""
@@ -738,7 +1042,8 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         pts2d  = pts2d[finite]; labels = labels[finite]
         if len(pts2d) < 4:
             self._draw_empty(); return
-        x = pts2d[:, 0]; z = pts2d[:, 1]
+        pts2d_plot, amplified = self._amplify_points_for_display(pts2d, warn_ref_sg, alpha)
+        x = pts2d_plot[:, 0]; z = pts2d_plot[:, 1]
 
         # Cap plotted points: a section can hold >10k points (mean ~6k on
         # real scans); re-scattering all of them every refresh/animation
@@ -771,6 +1076,12 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         pt_alpha = max(0.3, min(0.75, 0.35 + 0.40 * alpha))
         ax.scatter(x, z, c=final_colors, s=2.2, alpha=pt_alpha,
                    linewidths=0, rasterized=True, zorder=2)
+        if amplified:
+            ax.text(0.02, 0.98, f"Visual deformation x{self._visual_deformation_scale():.0f} (measurements true)",
+                    transform=ax.transAxes, ha="left", va="top", fontsize=7.5,
+                    color="#7C3AED", fontweight="bold",
+                    bbox=dict(facecolor="#F5F3FF", edgecolor="#C4B5FD",
+                              boxstyle="round,pad=0.25", alpha=0.95), zorder=11)
         # PDF params overlay
         # ── δv Crown settlement arrow ──────────────────────────────────────
         # Crown marker. With a T0 reference this is the TRUE crown settlement
@@ -1089,6 +1400,8 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                 parts.append(f"{warn_status}: {section_warning_text(warn_issues)}")
             parts.append(f"Ch:{sg.chainage:.2f}m")
             parts.append("Tn")
+            if ref_info is not None and self._visual_deformation_scale() > 1.0:
+                parts.append(f"Visual x{self._visual_deformation_scale():.0f}")
             if np.isfinite(sg.W1):
                 parts.append(f"W1={sg.W1:.3f}m")
             if np.isfinite(sg.H1):

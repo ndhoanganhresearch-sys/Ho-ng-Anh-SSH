@@ -15,7 +15,7 @@ from ..ifc_exporter import TunnelIFCExporter
 from ..target_detector import TargetDetector, Target
 from ..rag_ai import TunnelRAGAssistant
 from .widgets import (CollapsibleSection, MatplotlibSectionWidget, PolarDeformationPlotWidget,
-                      LinePlotWidget, SummaryDashboardWidget,
+                      LinePlotWidget, SummaryDashboardWidget, ChainageRulerWidget,
                       section_warning_status, section_warning_text)
 from .i18n_v4 import tr as _tr
 from translations import get_available_languages
@@ -216,6 +216,13 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         rlay.addWidget(self.header)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal); rlay.addWidget(splitter, 1)
+
+        # ── Chainage ruler — always visible below the 3D viewport ───────────
+        # Shows the full tunnel chainage with CRITICAL (red ▼) / CAUTION (amber ▼)
+        # markers so dangerous sections are visible from any tab.
+        self._chainage_ruler = ChainageRulerWidget()
+        self._chainage_ruler.jumped.connect(self._slot_chainage_ruler_jump)
+        rlay.addWidget(self._chainage_ruler)
 
         self.vp_frame  = QtWidgets.QFrame(); self.vp_frame.setObjectName("ViewportFrame")
         self.vp_layout = QtWidgets.QVBoxLayout(self.vp_frame)
@@ -1186,6 +1193,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             ref_secs = getattr(self, "_section_ref_sections", []) or []
             self.dashboard_widget.update_sections(
                 sections, ref_secs, profile=self.context.tunnel_profile or "Circle")
+            # Update chainage ruler — warning triangles always visible below viewport.
+            if hasattr(self, "_chainage_ruler"):
+                _ruler_ref = getattr(self, "_section_ref_sections", []) or []
+                self._chainage_ruler.set_sections(sections, _ruler_ref)
+                if sections:
+                    self._chainage_ruler.set_current(sections[0].chainage)
             # Overlay coloured warning rings on 3D viewport.
             self._render_warning_markers(sections, ref_secs)
             valid = [s for s in sections if s.pts_2d is not None]
@@ -2895,6 +2908,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         try: self.plotter.remove_actor("sec_plane"); self.plotter.remove_actor("sec_center")
         except Exception: pass
 
+        # Update chainage ruler current-position indicator.
+        if hasattr(self, "_chainage_ruler"):
+            self._chainage_ruler.set_current(sg.chainage)
+
         # Draw section disc
         import pyvista as _pv
         radius = float(sg.radius_fit) if np.isfinite(sg.radius_fit) else 4.0
@@ -2914,6 +2931,21 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self.plotter.add_lines(ln, color=col, width=3, connected=True, name=nm)
 
         self.plotter.render()
+
+    def _slot_chainage_ruler_jump(self, idx: int) -> None:
+        """Jump to section *idx* when user clicks on the chainage ruler."""
+        sections = self.context.sections
+        if not sections or idx < 0 or idx >= len(sections):
+            return
+        # Switch to the 2D cross-section tab so the section is visible.
+        if hasattr(self, "_section_tab_idx"):
+            self.right_tabs.setCurrentIndex(self._section_tab_idx)
+        # Move the section slider/spinbox inside MatplotlibSectionWidget.
+        if hasattr(self, "section_widget") and hasattr(self.section_widget, "set_section_index"):
+            self.section_widget.set_section_index(idx)
+        else:
+            # Fallback: drive the existing highlight logic directly.
+            self._highlight_section(idx)
 
     def _render_warning_markers(self, sections, ref_sections=None) -> None:
         """Place coloured flag-pole markers (sphere + stem + label) above each

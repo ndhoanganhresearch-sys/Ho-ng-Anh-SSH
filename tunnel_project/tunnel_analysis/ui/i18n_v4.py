@@ -467,6 +467,8 @@ PHRASES.update({
     "Animate deformation T0 -> Tn": {"vi": "Hoạt ảnh biến dạng T0 -> Tn", "ko": "T0 -> Tn 변형 애니메이션"},
     "Run Step 6.3 to display section parameters.": {"vi": "Chạy bước 6.3 để hiển thị tham số mặt cắt.", "ko": "단면 매개변수를 표시하려면 6.3단계를 실행하세요."},
     "RMSE: --": {"vi": "Sai số RMSE: --", "ko": "RMSE 오차: --"},
+    "Visual scale": {"vi": "Phóng đại nhìn", "ko": "시각 배율"},
+    "Visual-only deformation magnification for T0/Tn overlay and animation. Measurements stay real.": {"vi": "Chỉ phóng đại biến dạng để quan sát overlay/animation T0-Tn. Số đo vẫn là giá trị thật.", "ko": "T0/Tn 오버레이와 애니메이션에서만 변형을 시각적으로 확대합니다. 측정값은 실제값 그대로입니다."},
 })
 
 def tr(text: str, lang: str = "en") -> str:
