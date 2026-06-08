@@ -191,4 +191,107 @@ class TimeSeriesLayer:
             "method": method,
         }
 
+    def forecast_threshold_crossing(
+        self,
+        series: Dict[str, object],
+        times: Optional[List[float]] = None,
+        caution_mm: float = 10.0,
+        critical_mm: float = 25.0,
+        degree: int = 1,
+        min_epochs: int = 3,
+        metric: str = "p95_abs_mm",
+    ) -> Dict[str, object]:
+        """Extrapolate a multi-epoch deformation trend to predict when it will
+        cross the CAUTION / CRITICAL safety thresholds (predictive maintenance,
+        PDF Phase 4).
+
+        Takes the output of :meth:`spatiotemporal_series` and fits a low-order
+        polynomial (``degree`` 1 = constant rate, 2 = with acceleration) to the
+        chosen per-epoch magnitude series over ``times``, then solves for the
+        first FUTURE time the fitted curve reaches each threshold.
+
+        ``times`` are the epoch times (e.g. months since T0) for T1..Tn and must
+        match ``series['labels']``; defaults to 1, 2, 3, ... (unit spacing, T0
+        implied at 0). Returns the fitted instantaneous ``rate_per_unit`` at the
+        latest epoch, the fit ``r_squared``, the predicted crossing times
+        (``None`` when the trend never reaches a threshold, e.g. flat/recovering)
+        and a human-readable ``summary``. ``low_confidence`` flags an R^2 below
+        0.5, where extrapolation should not be trusted.
+        """
+        values = np.asarray(series.get(metric, []), dtype=np.float64).ravel()
+        n = int(values.size)
+        result: Dict[str, object] = {
+            "ok": False, "metric": metric, "degree": int(degree),
+            "rate_per_unit": None, "r_squared": None,
+            "t_caution": None, "t_critical": None,
+            "dt_caution": None, "dt_critical": None,
+            "caution_mm": float(caution_mm), "critical_mm": float(critical_mm),
+            "low_confidence": False, "reason": "", "summary": "",
+        }
+        if n < min_epochs:
+            result["reason"] = f"need >= {min_epochs} epochs, got {n}"
+            result["summary"] = (
+                f"Chua du du lieu de du bao (can >= {min_epochs} epoch, co {n}).")
+            return result
+        if times is None:
+            t = np.arange(1, n + 1, dtype=np.float64)
+        else:
+            t = np.asarray(times, dtype=np.float64).ravel()
+            if t.size != n:
+                result["reason"] = f"times length {t.size} != series length {n}"
+                return result
+        finite = np.isfinite(values) & np.isfinite(t)
+        if int(finite.sum()) < min_epochs:
+            result["reason"] = "too many non-finite samples"
+            return result
+        t = t[finite]; values = values[finite]
+
+        deg = int(max(1, min(degree, t.size - 1)))
+        coeffs = np.polyfit(t, values, deg)
+        fit = np.poly1d(coeffs)
+        pred = fit(t)
+        ss_res = float(np.sum((values - pred) ** 2))
+        ss_tot = float(np.sum((values - values.mean()) ** 2))
+        r2 = 1.0 - ss_res / ss_tot if ss_tot > 1e-12 else 1.0
+        rate = float(np.polyder(fit)(t[-1]))     # instantaneous rate at latest epoch
+        t_last = float(t[-1]); v_last = float(values[-1])
+
+        def _first_future_crossing(thr: float) -> Optional[float]:
+            if v_last >= thr:
+                return t_last                      # already at/over the threshold
+            c = coeffs.copy(); c[-1] -= thr        # solve fit(t) - thr = 0
+            roots = np.roots(c) if c.size > 1 else np.array([])
+            future = [float(r.real) for r in np.atleast_1d(roots)
+                      if abs(getattr(r, "imag", 0.0)) < 1e-6 and r.real > t_last + 1e-9]
+            return min(future) if future else None
+
+        t_caution = _first_future_crossing(float(caution_mm))
+        t_critical = _first_future_crossing(float(critical_mm))
+        dt_caution = (t_caution - t_last) if t_caution is not None else None
+        dt_critical = (t_critical - t_last) if t_critical is not None else None
+
+        result.update({
+            "ok": True,
+            "rate_per_unit": rate,
+            "r_squared": r2,
+            "t_caution": t_caution, "t_critical": t_critical,
+            "dt_caution": dt_caution, "dt_critical": dt_critical,
+            "low_confidence": bool(r2 < 0.5),
+        })
+
+        def _phrase(label, thr, v_now, dt):
+            if v_now >= thr:
+                return f"Da vuot {label} ({thr:g}mm). "
+            if dt is None:
+                return f"Khong du bao dat {label} ({thr:g}mm) (xu huong on dinh/giam). "
+            return f"Du bao dat {label} ({thr:g}mm) sau ~{dt:.1f} don vi thoi gian. "
+
+        summary = f"Toc do {metric}: {rate:+.2f} mm/don-vi (R^2={r2:.2f}). "
+        summary += _phrase("CAUTION", caution_mm, v_last, dt_caution)
+        summary += _phrase("CRITICAL", critical_mm, v_last, dt_critical)
+        if r2 < 0.5:
+            summary += "(Do tin cay thap - xu huong khong tuyen tinh, can them epoch.) "
+        result["summary"] = summary
+        return result
+
 
