@@ -43,7 +43,7 @@ CORE_STEP_CODES = {
     "5.1", "5.2", "5.5", "5.6",                       # deformation parameters (5.3/5.8 3D maps hidden — redundant)
     "6.1", "6.2", "6.3",                              # 4D time-series
     "7.1c", "7.2",                                    # BIM export (IFC + components = most complete) + AI assistant
-    "8.1", "8.2", "8.3",                              # export results: CSV / Excel / PDF report
+    "8.1", "8.2", "8.3", "8.5",                       # export results: CSV / Excel / PDF report / AI work order
 }
 
 # Clean, gap-free DISPLAY numbering for the core sidebar. Filtering still uses
@@ -62,7 +62,8 @@ CORE_DISPLAY_RENUMBER = {
     "8.1": "7.2",     # CSV export  (moved from section 8 into section 7)
     "8.2": "7.3",     # Excel report
     "8.3": "7.4",     # PDF report
-    "7.2": "7.5",     # AI assistant (last in the merged section)
+    "8.5": "7.5",     # AI work order (PDF)
+    "7.2": "7.6",     # AI assistant (last in the merged section)
 }
 
 # Output tabs hidden in core mode, matched by their English source title.
@@ -663,6 +664,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 ("8.1  Export section CSV", self._slot_8_1_csv),
                 ("8.2  Export Excel report", self._slot_8_2_excel),
                 ("8.3  Export PDF report", self._slot_8_3_pdf),
+                ("8.5  Generate AI work order (PDF)", self._slot_8_5_work_order),
                 ("7.2  Query structural AI assistant", self._slot_7_2_query_ai),
             ]),
             (8, "Web dashboard", "Web", [
@@ -1391,6 +1393,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             path = result
             self._log(f"PDF report exported: {path}")
             import subprocess; subprocess.Popen(["explorer", "/select,", path])
+        elif key == "8.5_workorder":
+            self._log(f"AI work order exported: {result['path']}  "
+                      f"(CRITICAL={result['n_critical']}, CAUTION={result['n_caution']}, "
+                      f"items={result['n_items']})")
+            import subprocess; subprocess.Popen(["explorer", "/select,", result["path"]])
         elif key == "8.2_excel":
             path = result
             self._log(f"Excel report exported: {path}")
@@ -2659,6 +2666,34 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         proj = scan.path if scan and scan.path else "Tunnel Analysis"
         self._start_worker("8.3_pdf", lambda: self.pdf_mod.export_pdf(
             self.context, path, project_name=proj, engineer="CBNU Smart Structure Lab"))
+
+    def _slot_8_5_work_order(self) -> None:
+        self._hdr("AI Work Order",
+                  "Generate a prioritized maintenance work order (PDF) from flagged sections.")
+        if not self.context.sections:
+            self._log(_tr("Run parameter extraction first (Step 5).", self.current_language)); return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, _tr("Save Work Order", self.current_language),
+            "tunnel_work_order.pdf", "PDF Files (*.pdf)")
+        if not path: return
+        scan = self.context.active_scan
+        proj = scan.path if scan and scan.path else "Tunnel Analysis"
+        sections = self.context.sections
+        ref_secs = list(getattr(self, "_section_ref_sections", []) or [])
+
+        def _task():
+            # classify_sections is the single source of truth shared with the
+            # ruler / 2D track / dashboard; inject it so rag_ai stays headless.
+            statuses = classify_sections(sections, ref_secs or None)
+            order = self.rag_mod.generate_work_order(
+                self.context, statuses, project_name=str(proj))
+            out = self.pdf_mod.export_work_order_pdf(
+                self.context, order, path, project_name=str(proj))
+            return {"path": out, "n_critical": order.get("n_critical", 0),
+                    "n_caution": order.get("n_caution", 0),
+                    "n_items": len(order.get("items", []))}
+
+        self._start_worker("8.5_workorder", _task)
 
     def _slot_7_1_ifc(self) -> None:
         self._hdr("IFC/BIM Export (IFC4)", "Export tunnel geometry and parameters to IFC4 format.")

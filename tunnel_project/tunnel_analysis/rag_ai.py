@@ -79,6 +79,148 @@ SAFETY_STANDARDS = [
 ]
 
 
+# Map a classify_sections issue label -> (phenomenon, governing standard, the
+# recommended field action). Keys cover both the T0-comparison labels
+# (dW/dH/dR/dOval/dEcc) and the single-scan absolute labels
+# (ovality/eccentricity/clearance) emitted by classify_sections().
+WORK_ORDER_RULES = {
+    "clearance":    ("Vehicle clearance violation",
+                     "Korean Railway Act Art.26",
+                     "Verify gauge intrusion on site; restrict/redirect traffic until cleared."),
+    "dW":           ("Lateral convergence (clear-width change)",
+                     "KDS 27 25 00",
+                     "Install temporary props/shoring; survey convergence daily."),
+    "dH":           ("Crown settlement (clear-height change)",
+                     "KR C-08080",
+                     "Increase crown-settlement monitoring frequency; assess overburden load."),
+    "dR":           ("Radius deformation",
+                     "KDS 27 25 00",
+                     "Inspect lining for cracking along the affected ring(s)."),
+    "dOval":        ("Ovality (cross-section distortion)",
+                     "KDS 27 25 00",
+                     "Check for differential ground pressure; schedule lining-distress survey."),
+    "ovality":      ("Ovality (cross-section distortion)",
+                     "KDS 27 25 00",
+                     "Check for differential ground pressure; schedule lining-distress survey."),
+    "dEcc":         ("Eccentricity (centre offset)",
+                     "KDS 27 25 00",
+                     "Investigate differential settlement / construction tolerance."),
+    "eccentricity": ("Eccentricity (centre offset)",
+                     "KDS 27 25 00",
+                     "Investigate differential settlement / construction tolerance."),
+}
+_WORK_ORDER_FALLBACK = ("Structural anomaly", "ITA guidelines",
+                        "Perform detailed engineering inspection.")
+_PRIORITY = {"CRITICAL": "Within 48 hours", "CAUTION": "Within 30 days"}
+
+
+def _dominant_issue(issues):
+    """Pick the governing issue of a section: CRITICAL outranks CAUTION, then
+    the largest magnitude. ``issues`` is the classify_sections list of
+    (level, label, value, unit). Returns that tuple, or None when empty."""
+    if not issues:
+        return None
+    def _key(it):
+        level, _label, value, _unit = it
+        sev = 1 if level == "CRITICAL" else 0
+        mag = abs(value) if isinstance(value, (int, float)) and np.isfinite(value) else 0.0
+        return (sev, mag)
+    return max(issues, key=_key)
+
+
+def build_work_order(sections, section_statuses, project_name="Tunnel",
+                     group_gap_m=2.0):
+    """Group classified warning sections into a ranked, structured work order.
+
+    Pure data transform (no LLM / DB): consumes the SAME
+    ``classify_sections()`` output used by every view (single source of truth)
+    and is injected here so this module stays headless and never imports the UI.
+
+    Args:
+        sections: list of SectionGeometry (for chainage lookup).
+        section_statuses: classify_sections() output -> list of (status, issues)
+            aligned 1:1 with ``sections``.
+        project_name: shown on the order header.
+        group_gap_m: merge adjacent flagged sections sharing the same dominant
+            issue when their chainage gap is <= this (metres) into one zone.
+
+    Returns a dict with project/header counts and a ``items`` list, each item a
+    contiguous zone: id, level, chainage_start/end, n_sections, phenomenon,
+    issue_label, max_value, unit, standard, priority, action.
+    """
+    flagged = []
+    for i, sec in enumerate(sections or []):
+        if i >= len(section_statuses or []):
+            break
+        status, issues = section_statuses[i]
+        if status == "OK":
+            continue
+        dom = _dominant_issue(issues)
+        if dom is None:
+            continue
+        level, label, value, unit = dom
+        flagged.append({
+            "idx": i,
+            "chainage": float(getattr(sec, "chainage", float(i))),
+            "level": level, "label": label,
+            "value": float(value) if isinstance(value, (int, float)) else float("nan"),
+            "unit": unit,
+        })
+
+    flagged.sort(key=lambda f: f["chainage"])
+
+    # Merge adjacent same-label sections into zones.
+    zones = []
+    for f in flagged:
+        z = zones[-1] if zones else None
+        if (z is not None and z["label"] == f["label"]
+                and f["chainage"] - z["chainage_end"] <= group_gap_m):
+            z["chainage_end"] = f["chainage"]
+            z["n_sections"] += 1
+            z["_vals"].append(f["value"])
+            if f["level"] == "CRITICAL":
+                z["level"] = "CRITICAL"
+        else:
+            zones.append({
+                "label": f["label"], "level": f["level"],
+                "chainage_start": f["chainage"], "chainage_end": f["chainage"],
+                "n_sections": 1, "unit": f["unit"], "_vals": [f["value"]],
+            })
+
+    # Rank: CRITICAL first, then by peak magnitude.
+    def _peak(z):
+        vals = [abs(v) for v in z["_vals"] if np.isfinite(v)]
+        return max(vals) if vals else 0.0
+    zones.sort(key=lambda z: (0 if z["level"] == "CRITICAL" else 1, -_peak(z)))
+
+    items = []
+    for n, z in enumerate(zones, start=1):
+        phenomenon, standard, action = WORK_ORDER_RULES.get(z["label"], _WORK_ORDER_FALLBACK)
+        items.append({
+            "id": f"WO-{n:03d}",
+            "level": z["level"],
+            "chainage_start": round(z["chainage_start"], 2),
+            "chainage_end": round(z["chainage_end"], 2),
+            "n_sections": z["n_sections"],
+            "phenomenon": phenomenon,
+            "issue_label": z["label"],
+            "max_value": round(_peak(z), 2),
+            "unit": z["unit"],
+            "standard": standard,
+            "priority": _PRIORITY.get(z["level"], "Schedule inspection"),
+            "action": action,
+        })
+
+    return {
+        "project": project_name,
+        "n_sections": len(sections or []),
+        "n_flagged": len(flagged),
+        "n_critical": sum(1 for it in items if it["level"] == "CRITICAL"),
+        "n_caution": sum(1 for it in items if it["level"] == "CAUTION"),
+        "items": items,
+    }
+
+
 class TunnelRAGAssistant:
     """RAG-enhanced AI assistant with tunnel safety knowledge base."""
 
@@ -217,6 +359,56 @@ Provide:
                     f"Pull model: ollama pull {self.OLLAMA_MODEL}\n\n"
                     f"--- Offline Analysis ---\n"
                     f"{self._offline_analysis(context)}")
+
+    def enrich_work_order(self, order: dict, context: PipelineContext = None,
+                          use_llm: bool = True, max_items: int = 20) -> dict:
+        """Add a one-line LLM advisory ``narrative`` to each work-order item.
+
+        All numbers come from the item data (the prompt forbids inventing
+        figures); the LLM only phrases the advisory. Degrades gracefully: if
+        ``use_llm`` is off, requests is missing, or Ollama is unreachable, the
+        order is returned unchanged (template ``action`` still present). Safe to
+        call headless / offline.
+        """
+        items = order.get("items") if isinstance(order, dict) else None
+        if not use_llm or not items:
+            return order
+        try:
+            import requests
+        except ImportError:
+            return order
+        for it in items[:max_items]:
+            prompt = (
+                "In one concise sentence, advise a tunnel maintenance engineer about a "
+                f"{it.get('level')} {it.get('phenomenon')} at chainage "
+                f"{it.get('chainage_start')}-{it.get('chainage_end')} m "
+                f"(peak {it.get('max_value')}{it.get('unit')}), governed by "
+                f"{it.get('standard')}. Do not invent any numbers.")
+            try:
+                r = requests.post(self.OLLAMA_URL, json={
+                    "model": self.OLLAMA_MODEL, "prompt": prompt, "stream": False,
+                    "options": {"temperature": 0.1, "num_predict": 80}},
+                    timeout=(3.0, 30.0))
+                r.raise_for_status()
+                txt = (r.json().get("response") or "").strip().replace("\n", " ")
+                if txt:
+                    it["narrative"] = txt[:240]
+            except Exception:
+                continue
+        return order
+
+    def generate_work_order(self, context: PipelineContext, section_statuses,
+                            project_name: str = "Tunnel", use_llm: bool = True,
+                            group_gap_m: float = 2.0) -> dict:
+        """Build + (optionally) LLM-enrich a work order in one call.
+
+        ``section_statuses`` is the classify_sections() output (injected by the
+        caller so this module never imports the UI). Render the result with
+        TunnelPDFReporter.export_work_order_pdf().
+        """
+        order = build_work_order(context.sections, section_statuses,
+                                 project_name=project_name, group_gap_m=group_gap_m)
+        return self.enrich_work_order(order, context, use_llm=use_llm)
 
     def _build_params_str(self, context: PipelineContext) -> str:
         lines = []

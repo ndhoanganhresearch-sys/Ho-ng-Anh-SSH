@@ -73,6 +73,98 @@ class TunnelPDFReporter:
         c.save()
         return str(path)
 
+    # ----------------------------------------------------------- Work order --
+    def export_work_order_pdf(self, context: PipelineContext, order: dict,
+                              out_path: str,
+                              project_name: str = "Tunnel Analysis",
+                              engineer: str = "CBNU Smart Structure Lab",
+                              location: str = "Osong Test Line") -> str:
+        """Render a structured work order (build_work_order output) to PDF.
+
+        ``order`` is the dict returned by rag_ai.build_work_order /
+        generate_work_order; this method only lays it out, so the data logic
+        stays headless and testable. Returns the written path.
+        """
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.pdfgen import canvas as rl_canvas
+        except ImportError:
+            raise RuntimeError("reportlab required: pip install reportlab")
+
+        path = Path(out_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        W, H = A4
+        c = rl_canvas.Canvas(str(path), pagesize=A4)
+        c.setTitle(f"Work Order - {project_name}")
+        c.setAuthor(engineer)
+
+        page = 1
+        title = "TUNNEL MAINTENANCE WORK ORDER"
+        self._draw_page_header(c, W, H, title, project_name)
+        y = H - 80
+        c.setFillColorRGB(*self.C_BLACK); c.setFont("Helvetica-Bold", 10)
+        c.drawString(30, y, f"Project: {project_name}    Location: {location}    "
+                            f"Date: {datetime.now():%Y-%m-%d %H:%M}")
+        y -= 15
+        c.setFont("Helvetica", 9)
+        c.drawString(30, y, f"Engineer: {engineer}")
+        y -= 18
+        c.setFont("Helvetica-Bold", 10)
+        c.setFillColorRGB(*self.C_RED)
+        c.drawString(30, y, f"CRITICAL: {order.get('n_critical', 0)}")
+        c.setFillColorRGB(*self.C_YELLOW)
+        c.drawString(150, y, f"CAUTION: {order.get('n_caution', 0)}")
+        c.setFillColorRGB(*self.C_DGRAY)
+        c.drawString(270, y,
+                     f"Sections flagged: {order.get('n_flagged', 0)}/{order.get('n_sections', 0)}")
+        y -= 24
+
+        items = order.get("items", [])
+        if not items:
+            c.setFillColorRGB(*self.C_GREEN); c.setFont("Helvetica-Bold", 14)
+            c.drawCentredString(W / 2, H / 2, "No work orders - all sections within limits.")
+        else:
+            for it in items:
+                card_h = 80 if it.get("narrative") else 66
+                if y - card_h < 50:
+                    self._draw_footer(c, W, page, project_name)
+                    c.showPage(); page += 1
+                    self._draw_page_header(c, W, H, title + " (cont.)", project_name)
+                    y = H - 80
+                self._draw_work_order_card(c, W, y, it, card_h)
+                y -= card_h + 8
+
+        self._draw_footer(c, W, page, project_name)
+        c.save()
+        return str(path)
+
+    def _draw_work_order_card(self, c, W, y_top, it, card_h):
+        level = it.get("level", "CAUTION")
+        accent = self.C_RED if level == "CRITICAL" else self.C_YELLOW
+        x = 30; w = W - 60
+        c.setFillColorRGB(*self.C_LGRAY)
+        c.roundRect(x, y_top - card_h, w, card_h, 6, fill=1, stroke=0)
+        c.setFillColorRGB(*accent)
+        c.rect(x, y_top - card_h, 5, card_h, fill=1, stroke=0)
+
+        c.setFillColorRGB(*self.C_BLUE); c.setFont("Helvetica-Bold", 11)
+        c.drawString(x + 14, y_top - 16, f"{it.get('id', '')}  -  {it.get('phenomenon', '')}")
+        c.setFillColorRGB(*accent); c.setFont("Helvetica-Bold", 9)
+        c.drawRightString(x + w - 10, y_top - 16, level)
+
+        ch_s = it.get("chainage_start", 0.0); ch_e = it.get("chainage_end", 0.0)
+        rng = f"Ch {ch_s:.2f}m" if ch_s == ch_e else f"Ch {ch_s:.2f}-{ch_e:.2f}m"
+        c.setFillColorRGB(*self.C_BLACK); c.setFont("Helvetica", 9)
+        c.drawString(x + 14, y_top - 32,
+                     f"Location: {rng}  ({it.get('n_sections', 1)} section(s))    "
+                     f"Peak: {it.get('max_value', '')}{it.get('unit', '')}")
+        c.drawString(x + 14, y_top - 45,
+                     f"Standard: {it.get('standard', '')}    Priority: {it.get('priority', '')}")
+        c.setFillColorRGB(*self.C_DGRAY); c.setFont("Helvetica-Oblique", 8)
+        c.drawString(x + 14, y_top - 58, f"Action: {it.get('action', '')}"[:125])
+        if it.get("narrative"):
+            c.drawString(x + 14, y_top - 71, f"Note: {it['narrative']}"[:125])
+
     # ---------------------------------------------------------------- Cover --
     def _draw_cover(self, c, W, H, project_name, engineer, location, context):
         from reportlab.lib.units import mm
