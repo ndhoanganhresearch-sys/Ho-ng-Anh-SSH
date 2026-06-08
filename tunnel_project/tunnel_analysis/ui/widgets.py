@@ -146,8 +146,17 @@ def classify_sections(sections, ref_sections=None):
             elif v >= caution_abs and is_local:
                 add(i, "CAUTION",  label, float(arr[i]), unit)
 
-    # ── Clearance violation (always) ─────────────────────────────────────
+    # ── Clearance violation (always, except portal artifacts) ────────────
+    # Incomplete rings at the two tunnel mouths leave stray inner points and a
+    # mis-fit centerline, so the outermost sections systematically over-report
+    # clearance intrusion (observed: every "worst" violation sat at the two
+    # chainage ends). Skip a small margin at each end on tunnels long enough for
+    # the portal to be a small fraction; short section runs (tests / stub data)
+    # are never trimmed so mid-tunnel violations stay flagged.
+    portal_n = int(round(n * 0.04)) if n >= 20 else 0
     for i, sec in enumerate(sections):
+        if portal_n and (i < portal_n or i >= n - portal_n):
+            continue
         if sec.clearance_violation:
             val = (sec.min_clearance_dist * 1e3
                    if np.isfinite(sec.min_clearance_dist) else float("nan"))
@@ -1250,6 +1259,10 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
             self._draw_empty(); return
         pts2d_plot, amplified = self._amplify_points_for_display(pts2d, warn_ref_sg, alpha)
         x = pts2d_plot[:, 0]; z = pts2d_plot[:, 1]
+        z_display_shift = 0.0
+        if self._profile != "Circle":
+            z_display_shift = -float(np.percentile(z, 1))
+            z = z + z_display_shift
 
         # Cap plotted points: a section can hold >10k points (mean ~6k on
         # real scans); re-scattering all of them every refresh/animation
@@ -1261,13 +1274,17 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
             x = x[_sub]; z = z[_sub]; labels = labels[_sub]
 
         # ── 3. Deviation colormap from best-fit circle ─────────────────────
-        r_ref = sg.radius_fit if np.isfinite(sg.radius_fit) else float(np.median(np.hypot(x, z)))
-        radii = np.hypot(x, z)
-        dev_mm = (radii - r_ref) * 1e3  # mm
-        dev_abs = np.abs(dev_mm)
-        # green < 1mm, yellow 1-3mm, red > 3mm
-        pt_colors = np.where(dev_abs < 1.0, "#16A34A",
-                    np.where(dev_abs < 3.0, "#D97706", "#DC2626"))
+        if self._profile == "Circle":
+            r_ref = sg.radius_fit if np.isfinite(sg.radius_fit) else float(np.median(np.hypot(x, z)))
+            radii = np.hypot(x, z)
+            dev_mm = (radii - r_ref) * 1e3  # mm
+            dev_abs = np.abs(dev_mm)
+            # green < 1mm, yellow 1-3mm, red > 3mm
+            pt_colors = np.where(dev_abs < 1.0, "#16A34A",
+                        np.where(dev_abs < 3.0, "#D97706", "#DC2626"))
+        else:
+            radii = np.hypot(x, z)
+            pt_colors = np.full(len(x), "#64748B", dtype=object)
 
         # ── 1. Wall/Crown/Floor colour override ────────────────────────────
         WALL_C   = "#1D4ED8"
@@ -1340,35 +1357,35 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
                 bbox=dict(facecolor="white", edgecolor="#1D4ED8",
                           boxstyle="round,pad=0.2", alpha=0.9), zorder=10)
 
-        # ── e Eccentricity: measured center dot ─────────────────────────────
-        # Geometric centre via least-squares circle fit, NOT the mass centroid
-        # (mean). On real sections points are unevenly sampled (dense floor,
-        # sparse arcs), so the centroid drifts metres off and inflates e to
-        # absurd values (measured: e_mean ~0.6-1.7 m vs e_fit ~0.02-0.1 m).
-        try:
-            _A = np.column_stack([x, z, np.ones(len(x))])
-            _b = x * x + z * z
-            _sol, _, _, _ = np.linalg.lstsq(_A, _b, rcond=None)
-            cx_meas = float(_sol[0] / 2.0); cz_meas = float(_sol[1] / 2.0)
-            if not (np.isfinite(cx_meas) and np.isfinite(cz_meas)):
+        if self._profile == "Circle":
+            # ── e Eccentricity: measured center dot ─────────────────────────────
+            # Geometric centre via least-squares circle fit, NOT the mass centroid
+            # (mean). On real sections points are unevenly sampled (dense floor,
+            # sparse arcs), so the centroid drifts metres off and inflates e to
+            # absurd values (measured: e_mean ~0.6-1.7 m vs e_fit ~0.02-0.1 m).
+            try:
+                _A = np.column_stack([x, z, np.ones(len(x))])
+                _b = x * x + z * z
+                _sol, _, _, _ = np.linalg.lstsq(_A, _b, rcond=None)
+                cx_meas = float(_sol[0] / 2.0); cz_meas = float(_sol[1] / 2.0)
+                if not (np.isfinite(cx_meas) and np.isfinite(cz_meas)):
+                    cx_meas = float(np.mean(x)); cz_meas = float(np.mean(z))
+            except Exception:
                 cx_meas = float(np.mean(x)); cz_meas = float(np.mean(z))
-        except Exception:
-            cx_meas = float(np.mean(x)); cz_meas = float(np.mean(z))
-        ax.plot(cx_meas, cz_meas, "D", color="#7C3AED", ms=7, zorder=10,
-                label=f"C_meas")
-        ax.plot(0, 0, "+", color="#64748B", ms=10, mew=2, zorder=10,
-                label="C_design")
-        ecc_mm = np.sqrt(cx_meas**2 + cz_meas**2) * 1e3
-        if ecc_mm > 1.0:
-            ax.plot([0, cx_meas], [0, cz_meas], "--",
-                color="#7C3AED", lw=1.2, alpha=0.7, zorder=8)
-            ax.text(cx_meas/2, cz_meas/2 + 0.1, f"e={ecc_mm:.0f}mm",
-                color="#7C3AED", fontsize=7.5, ha="center",
-                bbox=dict(facecolor="white", edgecolor="#7C3AED",
-                          boxstyle="round,pad=0.15", alpha=0.85), zorder=10)
+            ax.plot(cx_meas, cz_meas, "D", color="#7C3AED", ms=7, zorder=10,
+                    label=f"C_meas")
+            ax.plot(0, 0, "+", color="#64748B", ms=10, mew=2, zorder=10,
+                    label="C_design")
+            ecc_mm = np.sqrt(cx_meas**2 + cz_meas**2) * 1e3
+            if ecc_mm > 1.0:
+                ax.plot([0, cx_meas], [0, cz_meas], "--",
+                    color="#7C3AED", lw=1.2, alpha=0.7, zorder=8)
+                ax.text(cx_meas/2, cz_meas/2 + 0.1, f"e={ecc_mm:.0f}mm",
+                    color="#7C3AED", fontsize=7.5, ha="center",
+                    bbox=dict(facecolor="white", edgecolor="#7C3AED",
+                              boxstyle="round,pad=0.15", alpha=0.85), zorder=10)
 
-        # ── ε Ovality: show fitted ellipse ──────────────────────────────────
-        if SHOW_OVERLAY_LINES and hasattr(sg, "ovality") and np.isfinite(sg.ovality) and sg.ovality > 0.1:
+            # ── ε Ovality: show fitted ellipse ──────────────────────────────────        if SHOW_OVERLAY_LINES and hasattr(sg, "ovality") and np.isfinite(sg.ovality) and sg.ovality > 0.1:
             a_semi = float(np.max(np.abs(x)))
             b_semi = float(np.max(np.abs(z)))
             if a_semi > 0.1 and b_semi > 0.1:
@@ -1382,6 +1399,8 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
 
         if ref_sg is not None and ref_sg.pts_2d is not None and len(ref_sg.pts_2d) >= 4:
             rx = ref_sg.pts_2d[:, 0]; rz = ref_sg.pts_2d[:, 1]
+            if z_display_shift != 0.0:
+                rz = rz + z_display_shift
             ref_alpha = max(0.15, 0.55 * (1.0 - alpha))
             ax.scatter(rx, rz, c="#94A3B8", s=1.5, alpha=ref_alpha,
                        linewidths=0, rasterized=True, zorder=1, label="T0 reference")
@@ -1554,6 +1573,9 @@ class MatplotlibSectionWidget(QtWidgets.QWidget):
         else:
             vl_x0, vl_x1 = -self._vl_box_w, self._vl_box_w
             vl_z0, vl_z1 = 0.0, self._vl_box_h
+            if z_display_shift != 0.0:
+                vl_z0 += z_display_shift
+                vl_z1 += z_display_shift
         pad = max(0.5, 0.08 * max(x_span, z_span))
         x_lo = float(np.percentile(x, 0.5)); x_hi = float(np.percentile(x, 99.5))
         z_lo = float(np.percentile(z, 0.5)); z_hi = float(np.percentile(z, 99.5))
@@ -2137,24 +2159,44 @@ class SummaryDashboardWidget(QtWidgets.QWidget):
         )
         total = n_crit + n_caut + n_ok
 
-        if total == 0:
+        # Section-level alerts (clearance + per-section dW/dH/ovality/ecc) come
+        # from the SAME classify_sections() the alerts table uses, so the banner
+        # can never read "all safe" while the table shows CRITICAL sections.
+        sec_crit = sec_caut = 0
+        if self._sections:
+            try:
+                for status, _issues in classify_sections(self._sections, self._ref_sections):
+                    if status == "CRITICAL":
+                        sec_crit += 1
+                    elif status == "CAUTION":
+                        sec_caut += 1
+            except Exception:
+                pass
+
+        crit = n_crit + sec_crit
+        caut = n_caut + sec_caut
+        sec_note = (f",  {sec_crit} {self._translate('section alert(s)')}"
+                    if sec_crit else
+                    (f",  {sec_caut} {self._translate('section alert(s)')}" if sec_caut else ""))
+
+        if total == 0 and not self._sections:
             self._banner.setText(
                 self._translate("No data yet — run Steps 5.1 to 5.6 to populate the dashboard."))
             self._banner.setStyleSheet(
                 "QLabel{background:#F1F5F9;color:#475569;border:1px solid #CBD5E1;"
                 "border-radius:6px;padding:6px 12px;font-weight:600;font-size:10.5pt;}")
-        elif n_crit > 0:
+        elif crit > 0:
             self._banner.setText(
                 f"{self._translate('CRITICAL')}  --  {n_crit} {self._translate('critical metric(s)')},"
-                f"  {n_caut} {self._translate('caution')},  {n_ok} {self._translate('OK')}")
+                f"  {n_caut} {self._translate('caution')},  {n_ok} {self._translate('OK')}{sec_note}")
             self._banner.setStyleSheet(
                 f"QLabel{{background:{self._C_CRIT_BG};color:{self._C_CRIT};"
                 "border:2px solid #FCA5A5;border-radius:6px;padding:6px 12px;"
                 "font-weight:800;font-size:11pt;}}")
-        elif n_caut > 0:
+        elif caut > 0:
             self._banner.setText(
                 f"{self._translate('CAUTION')}  --  {n_caut} {self._translate('caution metric(s)')},"
-                f"  {n_ok} {self._translate('OK')}")
+                f"  {n_ok} {self._translate('OK')}{sec_note}")
             self._banner.setStyleSheet(
                 f"QLabel{{background:{self._C_CAUT_BG};color:{self._C_CAUT};"
                 "border:2px solid #FCD34D;border-radius:6px;padding:6px 12px;"

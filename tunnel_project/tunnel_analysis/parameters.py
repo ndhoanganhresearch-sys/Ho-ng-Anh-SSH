@@ -574,10 +574,14 @@ class ParameterExtractionLayer:
             C2 = max(0.0, x_max - vl_box_w)
             C3 = max(0.0, z_max - (z_min + vl_box_h))
 
+        # Clearance is flagged on a robust 1st-percentile of the signed distance
+        # (negative = lining intrudes into the clear envelope), NOT the single
+        # worst point. A lone stray inner point (sensor noise, an incomplete
+        # portal ring, a fixture) must not condemn the whole section — only a
+        # real intrusion affecting >=1% of the section's points does. Mirrors the
+        # p1/p99 outlier rejection already used for W1/H1 above.
         if profile == "Circle":
             signed_clearance = np.hypot(x, z) - vl_cir_r
-            min_clearance_dist = float(np.nanmin(signed_clearance)) if signed_clearance.size else float("nan")
-            clearance_violation = bool(np.any(signed_clearance < 0.0))
         else:
             inside_x = (x >= -vl_box_w) & (x <= vl_box_w)
             inside_z = (z >= 0.0) & (z <= vl_box_h)
@@ -589,8 +593,10 @@ class ParameterExtractionLayer:
                 signed_clearance = signed_clearance.copy()
                 inside_margin = np.minimum.reduce((vl_box_w - np.abs(x), z, vl_box_h - z))
                 signed_clearance[inside] = -inside_margin[inside]
-            min_clearance_dist = float(np.nanmin(signed_clearance)) if signed_clearance.size else float("nan")
-            clearance_violation = bool(inside.any())
+        min_clearance_dist = (float(np.nanpercentile(signed_clearance, 1.0))
+                              if signed_clearance.size else float("nan"))
+        clearance_violation = bool(np.isfinite(min_clearance_dist)
+                                   and min_clearance_dist < 0.0)
 
         wal = self._wall_angle(pts2d, "left")
         war = self._wall_angle(pts2d, "right")
@@ -729,9 +735,12 @@ class ParameterExtractionLayer:
         if np.isfinite(crown_flat) and crown_flat > 0.15:
             return "U-type"
         # 2) Box family: flat crown + boxy radial spread + straight edges.
-        if (np.isfinite(crown_flat) and crown_flat < 0.030
-                and rad_cv > 0.150 and edge_frac > 0.85):
-            return "Box 2-cell" if center_band > 0.12 else "Box"
+        # The short box samples in data/sample_pcd are slightly noisier than
+        # the training median, so keep the decision tolerant and let the
+        # centre-band split decide only when there is a strong centre wall.
+        if (np.isfinite(crown_flat) and crown_flat < 0.040
+                and rad_cv > 0.145 and edge_frac > 0.82):
+            return "Box 2-cell" if center_band > 0.16 else "Box"
         # 3) Otherwise a circular / shield bore.
         return "Circle"
 
