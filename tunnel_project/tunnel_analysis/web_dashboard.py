@@ -84,19 +84,36 @@ def build_app(context: PipelineContext):
             # Tab 2: Deformation Charts
             dcc.Tab(label="Deformation Charts", children=[
                 html.Div([
-                    dcc.Graph(figure=_fig_trend(chainages, settlements,
+                    html.P("Tip: click any point on a chart to inspect that section.",
+                           style={"color": "#64748B", "fontSize": "12px",
+                                  "margin": "0 0 8px 4px"}),
+                    dcc.Graph(id="trend-settlement", figure=_fig_trend(chainages, settlements,
                         "Crown Height H1 (m)", "#1D4ED8", 10.0, 25.0)),
-                    dcc.Graph(figure=_fig_trend(chainages, convergences,
+                    dcc.Graph(id="trend-convergence", figure=_fig_trend(chainages, convergences,
                         "Clear Width W1 (m)", "#047857", 15.0, 30.0)),
-                    dcc.Graph(figure=_fig_trend(chainages, ovalities,
+                    dcc.Graph(id="trend-ovality", figure=_fig_trend(chainages, ovalities,
                         "Ovality ε (%)", "#C2410C", 0.5, 1.0)),
+                    html.Div(id="section-detail",
+                             children=_section_detail_panel(None),
+                             style={"marginTop": "12px"}),
                 ], style={"padding": "12px"})
             ]),
 
             # Tab 3: Section Table
             dcc.Tab(label="Section Data", children=[
                 html.Div([
-                    _data_table(sec_data)
+                    html.Div([
+                        html.Label("Filter: ", style={"fontSize": "12px",
+                                   "color": "#475569", "marginRight": "8px"}),
+                        dcc.Dropdown(id="table-filter",
+                            options=[{"label": "All sections", "value": "all"},
+                                     {"label": "Warnings only", "value": "warnings"},
+                                     {"label": "Clearance violations only", "value": "violations"}],
+                            value="all", clearable=False,
+                            style={"width": "280px", "fontSize": "12px"}),
+                    ], style={"display": "flex", "alignItems": "center",
+                              "marginBottom": "10px"}),
+                    html.Div(id="section-table-wrap", children=_data_table(sec_data)),
                 ], style={"padding": "12px", "overflowX": "auto"})
             ]),
 
@@ -117,7 +134,101 @@ def build_app(context: PipelineContext):
                   "borderTop": "1px solid #E2E8F0", "textAlign": "center"}),
     ], style={"fontFamily": "Arial, sans-serif", "background": "white", "minHeight": "100vh"})
 
+    # ── Interactivity ─────────────────────────────────────────────────────
+    # Click any deformation chart point -> show that section's full detail.
+    @app.callback(
+        Output("section-detail", "children"),
+        Input("trend-settlement", "clickData"),
+        Input("trend-convergence", "clickData"),
+        Input("trend-ovality", "clickData"),
+    )
+    def _on_chart_click(c_set, c_con, c_ov):
+        for cd in (c_set, c_con, c_ov):
+            row = _pick_section(sec_data, cd)
+            if row is not None:
+                return _section_detail_panel(row)
+        return _section_detail_panel(None)
+
+    # Filter the section table by status.
+    @app.callback(
+        Output("section-table-wrap", "children"),
+        Input("table-filter", "value"),
+    )
+    def _on_filter(mode):
+        return _data_table(_filter_sections(sec_data, mode))
+
     return app
+
+
+def _pick_section(sec_data, click_data):
+    """Resolve a clicked chart point to its section row dict (or None).
+
+    Prefers the Plotly point index; falls back to nearest chainage on the x
+    axis so it stays robust if the index is absent.
+    """
+    if not sec_data or not click_data:
+        return None
+    points = click_data.get("points") or []
+    if not points:
+        return None
+    p = points[0]
+    idx = p.get("pointIndex", p.get("pointNumber"))
+    if idx is None:
+        x = p.get("x")
+        if x is None:
+            return None
+        chainages = [r["Chainage (m)"] for r in sec_data]
+        idx = int(np.argmin([abs(float(c) - float(x)) for c in chainages]))
+    if 0 <= idx < len(sec_data):
+        return sec_data[idx]
+    return None
+
+
+def _filter_sections(sec_data, mode):
+    """Filter prepared section rows by status: all / warnings / violations."""
+    rows = sec_data or []
+    if mode == "violations":
+        return [r for r in rows if "VIOLATION" in str(r.get("Clearance", ""))]
+    if mode == "warnings":
+        out = []
+        for r in rows:
+            ov = r.get("Ovality (%)")
+            ec = r.get("Ecc (mm)")
+            viol = "VIOLATION" in str(r.get("Clearance", ""))
+            if viol or (ov is not None and ov >= 0.5) or (ec is not None and ec >= 10.0):
+                out.append(r)
+        return out
+    return rows
+
+
+def _section_detail_panel(row):
+    """Render a clicked section's parameters as a detail card."""
+    from dash import html
+    if not row:
+        return html.P("Click a point on a chart above to inspect that section.",
+                      style={"color": "#64748B", "fontSize": "12px",
+                             "fontStyle": "italic"})
+    body = []
+    for k, v in row.items():
+        color = "#DC2626" if "VIOLATION" in str(v) else "#111827"
+        body.append(html.Tr([
+            html.Td(k, style={"padding": "5px 12px", "color": "#475569",
+                              "fontSize": "12px", "fontWeight": "600",
+                              "borderBottom": "1px solid #F1F5F9"}),
+            html.Td(str(v) if v is not None else "-",
+                    style={"padding": "5px 12px", "color": color,
+                           "fontSize": "12px",
+                           "borderBottom": "1px solid #F1F5F9"}),
+        ]))
+    return html.Div([
+        html.H4(f"Section @ Chainage {row.get('Chainage (m)')} m",
+                style={"color": "#0F4C81", "fontSize": "14px",
+                       "margin": "0 0 8px 0"}),
+        html.Table(html.Tbody(body),
+                   style={"borderCollapse": "collapse", "minWidth": "320px",
+                          "border": "1px solid #E2E8F0", "borderRadius": "6px"}),
+    ], style={"background": "#F8FAFC", "padding": "12px 16px",
+              "borderRadius": "8px", "border": "1px solid #E2E8F0"})
 
 
 def _card(title, value):
