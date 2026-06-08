@@ -1,0 +1,73 @@
+{
+  "dataset": "box_four_spots",
+  "created_by": "tools/create_box_four_spots_dataset.py",
+  "purpose": "Short centered box-tunnel dataset with 4 evenly spaced defect spots for full-feature testing.",
+  "units": "meters",
+  "columns": "x y z r g b",
+  "geometry": {
+    "shape": "box",
+    "centered": true,
+    "width_m": 6.4,
+    "height_m": 4.1,
+    "length_m": 120.0,
+    "axis": "Y / chainage"
+  },
+  "defect_spots": [
+    {
+      "chainage_m": -30.0,
+      "type": "crown settlement",
+      "crown_mm": -45.0
+    },
+    {
+      "chainage_m": -10.0,
+      "type": "sidewall convergence",
+      "per_side_mm": -35.0
+    },
+    {
+      "chainage_m": 14.0,
+      "type": "noise (cable + outliers)",
+      "cable_pts": 96,
+      "outlier_pts": 24
+    },
+    {
+      "chainage_m": 34.0,
+      "type": "clearance intrusion",
+      "intruder_pts": 20,
+      "intruder_offset_m": [
+        1.09,
+        34.0,
+        1.6
+      ]
+    }
+  ],
+  "files": [
+    {
+      "name": "T0_box_short.las / .txt",
+      "role": "reference (clean)",
+      "points": 34364
+    },
+    {
+      "name": "Tn_box_short.las / .txt",
+      "role": "monitoring (4 defects)",
+      "points": 34504
+    }
+  ],
+  "las": {
+    "version": "1.2",
+    "point_format": 2,
+    "scales": [
+      1e-05,
+      1e-05,
+      1e-05
+    ],
+    "offsets": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "notes": [
+    "Coordinates are centered near the origin to avoid LAS offset/precision issues.",
+    "T0 and Tn exercise import, cleaning, sections, Step 6, warnings, and export; use full_test for target registration."
+  ]
+}
