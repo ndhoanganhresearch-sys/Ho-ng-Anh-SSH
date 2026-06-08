@@ -716,7 +716,18 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         while self.vp_layout.count():
             item = self.vp_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
-        if pv is None: self._vp_msg("PyVista is not installed."); return
+        global pv
+        if pv is None:
+            # `pv` is lazy-loaded in common.make_vertex_cloud; the `import *`
+            # binding here stays None until then, so trigger the real import
+            # ourselves rather than reporting a false "not installed".
+            try:
+                import pyvista as _pv
+                pv = _pv
+                try: pv.global_theme.silence_errors = True
+                except Exception: pass
+            except ImportError:
+                self._vp_msg("PyVista is not installed."); return
         try:
             # auto_update=False disables pyvistaqt's background render timer
             # (default 5 fps). On large clouds / weak GPUs that timer keeps
