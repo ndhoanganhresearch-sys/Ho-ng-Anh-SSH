@@ -1,0 +1,40 @@
+{
+  "dataset": "box_icp_shift",
+  "created_by": "tools/create_box_icp_shift_dataset.py",
+  "purpose": "Short centered box tunnel with a rigidly shifted Tn for ICP registration tests.",
+  "units": "meters",
+  "columns": "x y z r g b",
+  "geometry": {
+    "shape": "box",
+    "centered": true,
+    "width_m": 6.4,
+    "height_m": 4.1,
+    "length_m": 120.0,
+    "axis": "Y / chainage"
+  },
+  "icp_transform": {
+    "yaw_deg": 9.0,
+    "shift_m": [
+      1.8,
+      7.5,
+      0.55
+    ],
+    "extra_outliers": 120
+  },
+  "files": [
+    {
+      "name": "T0_box_icp.las / .txt",
+      "role": "reference (clean)",
+      "points": 34364
+    },
+    {
+      "name": "Tn_box_icp.las / .txt",
+      "role": "monitoring (rigidly shifted + outliers)",
+      "points": 34484
+    }
+  ],
+  "notes": [
+    "LAS offsets are zero; the rigid shift is encoded in the Tn coordinates.",
+    "This dataset is intended for ICP / register_epochs tests, not target-based matching."
+  ]
+}
