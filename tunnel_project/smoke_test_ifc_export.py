@@ -6,8 +6,10 @@ Run from the tunnel_project directory:
 
 Builds a synthetic tunnel context, exports an IFC4 file, reads it back with
 ifcopenshell, and verifies the spatial hierarchy, the centerline annotation,
-and that every section proxy now carries BOTH an ObjectPlacement and a
-Representation (the gap this work closed). Skips cleanly if ifcopenshell is
+and the continuous tunnel lining: a tessellated shell (IfcPolygonalFaceSet)
+lofted from the MEASURED per-section rings so it follows real deformation
+(replacing the old uniform swept-disk bore). Per-section proxies are kept as
+data-only carriers of their property sets. Skips cleanly if ifcopenshell is
 unavailable.
 """
 import importlib.util
@@ -53,6 +55,7 @@ def test_ifc_export_geometry_and_hierarchy():
     if not _HAS_IFC:
         return "skipped (ifcopenshell missing)"
     import ifcopenshell
+    import ifcopenshell.geom as geom
     ctx = _ctx()
     with tempfile.TemporaryDirectory() as tmp:
         out = os.path.join(tmp, "tunnel.ifc")
@@ -63,46 +66,46 @@ def test_ifc_export_geometry_and_hierarchy():
         for t in ("IfcProject", "IfcSite", "IfcBuilding", "IfcBuildingStorey"):
             assert len(f.by_type(t)) == 1, (t, len(f.by_type(t)))
         assert len(f.by_type("IfcAnnotation")) == 1, "centerline annotation missing"
+
         all_proxies = f.by_type("IfcBuildingElementProxy")
-        # One proxy per section plus the single whole-bore proxy.
         proxies = [e for e in all_proxies if e.Name and e.Name.startswith("Section_")]
-        bores = [e for e in all_proxies if e.Name == "Tunnel Bore"]
+        lining = [e for e in all_proxies if e.Name and e.Name.startswith("Tunnel Lining")]
         assert len(proxies) == len(ctx.sections), (len(proxies), len(ctx.sections))
-        assert len(bores) == 1, f"expected 1 Tunnel Bore proxy, got {len(bores)}"
-        n_rep = sum(1 for e in proxies if e.Representation is not None)
-        n_pl = sum(1 for e in proxies if e.ObjectPlacement is not None)
-        assert n_rep == len(proxies), f"only {n_rep}/{len(proxies)} proxies have geometry"
-        assert n_pl == len(proxies), f"only {n_pl}/{len(proxies)} proxies have placement"
-        # property sets carried through
+        assert len(lining) == 1, f"expected 1 continuous lining proxy, got {len(lining)}"
+
+        # Continuous lining = tessellated shell lofted from measured rings; the
+        # old uniform swept-disk bore must be gone.
+        n_faceset = len(f.by_type("IfcPolygonalFaceSet"))
+        assert n_faceset >= 1, "deformation lining face set missing"
+        assert len(f.by_type("IfcSweptDiskSolid")) == 0, "uniform swept-disk bore should be gone"
+
+        # Per-section proxies are data carriers: each keeps its property set.
         psets = f.by_type("IfcPropertySet")
-        assert any(p.Name == "TunnelSectionProperties" for p in psets), "section pset missing"
-        # Solid geometry: each section is an extruded-area solid; the whole
-        # bore is a single swept-disk solid (Circle profile).
-        n_extruded = len(f.by_type("IfcExtrudedAreaSolid"))
-        n_disk = len(f.by_type("IfcSweptDiskSolid"))
-        assert n_extruded >= len(ctx.sections) - 2, f"too few solid slices: {n_extruded}"
-        assert n_disk >= 1, "tunnel bore swept-disk solid missing"
-        # Coloured components: every solid carries a surface style.
+        n_sec_pset = sum(1 for p in psets if p.Name == "TunnelSectionProperties")
+        assert n_sec_pset == len(proxies), (n_sec_pset, len(proxies))
+
+        # Status-bucketed face sets each carry a surface style.
         n_style = len(f.by_type("IfcStyledItem"))
         n_surf = len(f.by_type("IfcSurfaceStyle"))
-        assert n_style >= n_extruded, f"too few styled items: {n_style}"
+        assert n_style >= n_faceset, f"too few styled items: {n_style}"
         assert n_surf >= 1, "no surface styles"
+
         # Detected-component counts recorded on the project.
-        comp = [x for x in f.by_type("IfcPropertySet") if x.Name == "TunnelComponents"]
+        comp = [x for x in psets if x.Name == "TunnelComponents"]
         assert len(comp) == 1, "TunnelComponents pset missing"
         cprops = {pp.Name: pp.NominalValue.wrappedValue for pp in comp[0].HasProperties}
         assert cprops.get("CableSegments") == 12, cprops
         assert cprops.get("LightFixtures") == 4, cprops
-        # Every proxy shape must actually build via the geometry kernel.
-        import ifcopenshell.geom as geom
+
+        # The continuous lining must build via the geometry kernel.
         settings = geom.settings()
         built = 0
-        for e in f.by_type("IfcBuildingElementProxy"):
-            if e.Representation is None:
-                continue
-            geom.create_shape(settings, e); built += 1
-        result = (f"{len(proxies)} section proxies; extruded={n_extruded}, "
-                  f"swept_disk={n_disk}, styled={n_style}, shapes_built={built}")
+        for e in lining:
+            if e.Representation is not None:
+                geom.create_shape(settings, e); built += 1
+        assert built == 1, "lining shell did not build"
+        result = (f"{len(proxies)} section proxies (data); faceset={n_faceset}, "
+                  f"styled={n_style}, lining_built={built}")
         del f
         return result
 
@@ -115,7 +118,6 @@ def test_ifc_components_by_label():
         return "skipped (ifcopenshell missing)"
     import ifcopenshell
     ctx = _ctx()
-    # attach synthetic per-point labels to the active scan
     n = len(ctx.scans[0].points)
     rng = np.random.default_rng(7)
     labels = rng.integers(0, 3, size=n)
@@ -138,7 +140,7 @@ def test_ifc_components_by_label():
 
 def test_ifc4x3_alignment():
     """IFC4X3 schema exports the centerline as an IfcAlignment (infra
-    standard); IFC4 keeps IfcAnnotation. Geometry still builds."""
+    standard); IFC4 keeps IfcAnnotation. The deformation lining still builds."""
     if not _HAS_IFC:
         return "skipped (ifcopenshell missing)"
     import ifcopenshell
@@ -150,10 +152,10 @@ def test_ifc4x3_alignment():
         assert f.schema.startswith("IFC4X3"), f.schema
         assert len(f.by_type("IfcAlignment")) == 1, "centerline not exported as IfcAlignment"
         assert len(f.by_type("IfcAnnotation")) == 0, "unexpected IfcAnnotation in 4X3"
-        n_solid = len(f.by_type("IfcExtrudedAreaSolid"))
-        assert n_solid >= len(ctx.sections) - 2, n_solid
+        n_faceset = len(f.by_type("IfcPolygonalFaceSet"))
+        assert n_faceset >= 1, "deformation lining face set missing"
         del f
-        return f"IFC4X3 alignment OK, extruded={n_solid}"
+        return f"IFC4X3 alignment OK, lining facesets={n_faceset}"
 
 
 def test_ifc_components_export():
@@ -176,36 +178,43 @@ def test_ifc_components_export():
         lights_p = [n for n in names if n.startswith("Light")]
         assert len(cables) >= 1, names
         assert len(lights_p) >= 1, names
-        # Cable must be a swept-disk TUBE, not a box. The bore is also a
-        # swept disk, so require at least 2 (bore + >=1 cable).
-        assert len(f.by_type("IfcSweptDiskSolid")) >= 2, "cable not a tube"
+        # Cable must be a swept-disk TUBE. The tunnel lining is now a tessellated
+        # shell (no swept disk), so the cable tube(s) are the only swept disks.
+        assert len(f.by_type("IfcSweptDiskSolid")) >= 1, "cable not a tube"
         del f
         return f"components: {len(cables)} cable tube(s), {len(lights_p)} light box(es)"
 
 
-def test_ifc_boundary_polygon_profile():
-    """Sections export a measured-boundary polygon profile (hollow) for any
-    cross-section shape, sized correctly and buildable."""
+def test_deformed_lining_shell():
+    """The continuous tunnel lining is a tessellated shell lofted from the
+    MEASURED per-section rings (follows real deformation), and it builds via the
+    geometry kernel with a plausible vertex count."""
     if not _HAS_IFC:
         return "skipped (ifcopenshell missing)"
     import ifcopenshell, ifcopenshell.geom as geom
     ctx = _ctx()
     with tempfile.TemporaryDirectory() as tmp:
-        out = os.path.join(tmp, "poly.ifc")
+        out = os.path.join(tmp, "shell.ifc")
         TunnelIFCExporter().export_ifc(ctx, out)
         f = ifcopenshell.open(out)
-        n_poly = len(f.by_type("IfcArbitraryProfileDefWithVoids"))
-        assert n_poly >= len(ctx.sections) - 3, f"too few boundary profiles: {n_poly}"
+        fsets = f.by_type("IfcPolygonalFaceSet")
+        assert len(fsets) >= 1, "no deformation lining face set"
+        # Shared coordinate list: 2*K samples (outer+inner) per usable section.
+        n_pts = len(fsets[0].Coordinates.CoordList)
+        assert n_pts >= 2 * 48 * (len(ctx.sections) - 2), f"too few shell vertices: {n_pts}"
         st = geom.settings(); built = 0
         for e in f.by_type("IfcBuildingElementProxy"):
-            if e.Representation is None:
-                continue
-            geom.create_shape(st, e); built += 1
+            if e.Name and e.Name.startswith("Tunnel Lining") and e.Representation:
+                sh = geom.create_shape(st, e); built += 1
+                assert len(sh.geometry.verts) // 3 == n_pts, "kernel vertex mismatch"
+        assert built == 1, "lining shell did not build"
         del f
-        return f"boundary-voids profiles={n_poly}, shapes_built={built}"
+        return f"deformation shell verts={n_pts}, built={built}"
+
 
 def test_boundary_polygon_helper():
-    """_boundary_polygon traces outer+inner rings from a synthetic circle."""
+    """_boundary_polygon traces outer+inner rings from a synthetic circle
+    (still used as the per-section fallback when the loft cannot be built)."""
     th = np.linspace(0, 2 * np.pi, 200, endpoint=False)
     R = 2.75
     pts2d = np.column_stack([R * np.cos(th), R * np.sin(th)])
@@ -226,6 +235,6 @@ if __name__ == "__main__":
     print("test_ifc_components_by_label ->", test_ifc_components_by_label())
     print("test_ifc4x3_alignment ->", test_ifc4x3_alignment())
     print("test_ifc_components_export ->", test_ifc_components_export())
-    print("test_ifc_boundary_polygon_profile ->", test_ifc_boundary_polygon_profile())
+    print("test_deformed_lining_shell ->", test_deformed_lining_shell())
     print("test_boundary_polygon_helper ->", test_boundary_polygon_helper())
     print("SMOKE TEST PASSED")

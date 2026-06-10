@@ -63,6 +63,10 @@ class TunnelIFCExporter:
         ifcopenshell.api.run("aggregate.assign_object", ifc,
                               products=[storey], relating_object=building)
 
+        # Set True once the continuous deformation-following lining shell is
+        # built, so the per-section solid slices below are skipped (no overlap).
+        mesh_built = False
+
         # Centerline: IfcAlignment (IFC4X3 infrastructure standard) or
         # IfcAnnotation (IFC4 fallback). Both carry the same Curve3D polyline.
         cl = context.centerline
@@ -81,33 +85,47 @@ class TunnelIFCExporter:
             ifcopenshell.api.run("spatial.assign_container", ifc,
                                   products=[cl_entity], relating_structure=storey)
 
-            # Whole-bore solid: a swept-disk tube of the median measured radius
-            # following the centerline polyline, so the model carries a single
-            # continuous 3D body for the tunnel (Circle profiles only; box bores
-            # are represented by their per-section solid slices below).
+            # Continuous tunnel lining body. Preferred: a tessellated shell that
+            # FOLLOWS the measured deformation (loft of the real per-section
+            # rings, status-coloured). Fallback: a uniform median-radius
+            # swept-disk tube when the loft cannot be built (no frames / too few
+            # rings). When the deformation shell is built, the per-section solid
+            # slices below are skipped to avoid overlapping (Z-fighting) bodies.
             try:
-                radii = [float(sc.radius_fit) for sc in context.sections
-                         if np.isfinite(sc.radius_fit) and sc.radius_fit > 0]
-                is_circle = str(getattr(context, "tunnel_profile", "Circle")).lower().startswith("circle")
-                if is_circle and len(radii) >= 1 and len(cl) >= 3:
-                    bore_R = float(np.median(radii))
-                    directrix = ifc.createIfcPolyline(pts_3d)
-                    # Hollow tube: inner radius = bore_R - wall_thickness so the
-                    # tunnel is a shell, not a solid cylinder. Guard against a
-                    # non-positive inner radius on thin/odd bores.
-                    inner_R = max(0.0, bore_R - float(wall_thickness))
-                    inner_arg = inner_R if inner_R > 1e-6 else None
-                    disk = ifc.createIfcSweptDiskSolid(directrix, bore_R, inner_arg, None, None)
-                    bore = ifcopenshell.api.run("root.create_entity", ifc,
-                                                ifc_class="IfcBuildingElementProxy",
-                                                name="Tunnel Bore")
-                    bshape = ifc.createIfcShapeRepresentation(body_ctx, "Body", "AdvancedSweptSolid", [disk])
-                    bore.Representation = ifc.createIfcProductDefinitionShape(None, None, [bshape])
-                    self._apply_color(ifc, disk, (0.62, 0.66, 0.71), name="BoreSurface")
-                    ifcopenshell.api.run("spatial.assign_container", ifc,
-                                          products=[bore], relating_structure=storey)
+                lining_shape = self._deformed_lining_facetset(
+                    ifc, body_ctx, context, float(wall_thickness))
             except Exception as e:
-                warnings.warn(f"Tunnel bore swept solid skipped: {e}")
+                lining_shape = None
+                warnings.warn(f"Deformed lining mesh skipped: {e}")
+            if lining_shape is not None:
+                lining = ifcopenshell.api.run("root.create_entity", ifc,
+                                              ifc_class="IfcBuildingElementProxy",
+                                              name="Tunnel Lining (measured)")
+                lining.Representation = ifc.createIfcProductDefinitionShape(None, None, [lining_shape])
+                ifcopenshell.api.run("spatial.assign_container", ifc,
+                                      products=[lining], relating_structure=storey)
+                mesh_built = True
+            else:
+                try:
+                    radii = [float(sc.radius_fit) for sc in context.sections
+                             if np.isfinite(sc.radius_fit) and sc.radius_fit > 0]
+                    is_circle = str(getattr(context, "tunnel_profile", "Circle")).lower().startswith("circle")
+                    if is_circle and len(radii) >= 1 and len(cl) >= 3:
+                        bore_R = float(np.median(radii))
+                        directrix = ifc.createIfcPolyline(pts_3d)
+                        inner_R = max(0.0, bore_R - float(wall_thickness))
+                        inner_arg = inner_R if inner_R > 1e-6 else None
+                        disk = ifc.createIfcSweptDiskSolid(directrix, bore_R, inner_arg, None, None)
+                        bore = ifcopenshell.api.run("root.create_entity", ifc,
+                                                    ifc_class="IfcBuildingElementProxy",
+                                                    name="Tunnel Bore")
+                        bshape = ifc.createIfcShapeRepresentation(body_ctx, "Body", "AdvancedSweptSolid", [disk])
+                        bore.Representation = ifc.createIfcProductDefinitionShape(None, None, [bshape])
+                        self._apply_color(ifc, disk, (0.62, 0.66, 0.71), name="BoreSurface")
+                        ifcopenshell.api.run("spatial.assign_container", ifc,
+                                              products=[bore], relating_structure=storey)
+                except Exception as e:
+                    warnings.warn(f"Tunnel bore swept solid skipped: {e}")
 
         # Sections as IfcBuildingElementProxy with placement + solid geometry
         frames = context.frenet_frames or []
@@ -134,7 +152,13 @@ class TunnelIFCExporter:
             # the local section plane so the proxy is visible/located in a BIM
             # viewer instead of collapsing to the origin without geometry.
             fr = frames[i] if i < len(frames) else None
-            placement, shape = self._section_placement_shape(ifc, body_ctx, sec, fr, profile, thickness=slice_thk, wall_thickness=wall_thickness)
+            # When the continuous deformation shell carries the geometry, keep
+            # the per-section proxies as DATA-only carriers (property sets) and
+            # skip their solid slice so the two bodies do not overlap.
+            if mesh_built:
+                placement, shape = None, None
+            else:
+                placement, shape = self._section_placement_shape(ifc, body_ctx, sec, fr, profile, thickness=slice_thk, wall_thickness=wall_thickness)
             if placement is not None:
                 elem.ObjectPlacement = placement
             if shape is not None:
@@ -421,6 +445,115 @@ class TunnelIFCExporter:
             inner_arr = ctr + ov * scale[:, None]
             inner = [(float(x), float(y)) for x, y in inner_arr]
         return [(float(x), float(y)) for x, y in outer_arr], inner
+    @staticmethod
+    def _deformed_lining_facetset(ifc, body_ctx, context, wall_thickness,
+                                  K=48, radial_pct=92.0):
+        """Continuous tunnel lining that FOLLOWS the measured deformation.
+
+        Lofts the per-section measured rings into one tessellated hollow shell
+        (IfcPolygonalFaceSet): each ring is sampled at K fixed angles from the
+        real points (high-percentile radius = outer wall), reconstructed in 3D
+        via the section's Frenet N/B axes, then consecutive rings are connected
+        into outer + inner surfaces with annular end caps. Faces are bucketed by
+        section status so problem bands render red/amber on the grey shell.
+
+        Returns an IfcShapeRepresentation (RepresentationType "Tessellation")
+        with up to three coloured face sets sharing one coordinate list, or
+        None when fewer than two usable rings exist.
+        """
+        import numpy as _np
+        sections = list(getattr(context, "sections", []) or [])
+        frames = list(getattr(context, "frenet_frames", []) or [])
+        if len(sections) < 2:
+            return None
+        wt0 = float(wall_thickness)
+
+        def _u(v):
+            n = float(_np.linalg.norm(v)); return v / n if n > 1e-9 else v
+
+        outers, inners, ranks = [], [], []
+        centers_ang = _np.linspace(0.0, 2.0 * _np.pi, K, endpoint=False) + (_np.pi / K)
+        for i, sec in enumerate(sections):
+            P = getattr(sec, "pts_2d", None)
+            C = getattr(sec, "center_3d", None)
+            fr = frames[i] if i < len(frames) else None
+            if P is None or C is None or fr is None:
+                continue
+            if not all(k in fr for k in ("N", "B")):
+                continue
+            P = _np.asarray(P, dtype=float)
+            if P.ndim != 2 or P.shape[1] != 2 or len(P) < 24:
+                continue
+            N = _u(_np.asarray(fr["N"], float)); B = _u(_np.asarray(fr["B"], float))
+            C = _np.asarray(C, float)
+            ctr = P.mean(axis=0)
+            d = P - ctr
+            ang = (_np.arctan2(d[:, 1], d[:, 0]) + 2 * _np.pi) % (2 * _np.pi)
+            rad = _np.hypot(d[:, 0], d[:, 1])
+            bins = _np.clip((ang / (2 * _np.pi) * K).astype(int), 0, K - 1)
+            r = _np.full(K, _np.nan)
+            for b in range(K):
+                m = bins == b
+                if m.any():
+                    r[b] = float(_np.percentile(rad[m], radial_pct))
+            good = ~_np.isnan(r)
+            if good.sum() < 8:
+                continue
+            xs = _np.where(good)[0].astype(float)
+            r = _np.interp(_np.arange(K, dtype=float), xs, r[good], period=K)
+            rmin = float(_np.nanmin(r))
+            wt = float(min(wt0, max(rmin * 0.6, 0.02)))
+            r_in = _np.clip(r - wt, 0.02, None)
+            cos = _np.cos(centers_ang); sin = _np.sin(centers_ang)
+            ox = ctr[0] + r * cos;    oy = ctr[1] + r * sin
+            ix = ctr[0] + r_in * cos; iy = ctr[1] + r_in * sin
+            o3d = C[None, :] + ox[:, None] * N[None, :] + oy[:, None] * B[None, :]
+            i3d = C[None, :] + ix[:, None] * N[None, :] + iy[:, None] * B[None, :]
+            outers.append(o3d); inners.append(i3d)
+            if getattr(sec, "clearance_violation", False):
+                ranks.append(2)
+            elif _np.isfinite(getattr(sec, "ovality", _np.nan)) and sec.ovality >= 1.0:
+                ranks.append(1)
+            else:
+                ranks.append(0)
+        S = len(outers)
+        if S < 2:
+            return None
+
+        coords = []
+        for s in range(S):
+            coords.extend([(float(p[0]), float(p[1]), float(p[2])) for p in outers[s]])
+            coords.extend([(float(p[0]), float(p[1]), float(p[2])) for p in inners[s]])
+
+        def o(s, j): return s * 2 * K + (j % K) + 1          # 1-based
+        def inr(s, j): return s * 2 * K + K + (j % K) + 1
+
+        faces = {0: [], 1: [], 2: []}
+        for s in range(S - 1):
+            band = max(ranks[s], ranks[s + 1])
+            for j in range(K):
+                jn = j + 1
+                faces[band].append([o(s, j), o(s, jn), o(s + 1, jn), o(s + 1, j)])
+                faces[band].append([inr(s, j), inr(s + 1, j), inr(s + 1, jn), inr(s, jn)])
+        for j in range(K):                                    # annular end caps
+            jn = j + 1
+            faces[0].append([o(0, j), inr(0, j), inr(0, jn), o(0, jn)])
+            faces[0].append([o(S - 1, j), o(S - 1, jn), inr(S - 1, jn), inr(S - 1, j)])
+
+        pts_list = ifc.createIfcCartesianPointList3D(coords)
+        rgb_by_rank = {0: (0.62, 0.66, 0.71), 1: (0.85, 0.47, 0.04), 2: (0.86, 0.15, 0.15)}
+        items = []
+        for rank, flist in faces.items():
+            if not flist:
+                continue
+            poly_faces = [ifc.createIfcIndexedPolygonalFace([int(x) for x in f]) for f in flist]
+            fs = ifc.createIfcPolygonalFaceSet(pts_list, None, poly_faces, None)
+            TunnelIFCExporter._apply_color(ifc, fs, rgb_by_rank[rank], name="LiningStatus")
+            items.append(fs)
+        if not items:
+            return None
+        return ifc.createIfcShapeRepresentation(body_ctx, "Body", "Tessellation", items)
+
     @staticmethod
     def _section_placement_shape(ifc, body_ctx, sec, fr, profile, thickness=0.3, wall_thickness=0.3):
         """Build (IfcLocalPlacement, IfcShapeRepresentation) for a section.

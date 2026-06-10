@@ -42,7 +42,7 @@ CORE_STEP_CODES = {
     "4.3b",                                           # B-spline centerline (builds its own section frames; 4.4 hidden)
     "5.1", "5.2", "5.5", "5.6",                       # deformation parameters (5.3/5.8 3D maps hidden — redundant)
     "6.1", "6.2", "6.3",                              # 4D time-series
-    "7.1c", "7.2",                                    # BIM export (IFC + components = most complete) + AI assistant
+    "7.1", "7.2",                                     # BIM export (IFC tunnel structure, no components) + AI assistant
     "8.1", "8.2", "8.3", "8.5",                       # export results: CSV / Excel / PDF report / AI work order
 }
 
@@ -58,7 +58,7 @@ CORE_DISPLAY_RENUMBER = {
     "4.3b": "4.1",    # B-spline centerline
     "5.5": "5.3",     # Ovality
     "5.6": "5.4",     # Eccentricity
-    "7.1c": "7.1",    # IFC export
+    "7.1": "7.1",     # IFC tunnel structure (no cable/light components)
     "8.1": "7.2",     # CSV export  (moved from section 8 into section 7)
     "8.2": "7.3",     # Excel report
     "8.3": "7.4",     # PDF report
@@ -658,7 +658,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 ("6.3  Plot 2D Technical Section T0/Tn", self._slot_5_7_sections),
             ]),
             (7, "BIM, reporting and AI", "BIM/Out", [
-                ("7.1  Export IFC package", self._slot_7_1_ifc),
+                ("7.1  Export IFC tunnel structure", self._slot_7_1_ifc),
                 ("7.1b Export IFC4X3 (IfcAlignment)", self._slot_7_1b_ifc_alignment),
                 ("7.1c Export IFC + components (cables/lights)", self._slot_7_1c_ifc_components),
                 ("8.1  Export section CSV", self._slot_8_1_csv),
