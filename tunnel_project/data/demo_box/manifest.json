@@ -1,0 +1,19 @@
+{
+  "dataset": "demo_box",
+  "t0_name": "T0_box.las",
+  "tn_name": "Tn_box.las",
+  "shape": "box (straight)",
+  "width_m": 8.5,
+  "height_m": 5.0,
+  "length_m": 50.0,
+  "defects": [
+    {
+      "chainage_m": 25,
+      "type": "sidewall convergence",
+      "mm_per_side": -25
+    }
+  ],
+  "labels": {
+    "1": "lining"
+  }
+}

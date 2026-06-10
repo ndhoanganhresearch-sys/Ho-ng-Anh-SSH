@@ -1,0 +1,40 @@
+{
+  "dataset": "demo_circle",
+  "t0_name": "T0_circle.las",
+  "tn_name": "Tn_circle.las",
+  "shape": "circle (gently curved)",
+  "radius_m": 2.75,
+  "length_m": 60.0,
+  "defects": [
+    {
+      "chainage_m": 18,
+      "type": "crown settlement",
+      "mm": -28
+    },
+    {
+      "chainage_m": 38,
+      "type": "sidewall convergence",
+      "mm_per_side": -22
+    },
+    {
+      "chainage_m": 50,
+      "type": "clearance intrusion (inward dent)",
+      "depth_m": 0.5
+    },
+    {
+      "chainage_m": 30,
+      "type": "noise: crown cable",
+      "pts": 120
+    }
+  ],
+  "targets_ch_m": [
+    12.0,
+    30.0,
+    48.0
+  ],
+  "labels": {
+    "1": "lining",
+    "3": "cable",
+    "4": "target"
+  }
+}
