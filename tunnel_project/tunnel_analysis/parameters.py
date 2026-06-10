@@ -797,22 +797,35 @@ class ParameterExtractionLayer:
 
     @staticmethod
     def _smooth_series(sections: List[SectionGeometry]) -> List[SectionGeometry]:
-        if len(sections) < 6: return sections
+        """De-noise per-section series with a SHORT moving median.
+
+        A global low-order polynomial fit (the previous approach) forces the
+        whole tunnel onto a parabola and erases any LOCALISED defect — exactly
+        the crown settlement / convergence / clearance dips the deformation
+        analysis must keep. A small odd-window moving median removes point-to-
+        point sampling spikes while preserving real defects, which are always
+        wider than the window.
+        """
+        n = len(sections)
+        if n < 6:
+            return sections
         fields = ["H1", "H2", "H3", "W1", "W2", "radius_fit", "ovality", "eccentricity"]
-        chain = np.array([s.chainage for s in sections], dtype=np.float64)
+        win = 5
+        half = win // 2
         for fld in fields:
             vals = np.array([getattr(s, fld) for s in sections], dtype=np.float64)
-            finite = np.isfinite(vals)
-            if finite.sum() < 4: continue
-            try:
-                coeffs = np.polyfit(chain[finite], vals[finite], 2)
-                smoothed = np.polyval(coeffs, chain)
-                for i, s in enumerate(sections):
-                    if not np.isnan(getattr(s, fld)):
-                        val = float(smoothed[i])
-                        if fld == "radius_fit": val = float(np.clip(val, 2.0, 15.0))
-                        setattr(s, fld, val)
-            except Exception as e:
-                warnings.warn(f"Section series smoothing failed: {e}")
+            if np.isfinite(vals).sum() < 4:
+                continue
+            for i in range(n):
+                if not np.isfinite(getattr(sections[i], fld)):
+                    continue
+                w = vals[max(0, i - half):min(n, i + half + 1)]
+                w = w[np.isfinite(w)]
+                if not len(w):
+                    continue
+                v = float(np.median(w))
+                if fld == "radius_fit":
+                    v = float(np.clip(v, 2.0, 15.0))
+                setattr(sections[i], fld, v)
         return sections
 
