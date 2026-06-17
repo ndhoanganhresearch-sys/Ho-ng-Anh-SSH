@@ -16,6 +16,7 @@ class TunnelExporter:
         "crown_settlement_mm":    {"caution": 10.0, "critical": 25.0},
         "lateral_convergence_mm": {"caution": 15.0, "critical": 30.0},
         "ovality_mean_pct":       {"caution":  0.5, "critical":  1.0},
+        "ovality_pct":            {"caution":  0.5, "critical":  1.0},  # per-section key used in Summary rows
         "eccentricity_mean_mm":   {"caution": 10.0, "critical": 25.0},
     }
 

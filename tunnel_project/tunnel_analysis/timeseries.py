@@ -154,6 +154,9 @@ class TimeSeriesLayer:
         - ``distance_matrix_mm``: (T, M) signed displacement per epoch
         - ``median_mm``: (T,) median displacement per epoch
         - ``p95_abs_mm``: (T,) 95th-percentile absolute displacement per epoch
+        - ``max_abs_mm``: (T,) peak absolute displacement per epoch (worst
+          corepoint) — tracks LOCAL defects that a tunnel-wide percentile
+          dilutes; used by :meth:`forecast_threshold_crossing`
         - ``method``: "M3C2" or "C2C-fallback"
         """
         if len(epochs) < 2:
@@ -182,12 +185,14 @@ class TimeSeriesLayer:
         matrix = np.vstack(rows)
         median_mm = np.array([float(np.nanmedian(r)) for r in matrix])
         p95_abs_mm = np.array([float(np.nanpercentile(np.abs(r), 95)) for r in matrix])
+        max_abs_mm = np.array([float(np.nanmax(np.abs(r))) for r in matrix])
         return {
             "labels": list(labels),
             "corepoints": cp,
             "distance_matrix_mm": matrix,
             "median_mm": median_mm,
             "p95_abs_mm": p95_abs_mm,
+            "max_abs_mm": max_abs_mm,
             "method": method,
         }
 

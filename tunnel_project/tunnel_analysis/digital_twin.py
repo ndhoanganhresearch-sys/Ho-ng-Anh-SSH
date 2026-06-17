@@ -47,7 +47,7 @@ class DigitalTwinAILayer:
     def _sys(self, context: PipelineContext) -> str:
         p = context.parameters
         lines = ("\n".join(f"  - {k}: {v:.3f}" for k,v in p.items()
-                           if isinstance(v,(int,float))) if p else "  (none)")
+                           if isinstance(v,(int,float)) and np.isfinite(float(v))) if p else "  (none)")
         scan = context.active_scan
         info = (f"Scan: {scan.path}\nPoints: {len(scan.points):,}" if scan else "not loaded")
         return (

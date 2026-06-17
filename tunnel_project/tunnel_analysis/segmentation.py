@@ -106,7 +106,7 @@ class SegmentationLayer:
             elif derivative[idx] < derivative[seams[-1]]:
                 seams[-1] = int(idx)
 
-        seam_chainage = centers[seams] - centers[0] if seams else np.array([], dtype=np.float64)
+        seam_chainage = centers[seams] - pmin if seams else np.array([], dtype=np.float64)
         seam_projection = centers[seams] if seams else np.array([], dtype=np.float64)
         return {
             "chainage_m": seam_chainage.astype(np.float64),

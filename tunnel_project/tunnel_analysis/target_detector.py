@@ -588,7 +588,9 @@ class TargetDetector:
             freq_v = abs(peak_idx[0] - cy) / grid_res
             freq = max(freq_u, freq_v, 1e-6)
             width = u_max - u_min; height = v_max - v_min
-            cell_u = (width * freq) if freq_u > freq_v else (height * freq)
+            # freq is cycles-per-pixel; freq*grid_res = cycles across the span.
+            # Spatial period (m) = span / cycles, NOT span * freq.
+            cell_u = (width / (freq * grid_res)) if freq_u > freq_v else (height / (freq * grid_res))
             cell_size = float(np.clip(cell_u, cell_size_range[0], cell_size_range[1]))
             return score, cell_size
         except Exception:

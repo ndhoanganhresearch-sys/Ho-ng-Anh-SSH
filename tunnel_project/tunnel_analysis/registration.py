@@ -314,10 +314,10 @@ class RegistrationLayer:
             T = self._rigid_svd(cur[m], tgt[idx[m]])
             ones = np.ones((len(cur), 1))
             cur = (T @ np.hstack([cur, ones]).T).T[:, :3]
-            rmse = float(np.sqrt(np.mean(d[m] ** 2)))
-            if abs(prev_rmse - rmse) < 1e-6:
+            rmse_m = float(np.sqrt(np.mean(d[m] ** 2)))  # KD-tree distances are in metres
+            if abs(prev_rmse - rmse_m) < 1e-5:            # converged within 0.01 mm
                 break
-            prev_rmse = rmse
+            prev_rmse = rmse_m
         d, idx = tree.query(cur, k=1, workers=-1)
         thr = np.quantile(d, keep_frac); m = d <= max(thr, 1e-9)
         rmse_mm = float(np.sqrt(np.mean(d[m] ** 2))) * 1e3 if m.any() else float("nan")

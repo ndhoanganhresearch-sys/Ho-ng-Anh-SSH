@@ -258,7 +258,8 @@ class TunnelIFCExporter:
                 if tmp.exists():
                     tmp.unlink()
             except OSError:
-                pass
+                import warnings
+                warnings.warn(f"Could not remove temp IFC file left behind: {tmp}")
             raise
         return str(path)
 

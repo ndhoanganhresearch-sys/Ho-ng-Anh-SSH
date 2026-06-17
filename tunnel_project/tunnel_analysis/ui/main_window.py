@@ -1624,6 +1624,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self._auto_btn.setText(_tr("Running pipeline...", self.current_language))
         self._auto_running = True
         self._auto_step = 0
+        # Snapshot widget-derived values on the GUI thread. Every step below runs
+        # in a worker thread (PipelineWorker), where reading QWidgets is unsafe.
+        section_count = self._resolve_section_count()
+        vl_w, vl_h, vl_r = self._sp_vl_w.value(), self._sp_vl_h.value(), self._sp_vl_r.value()
         self._auto_steps = [
             ("2.1_voxel",       lambda: self.pre_mod.voxel_downsample(self.context),
              "Step 1/6: Voxel downsampling..."),
@@ -1631,28 +1635,29 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
              "Step 2/6: Smart noise removal (cables, lights, people, wall cables)..."),
             ("epoch_register",  lambda: self._auto_register_epochs(),
              "Step 2b: Align T0/Tn epochs (auto target/ICP)..."),
-            ("4.1_centerline",  lambda: self.geo_mod.extract_centerline(self.context, section_count=self._resolve_section_count()),
+            ("4.1_centerline",  lambda: self.geo_mod.extract_centerline(self.context, section_count=section_count),
              "Step 3/6: Centerline extraction..."),
-            ("4.3b_bspline",    lambda: self.geo_mod.extract_centerline_bspline(self.context, section_count=self._resolve_section_count()),
+            ("4.3b_bspline",    lambda: self.geo_mod.extract_centerline_bspline(self.context, section_count=section_count),
              "Step 4/6: B-spline centerline..."),
-            ("5.7_sections",    lambda: self._auto_sections_task(),
+            ("5.7_sections",    lambda: self._auto_sections_task(vl_w, vl_h, vl_r),
              "Step 5/6: 2D section analysis (auto profile + clearance)..."),
             ("auto_params",     lambda: self._auto_extract_params(),
              "Step 6/6: Parameter extraction..."),
         ]
         self._run_next_auto_step()
 
-    def _auto_sections_task(self):
+    def _auto_sections_task(self, vl_w, vl_h, vl_r):
         """AUTO PIPELINE 2D-section step: pick the profile and clearance gauge
         automatically (pure NumPy, safe in the worker thread), then compute
-        all sections.
+        all sections. The (vl_w, vl_h, vl_r) fallback gauge is captured on the
+        GUI thread by the caller; never read the spinboxes here.
         """
         self.context.tunnel_profile = self.par_mod.detect_profile(self.context)
         g = self._compute_auto_gauge()
         if g:
             w, h, r = g
         else:
-            w, h, r = self._sp_vl_w.value(), self._sp_vl_h.value(), self._sp_vl_r.value()
+            w, h, r = vl_w, vl_h, vl_r
         return self.par_mod.compute_all_sections(self.context, vl_box_w=w, vl_box_h=h, vl_cir_r=r)
 
     def _auto_register_epochs(self):
@@ -2498,7 +2503,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         else:
             self.context.tunnel_profile = self._profile_combo.currentText()
         self._auto_set_clearance()
-        self._start_worker("5.7_sections", lambda: self.par_mod.compute_all_sections(self.context, vl_box_w=self._sp_vl_w.value(), vl_box_h=self._sp_vl_h.value(), vl_cir_r=self._sp_vl_r.value()))
+        # Read widget values on the GUI thread; the lambda runs in a worker
+        # thread where touching QWidgets is undefined behaviour.
+        vl_w, vl_h, vl_r = self._sp_vl_w.value(), self._sp_vl_h.value(), self._sp_vl_r.value()
+        self._start_worker("5.7_sections", lambda: self.par_mod.compute_all_sections(self.context, vl_box_w=vl_w, vl_box_h=vl_h, vl_cir_r=vl_r))
 
     def _slot_6_1_epochs(self) -> None:
         self._hdr("Load Time-Series Epochs", "Load reference and monitoring point-cloud epochs for deformation comparison.")
