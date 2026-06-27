@@ -1,187 +1,280 @@
-# CLAUDE.md — Hướng dẫn cho Claude Code
+# CLAUDE.md - Huong dan cho Claude Code
 
-Tổng hợp từ phân tích lỗi session + AGENTS.md (ECC-influenced).
+Muc tieu cua file nay la giup Claude lam viec an toan, dung workflow, va verify duoc thay doi trong du an SSL Tunnel Analysis.
 
----
+## Cach lam viec mac dinh
 
-## 🎯 Quy tắc làm việc (từ AGENTS.md)
+Moi task code nen theo vong lap:
 
-- **Không refactor** code không liên quan trong khi fix feature
-- **Không revert** thay đổi của user hoặc benchmark artifacts trừ khi được yêu cầu
-- **Benchmark là bằng chứng** — không claim thuật toán tốt hơn nếu chưa đo thực tế
-- **Headroom optional trên Windows** — native compression chạy qua WSL `.venv-headroom`
-- Giữ nguyên workflow T0/Tn: T0 = reference, Tn = so sánh, warnings gắn với section/deformation
+1. Investigate: doc file lien quan, tim root cause, khong sua voi.
+2. Plan: neu task lon, de xuat plan ngan va neu rui ro.
+3. Implement: sua toi thieu, dung style hien co, khong refactor ngoai pham vi.
+4. Verify: chay test gan nhat truoc, sau do chay gate rong hon neu can.
+5. Summarize: bao file da sua, lenh da chay, ket qua, rui ro con lai.
 
----
+## Karpathy-style coding discipline
 
-## ✅ Verification (chạy trước khi báo fix xong)
+Ap dung tinh than tu `multica-ai/andrej-karpathy-skills`: uu tien code don gian, thay doi toi thieu, va verify duoc.
+
+- Think before coding: neu yeu cau mo ho, neu assumption ro rang; neu rui ro cao thi hoi lai truoc khi sua.
+- Simplicity first: khong them abstraction/config/feature neu user khong yeu cau; neu cach lam dang qua phuc tap, rut gon.
+- Surgical changes: chi sua dong/file can thiet; khong refactor, format, hay cleanup code khong lien quan.
+- Goal-driven execution: voi task nhieu buoc, dat success criteria ngan va verify bang test/build/smoke gan nhat.
+- Diff discipline: moi dong thay doi phai trace duoc ve yeu cau cua user; unrelated issue chi mention trong handoff.
+
+## Quy tac bat buoc
+
+- Khong refactor code khong lien quan khi fix bug hoac them feature.
+- Khong revert thay doi cua user hoac artifact benchmark tru khi duoc yeu cau ro.
+- Doc file truoc khi edit; neu file thay doi trong luc lam, doc lai truoc khi sua tiep.
+- Treat benchmark numbers as evidence: khong claim thuat toan tot hon neu chua co so do.
+- Giu workflow T0/Tn: T0 la reference, Tn la epoch can so sanh.
+- Warning deformation phai gan voi section/chainage cuc bo, khong highlight tran lan.
+- Headroom la optional tren Windows; native compression day du chay qua WSL `.venv-headroom`.
+- PaddleOCR la optional; dung cho report/label/document, khong dua vao core point-cloud math.
+
+## Duong dan va moi truong
+
+- Workspace Windows: `C:\Users\ssl\Desktop\Code Python\data python cusor`
+- Project chinh: `tunnel_project/`
+- Python Windows: `..\.venv\Scripts\python.exe` khi dang o `tunnel_project/`
+- Python WSL Headroom: `.venv-headroom/bin/python`
+- App entrypoint: `tunnel_project/run_tunnel_analysis.py`
+- Package chinh: `tunnel_project/tunnel_analysis/`
+
+Khong tron path Windows voi WSL:
+
+- PowerShell dung `C:\Users\ssl\...`
+- Bash/WSL dung `/mnt/c/Users/ssl/...`
+
+## Lenh verify chuan
+
+Chay tu `tunnel_project/`.
+
+### Gate nhanh mac dinh
 
 ```powershell
-# Từ thư mục tunnel_project/
-..\.venv\Scripts\python.exe -m py_compile tunnel_analysis\headroom_adapter.py tunnel_analysis\rag_ai.py tunnel_analysis\digital_twin.py
-..\.venv\Scripts\python.exe smoke_test_headroom_adapter.py
-..\.venv\Scripts\python.exe smoke_test_advanced_integrations.py
+.\agent_verify.ps1 quick
 ```
+
+Tuong duong voi compile package + smoke/guard co ban. Dung sau thay doi nho.
+
+### Gate Step 6 / T0-Tn
 
 ```powershell
-# WSL Headroom verification
-wsl --cd "C:\Users\ssl\Desktop\Code Python\data python cusor\tunnel_project" .venv-headroom/bin/python smoke_test_headroom_adapter.py
+.\agent_verify.ps1 step6
 ```
 
----
+Dung khi sua deformation, registration, centerline, section, warning 2D/3D, pipeline T0/Tn.
 
-## ⚠️ Các lỗi hay gặp & cách tránh
+### Gate AI / Headroom
 
-### 1. Nhầm đường dẫn Windows vs WSL
-- **Windows**: dùng `C:\Users\ssl\...` với PowerShell
-- **WSL/Linux**: dùng `/mnt/c/Users/ssl/...` với Bash
-- **Không trộn lẫn** — PowerShell không hiểu `/mnt/c/`, Bash không hiểu `C:\`
-
-### 2. Venv đúng theo môi trường
-| Môi trường | Python | Headroom |
-|-----------|--------|---------|
-| Windows | `.venv\Scripts\python.exe` | `.venv\Scripts\headroom.exe` |
-| WSL/Linux | `.venv-headroom/bin/python` | `.venv-headroom/bin/headroom` |
-
-### 3. Luôn Read trước khi Edit
-```
-❌ Sai: Edit file ngay không đọc trước
-✅ Đúng: Read file → sau đó mới Edit
-```
-Nếu file bị sửa đổi sau khi Read → phải Read lại trước khi Edit.
-
-### 4. MCP Server config đúng chỗ
-```
-❌ Sai: thêm mcpServers vào settings.json hoặc settings.local.json
-✅ Đúng: thêm vào .mcp.json ở thư mục gốc dự án
-```
-
-### 5. Escape dấu nháy trong PowerShell
-- Lệnh phức tạp có `"` bên trong → dễ bị `unexpected EOF`
-- Dùng single quote `'` hoặc escape `\"` đúng cách
-
----
-
-## 🔍 Review Focus (từ AGENTS.md)
-
-- Python runtime errors, imports, PyQt signal/slot issues
-- Threading và worker lifecycle trong UI
-- Deformation thresholds, unit conversion, section indexing, 2D/3D mapping
-- Benchmark regressions: clean noise, registration, centerline, T0/Tn comparison
-- Large point-cloud memory behavior trên máy 32GB RAM
-
----
-
-## 🛠️ Cấu hình dự án
-
-### MCP Server (Headroom)
-File: `.mcp.json`
-```json
-{
-  "mcpServers": {
-    "headroom": {
-      "command": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\.venv\\Scripts\\headroom.exe",
-      "args": ["mcp", "serve"],
-      "env": {
-        "HEADROOM_MCP_READ": "on"
-      }
-    }
-  }
-}
-```
-
-### Chạy Headroom Learn (Windows)
 ```powershell
-$env:PYTHONUTF8="1"
-.\.venv\Scripts\headroom.exe learn --agent claude --all --model ollama/qwen2.5:3b
-# Không dùng --apply vì headroom decode sai Windows path có spaces
-# Tự copy recommendations vào CLAUDE.md thủ công
+.\agent_verify.ps1 ai
 ```
 
-### Ollama
-- Model: `qwen2.5:3b` (1.9GB) — chạy **100% GPU** trên RTX 4060 Ti
-- Không dùng model >6GB VRAM (Chrome/Zalo chiếm ~2GB trước)
-- Kiểm tra: `ollama ps` → phải thấy `100% GPU`
-- Ollama version phải ≥ v0.30 để nhận GPU đúng
+Dung khi sua `headroom_adapter.py`, `rag_ai.py`, `digital_twin.py`, OCR/RAG/AI integration.
 
----
+### Gate file cu the
 
-## 📁 Cấu trúc dự án
-
-```
-data python cusor/
-├── .mcp.json                    # MCP server config (headroom)
-├── .venv/                       # Python venv Windows
-├── CLAUDE.md                    # File này
-└── tunnel_project/
-    ├── AGENTS.md                # Agent guide (ECC-influenced) ← đã merge vào đây
-    ├── BENCHMARK_WORKFLOW.md    # Quy trình benchmark
-    ├── PROJECT_DECISIONS.md     # Quyết định thiết kế
-    ├── VERIFICATION_CHECKLIST.md
-    ├── .venv-headroom/          # Python venv WSL/Linux
-    └── tunnel_analysis/
-        ├── headroom_adapter.py  # Tích hợp headroom + Ollama
-        ├── rag_ai.py            # RAG assistant (bug line 184)
-        └── digital_twin.py
+```powershell
+.\agent_verify.ps1 compile tunnel_analysis\parameters.py tunnel_analysis\ui\widgets.py
 ```
 
----
+Dung khi chi can compile nhanh cac file vua sua.
 
-## 🤖 Headroom Learned Patterns
-*qwen2.5:3b phân tích 118 tool calls — 9.3% failure rate*
+## Mapping task -> verify
 
-- Quản lý Ollama: `ollama stop <model>`, `ollama rm <model>`, `ollama list`
-- Kiểm tra path tồn tại trước khi đọc/ghi file
-- Dùng `$env:PYTHONUTF8="1"` khi chạy headroom trên Windows
-- Windows path: dùng `C:\Users\ssl\...`, không dùng `\\\Users\ssl\...`
+- Small Python logic: `agent_verify.ps1 compile <changed_files>` roi smoke gan nhat neu co.
+- UI PyQt/PyVista: compile + launch app neu feasible; kiem tra widget fit va step order.
+- Registration/T0-Tn/deformation: `agent_verify.ps1 step6`.
+- Clean noise/outlier/cable: smoke auto-denoise + benchmark theo `BENCHMARK_WORKFLOW.md`.
+- Blender synthetic dataset: `smoke_test_blender_dataset.py` va `benchmark_blender_dataset.py`.
+- AI/Headroom/RAG/OCR: `agent_verify.ps1 ai`.
+- Paper/research claim: theo `RESEARCH_WORKFLOW.md`, `MATERIAL_PASSPORT.md`, `PAPER_REVIEW_CHECKLIST.md`.
 
----
+## MCP va tool integration
 
-## 📌 Tóm tắt phiên gần nhất (đọc trước khi tiếp tục)
+Workspace `.mcp.json` co:
 
-**Tính năng đã thêm/sửa trong phiên này:**
-- **ChainageRulerWidget** (`widgets.py`): thanh lý trình full-width dưới viewport, tam giác cảnh báo đỏ/vàng, click nhảy mặt cắt.
-- **`classify_sections()` (nguồn chân lý chung)**: ruler + 2D track + 3D markers + dashboard + 2D banner dùng CHUNG hàm này → cảnh báo nhất quán. dW/dH/dR dùng ngưỡng tuyệt đối, dEcc/dOval giữ local-gate.
-- **`register_epochs()` (`registration.py`)**: căn chỉnh T0/Tn đo từ vị trí khác — tự dùng mốc cầu (SVD, không triệt tiêu biến dạng) nếu ≥3 mốc, không thì trimmed-ICP. Có divergence-guard. Nút "3.0/3.1 Auto-align T0/Tn".
-- **Sidebar gọn lại**: ẩn nút trùng qua `CORE_STEP_CODES`, đánh số hiển thị liền mạch qua `CORE_DISPLAY_RENUMBER` (giữ ID lọc ổn định), gộp Export (8.x) vào mục 7. i18n VN/KO cập nhật.
-- **Bộ test all-in-one**: `data/full_test/` (T0_full + Tn_full, .las + .txt) — hầm CONG ~1km, 4 vị trí lỗi (lún 200m, hội tụ 450m, nhiễu 700m, kết hợp 900m) + 5 mốc. **BỊ gitignore** → chạy `tools/create_full_test_dataset.py` để tái tạo.
-- **Fix eccentricity hầm cong + centerline guard** (chi tiết trong bug list dưới).
+- `headroom`: local Headroom MCP server voi `HEADROOM_MCP_READ=on`. Dung cho compression/RAG read, digital-twin/AI context.
+- `blender`: Blender MCP bridge, dung khi can scene inspection, 3D visualization, render, Blender-side scripting.
+- `openalex`: academic literature MCP, dung de tim paper, survey/review, citation metadata, va research gap theo topic.
+- `notebooklm`: NotebookLM MCP, dung de tong hop/ review tai lieu, sinh draft, doc-cross-query. Chi cho draft/review, khong dung lam core point-cloud math.
 
-**Trạng thái hiện tại**: 14/14 test suite PASS. Nhánh `feature/m3c2-gicp-integration`.
+Khi user yeu cau kiem research gap:
 
-**Lệnh test nhanh** (từ `tunnel_project/`, `$env:PYTHONUTF8="1"`):
-`..\.venv\Scripts\python.exe test_full_dataset.py` (end-to-end) · `test_step6_evaluation.py` · `test_deformation_groundtruth.py` (benchmark).
+1. Dung `openalex` de tim survey/review paper moi nhat theo topic, uu tien 2021-2026.
+2. Lay paper co citation cao va paper moi gan day de so sanh trend.
+3. Tom tat bang: paper, year, method/topic, limitation/open problem, possible gap.
+4. Khong claim gap la "chua ai lam" neu chua verify bang citation/search tiep.
 
-**Tồn đọng đã biết (có workaround, không blocker)**:
-- Ecc max ~245mm trên hầm CONG 1-scan (centerline lệch ~180mm khỏi tâm ống) → **luôn load T0+Tn** để ecc chính xác (bias triệt tiêu).
-- Cảnh báo có thể nổi ở 2 đầu hầm cong/dài (artifact portal).
-- `sg.eccentricity` (Info dialog/2D) còn cách cũ; chỉ card dashboard (calc_eccentricity) được detrend.
+Neu MCP khong hien trong session, restart agent/Claude Code de load lai `.mcp.json`.
 
----
+## Repo & MCP Router (doc dau moi task de chon dung)
 
-## 🐛 Lịch sử bug đã fix
+Quy tac vang: chi PHAT TRIEN trong `tunnel_project/`. Cac repo `_ref_*` la READ-ONLY, chi
+lay y tuong/thuat toan/benchmark, khong import nguyen khoi; neu trich dung phai ghi lai
+o `REPO_INTEGRATION_STATUS.md`. Source of truth chi tiet: `REPO_INVENTORY.md` +
+`REPO_INTEGRATION_STATUS.md` (doc khi can sau).
 
-- **rag_ai.py dead-code (line 184)** — ✅ đã fix: hàm `query()` giờ chỉ còn 1 `return` duy nhất, gộp `rag_note` + `optimized.note`.
-- **parameters.py crown settlement** — ✅ đã fix: đổi `(crown_n - crown_0)` → `(crown_0 - crown_n)` (dương = lún xuống, khớp ngưỡng dương).
-- **rag_ai.py / digital_twin.py model** — ✅ đã fix: đọc `TUNNEL_OLLAMA_MODEL` (mặc định `qwen2.5:3b`) ở instance, không hardcode `llama3`.
-- **ChromaDB URL parsing** — ✅ đã fix: dùng `urllib.parse` để chịu được https/trailing-slash/thiếu port.
-- **preprocessing.py NameError** — ✅ đã fix: khởi tạo `is_cable/is_light/is_person` trước block `cKDTree`.
-- **geometry.py zero tangent** — ✅ đã fix: fallback tìm tangent hợp lệ gần nhất, tránh vector N/B = 0.
-- **ifc_exporter.py atomic write** — ✅ đã fix: ghi temp + `os.replace` để tránh file IFC corrupt.
-- **timeseries.py M3C2** — ✅ đã fix: cảnh báo khi tỷ lệ điểm T0/Tn lệch lớn hoặc NaN > 50%.
-- **parameters.py compute_all_sections epsilon** — ✅ đã fix: slab cứng 5cm/section-spacing 80cm bỏ sót 45/80 mặt cắt → dùng `_section_epsilon` adaptive (0→80/80 mặt cắt có dữ liệu).
-- **parameters.py crown/width outlier** — ✅ đã fix: crown `b_proj.max()` và width `max-min` bị 1 điểm lạc làm hỏng (crown_max 1265mm→92mm, khớp GT). Dùng percentile p99/p1. Verify: test_deformation_groundtruth 6/6 vẫn pass.
-- **widgets.py classify_sections local-gate** — ✅ đã fix: gate `median+3·MAD` chặn cả biến dạng lớn trải rộng (dW=-63mm, dR=-27mm không được flag). Tách: dW/dH/dR dùng ngưỡng tuyệt đối (`local_gate=False`), dEcc/dOval giữ gate (chống offset hệ thống). v01→CAUTION, v02→CRITICAL recall 100%.
-- **parameters.py _has_t0_reference** — ✅ đã fix: crown/convergence cũ bắt `active_index>0` → báo "Cần T0" dù đã tải T0 (khi monitoring nằm trong normalized_points, active_index=0). Helper chung khớp logic section.
-- **run_tunnel_analysis.py user-site leak** — ✅ đã fix: MS Store Python inject user-site (numpy 2.4.3) vào venv (numpy 2.4.6) → RecursionError lúc import scipy.stats. Prune `local-packages` khỏi sys.path đầu file.
-- **registration.py register_epochs (mới)** — ✅ thêm: căn chỉnh T0/Tn đo từ vị trí khác → tự dùng điểm mốc cố định (SVD cứng, không triệt tiêu biến dạng) nếu phát hiện ≥3 mốc; không thì trimmed ICP (`_trimmed_icp` loại vùng residual cao → giữ biến dạng cục bộ, full ICP làm mất ~75%). Wire vào AUTO PIPELINE (bước 2b) khi có ≥2 epochs. Test: test_register_epochs 8/8 (mốc + ICP + biến dạng giữ nguyên).
-- **UI nút "3.0 Auto-align T0/Tn epochs"** — ✅ thêm: phơi bày register_epochs thành nút riêng ở section 3 (Registration), dùng key dispatch `epoch_register`. Thêm "3.0" vào CORE_STEP_CODES. Lưu ý: xoay quanh trục hầm (roll) với hầm tròn là bất khả quan sát → cần mốc; xoay quanh trục đứng (yaw) + tịnh tiến thì ICP khôi phục được. Test end-to-end: test_pipeline_end_to_end 16/16 (Tn lệch hệ tọa độ vẫn khớp, gap 2.1m→0.07m).
-- **registration.py register_epochs divergence guard** — ✅ thêm: ICP trượt 233m trên hầm dài gần đối xứng → chọn kết quả tốt nhất theo RMSE trong {nguyên bản, coarse, trimmed-ICP}, không bao giờ tệ hơn đầu vào.
-- **preprocessing.py voxel recenter đa trạm** — ✅ fix: voxel chỉ recenter khi 1 scan; ≥2 scan giữ khung tọa độ (T0/Tn không bị tách ~20m). Render lại cả 2 trạm sau 2.1/2.5 (giữ điểm nhiễu đỏ).
-- **parameters.py calc_eccentricity hầm cong** — ✅ fix (đầu tư): eccentricity 1-scan trên hầm cong báo giả ~452mm (B-spline centerline lệch tâm ống). Nhánh fallback (no-T0): tâm fit vòng tròn (Kasa, robust với sampling lệch) + detrend bằng moving-median reflect-pad + median filter + bỏ portal → **mean 452→10mm**. Nhánh T0 (test GT) giữ nguyên. CÒN LẠI: max ~245mm do centerline lệch ~180mm khỏi tâm ống cong (giới hạn tracking — cần viết lại centerline từ gốc, rủi ro cao). Verify: test_deformation_groundtruth 6/6 vẫn pass.
-- **Dọn code chết (loop session)** — ✅ xóa app cũ monolithic (main_app.py, TunnelApp.py×2) + helper mồ côi (view_manager.py, tunnel_utils.py) + scratch (_patch*/_add*/main_app_backup...). App thật `run_tunnel_analysis.py`→`tunnel_analysis/` chỉ dùng language_switcher+translations; verify 27 smoke test PASS sau khi xóa.
-- **test_register_guard.py (mới)** — ✅ khóa divergence-guard của register_epochs (hầm dài: ICP không trượt 233m; kết quả không bao giờ tệ hơn input). 4/4 pass.
-- **batch.py import thừa** — ✅ xóa `PointCloudBundle` không dùng (AST scan toàn package chỉ thấy 1 cái này).
-- **test_curved_eccentricity.py (mới)** — ✅ khóa fix eccentricity hầm cong: hầm cong tâm-đúng → ecc mean ~1mm (nếu không detrend ~450mm) + refine-guard không tệ hơn bootstrap.
-- **Ghi chú sg.eccentricity** — `sg.eccentricity` (trong _extract_section_geometry) = khoảng cách centroid↔tâm-bbox TRONG mặt cắt (tự thân, KHÔNG dùng centerline) → KHÁC calc_eccentricity (vs trục); nó không bị lệch-centerline (~45mm do sampling, không phải 452mm), không cần đổi.
-- **geometry.py _refine_centerline_tangent guard** — ✅ fix: bước refine tiếp tuyến (chạy khi hầm cong) thực ra làm centerline TỆ HƠN trên vài data cong (offset 24mm→204mm, do frame bootstrap PCA thẳng). Thêm `_axis_offset_metric` + guard trong extract_centerline_bspline: chỉ giữ refine nếu GIẢM offset tâm, không thì giữ bootstrap. Chỉ chạy khi cong → hầm thẳng (GT/step6) không đụng. Verify regression: GT 6/6, sections radius 2.750m, clearance precision/recall 1.00, step6 10/10, consistency 12/12, end-to-end 16/16 — pass hết.
+Bang dinh tuyen: loai task -> noi lam viec (trong tunnel_project) -> repo tham khao -> MCP -> verify.
+
+| Loai task | Module lam viec | Repo tham khao (_ref, read-only) | MCP | Verify |
+| --- | --- | --- | --- | --- |
+| Deformation / T0-Tn / M3C2 / centerline / section | `tunnel_analysis/parameters.py`, m3c2, centerline | `_ref_FY387_calc` (deformation, dataset) | - | `agent_verify.ps1 step6` |
+| Registration / alignment / outlier | `tunnel_analysis/registration.py` | `_ref_GROR` (robust GROR+FPFH) | - | `agent_verify.ps1 step6` |
+| Lining segmentation / component | `tunnel_analysis/segmentation.py` | `_ref_SAM4Tun` (SAM + projection) | - | smoke segmentation |
+| BIM / IFC export | `tunnel_analysis/ifc_exporter.py` | `_ref_Cloud2BIM` (scan-to-BIM) | - | IFC smoke + visual |
+| Clean noise / cable / line | clean/denoise module | `_ref_PowerLine` | - | benchmark denoise |
+| AI / RAG / OCR / digital twin | `rag_ai.py`, `headroom_adapter.py`, `digital_twin.py` | - | `headroom` | `agent_verify.ps1 ai` |
+| Research gap / paper / citation | docs, drafts, ARS skills | `_ref_FY387_calc` (benchmark) | `openalex` | RESEARCH_WORKFLOW |
+| Doc synthesis / review / draft | docs/ | - | `notebooklm` | doc review |
+| 3D scene / render / scene inspect | tools/ | - | `blender` | visual |
+| UI PyQt / PyVista | `tunnel_analysis/ui/` | - | - | compile + launch app |
+
+Cach chon repo: neu task khop ro mot dong trong bang -> TU DONG lam theo, khong hoi.
+Chi hoi lai khi task mo ho hoac dung cham nhieu module/repo cung luc, hoac khi can trich
+code tu `_ref_*` vao production (vi vi pham quy tac read-only).
+
+## Review focus
+
+- Python runtime errors, imports, PyQt signal/slot.
+- Threading va worker lifecycle trong UI.
+- Unit conversion, section indexing, 2D/3D mapping.
+- Registration khong duoc triet tieu bien dang cuc bo.
+- Benchmark regression: clean noise, centerline, registration, T0/Tn comparison.
+- Memory behavior voi point cloud lon tren may 32GB RAM.
+- Research/paper claim phai co provenance va benchmark.
+
+## Trang thai du an can nho
+
+- UI giu 7 step va khong doi ten nut; Advanced/debug buttons an mac dinh, bat bang checkbox `Show Advanced` roi restart tool.
+- App that su chay qua `run_tunnel_analysis.py` -> `tunnel_analysis/`.
+- Legacy prototypes nhu `TunnelApp.py`, `main_app.py`, `New folder/` chi la tham khao lich su.
+- `data/blender_step6_t1_tn/`, `data/blender_test_suite/`, `data/full_test/` la benchmark fixtures quan trong.
+- Logs, screenshots, export tam va point-cloud lon khong commit tru khi duoc promote thanh fixture co ten.
+
+## Format handoff cuoi task
+
+Luon tom tat ngan gon:
+
+- Changed: file/module da sua.
+- Verified: lenh da chay va ket qua.
+- Risks: rui ro con lai hoac test chua chay.
+- Next: de xuat buoc tiep theo neu co.
+
+## Cap nhat hien trang moi - Time-series T0~T5 va Step 6
+
+### Dataset T0~T5 moi tao
+
+Da co bo dataset sach de test time-series deformation:
+
+- Thu muc: `tunnel_project/data/time_series_deformation/`
+- Script tao lai: `tunnel_project/tools/create_time_series_deformation_dataset.py`
+- Test kiem chung: `tunnel_project/test_time_series_deformation_dataset.py`
+
+Cac file chinh:
+
+- `T0.las` den `T5.las`: 6 epoch point cloud.
+- `T0.txt` den `T5.txt`: ban debug text 8 cot `x y z nx ny nz intensity label`.
+- `ground_truth.csv`: bien dang tuyet doi theo tung epoch.
+- `baseline_pairs.csv`: bien dang tich luy `T0 -> Tn`.
+- `incremental_pairs.csv`: bien dang tang them `Tn -> Tn+1`.
+- `manifest.json`: metadata may doc duoc.
+- `README.md`: huong dan dung dataset.
+
+Thong so ground truth:
+
+- Tunnel dai `80 m`, ban kinh `3.0 m`, moi epoch `15456` diem.
+- `T0` la baseline sach.
+- Crown settlement tai chainage `20 m`: `0 -> -45 mm` tu `T0` den `T5`.
+- Sidewall convergence tai chainage `45 m`: `0 -> -35 mm` tu `T0` den `T5`.
+- Local damage tai chainage `65 m`: bat dau o `T3`, den `-40 mm` o `T5`.
+- Dataset nay da registered san: `registration.transform = identity`, `rmse_mm = 0` trong `manifest.json`.
+
+Lenh tao lai va test:
+
+```powershell
+cd "C:\Users\ssl\Desktop\Code Python\data python cusor\tunnel_project"
+..\.venv\Scripts\python.exe tools\create_time_series_deformation_dataset.py
+..\.venv\Scripts\python.exe test_time_series_deformation_dataset.py
+```
+
+Ket qua mong doi:
+
+- `TIME-SERIES DEFORMATION DATASET TEST PASSED`
+
+### Nguyen nhan va fix tab Time-Series Plot
+
+Truoc do tab `Time-Series Plot` nhin nhu khong hoat dong vi:
+
+- `spatiotemporal_series()` tra ve gia tri cho cac epoch sau `T0`.
+- Neu chi load cap `T0/Tn`, ket qua chi co 1 diem.
+- `LinePlotWidget` can it nhat 2 diem de ve line.
+- Vi vay chart trong tab trong/khong thay duong.
+
+Fix da lam trong `tunnel_project/tunnel_analysis/ui/main_window.py`:
+
+- Neu co nhieu scan `T0~T5`, Step `6.1 Plot deformation trend` dung tat ca epoch trong `context.scans`.
+- Neu chi co cap `T0/Tn`, chart tu them baseline `T0 = 0 mm` va ve `Tn = p95_abs_mm`.
+- Bieu do hien tai ve `p95 absolute displacement` thay vi median, vi median toan cloud thuong gan 0 khi bien dang cuc bo.
+
+Cac dong lien quan:
+
+- `tunnel_analysis/ui/main_window.py`: slot `_slot_6_2_plot`
+- `tunnel_analysis/ui/main_window.py`: dispatch `elif key == "6.2_plot"`
+
+Lenh verify da chay:
+
+```powershell
+..\.venv\Scripts\python.exe test_step6_timeseries.py
+..\.venv\Scripts\python.exe test_time_series_deformation_dataset.py
+```
+
+Ca hai deu PASS.
+
+### Cach dung dataset moi trong tool
+
+Dung nhanh theo cap baseline:
+
+1. Load `data/time_series_deformation/T0.las`.
+2. Load `data/time_series_deformation/T5.las` lam Tn.
+3. Dataset da aligned san, co the bo qua registration hoac chay `3.0` de kiem tra RMSE.
+4. Chay `6.1 Plot deformation trend T0->Tn`.
+5. Chart se co baseline `T0=0` va diem Tn theo `p95_abs_mm`.
+
+Dung theo chuoi day du:
+
+1. Load/add du cac scan `T0.las` den `T5.las` vao `context.scans`.
+2. Chay `6.1 Plot deformation trend T0->Tn`.
+3. Slot se dung tat ca scan trong `context.scans` va ve trend nhieu epoch.
+
+Luu y hien tai:
+
+- UI hien tai chua co workflow rieng that dep de chon mot luc 6 epoch `T0~T5`; co the can nang cap UI sau.
+- Dataset sach chu yeu de validate deformation/time-series, khong phai de stress-test registration.
+- Sau nay can tao bo realistic/Blender LiDAR co offset/rotation/noise/targets de test `3.0 Auto-align`.
+
+### Neu tiep tuc phat trien Step 6
+
+Uu tien tiep theo:
+
+1. Tao UI load multi-epoch `T0~T5` mot lan.
+2. Hien label truc X theo epoch name thay vi chi index.
+3. Xuat Excel/PDF rieng cho time-series: baseline, incremental, warning count per epoch.
+4. Them chart `baseline deformation` va `incremental deformation` tach rieng.
+5. Them so sanh output tool voi `ground_truth.csv` de tinh sai so mm.
+
+## Quan ly nut UI Public/Advanced
+
+Da co file registry: `tunnel_project/docs/UI_BUTTON_REGISTRY.md`.
+
+Quy tac hien tai:
+
+- Khong xoa nut Advanced khi chua duoc yeu cau ro.
+- Khong doi ten/doi so nut hien co neu user khong yeu cau.
+- `CORE_FEATURES_ONLY = True` giu UI gon theo 7 step.
+- `SHOW_ADVANCED_BUTTONS = False` an cac nut Advanced/debug.
+- Muon debug day du, doi `SHOW_ADVANCED_BUTTONS = True` trong `tunnel_analysis/ui/main_window.py` roi restart app.
+- Nut Advanced bi an, khong bi xoa; slot/function van phai giu de benchmark va troubleshooting.
