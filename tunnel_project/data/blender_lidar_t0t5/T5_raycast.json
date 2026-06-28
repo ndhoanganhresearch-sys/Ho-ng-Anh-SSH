@@ -1,0 +1,48 @@
+{
+  "source": "raycast_tunnel_epochs (real curved tunnel, BVHTree on Tunnel_Lining)",
+  "epoch": "T5",
+  "mesh_source": "tunnel_lidar_scene.blend",
+  "alignment": "horizontal curve R=500 m; chainage = arc length",
+  "radius_m": 4.25,
+  "stations_arc_length_m": [
+    10.0,
+    40.0,
+    70.0
+  ],
+  "station_z": -1.3,
+  "ray_grid_deg": {
+    "azimuth_step": 1.0,
+    "elevation_step": 1.0,
+    "elevation_range": [
+      -25.0,
+      90.0
+    ]
+  },
+  "noise_model": "sigma_m = 0.002 + 0.00006 * distance_m",
+  "point_count": 112536,
+  "labels": {
+    "1": "tunnel lining"
+  },
+  "deformation_prescribed": {
+    "crown_settlement": {
+      "value_mm": -45,
+      "chainage_m": 20.0,
+      "sigma_m": 3.0,
+      "theta_deg": 90.0
+    },
+    "sidewall_convergence": {
+      "value_mm": -35,
+      "chainage_m": 45.0,
+      "sigma_m": 3.0,
+      "theta_deg": 0.0
+    },
+    "local_damage": {
+      "value_mm": -40,
+      "chainage_m": 65.0,
+      "sigma_m": 1.2,
+      "theta_deg": 55.0
+    }
+  },
+  "ground_truth_file": "ground_truth.csv",
+  "registration_status": "identity (same 3 stations for every epoch)"
+}

@@ -1,200 +1,72 @@
-# Phase A: Create T0 Clean Reference
-## Step-by-step guide to raycast the clean tunnel baseline
+# Phase A: Generate Clean T0 Reference
 
-**Timeline:** ~30 minutes (15 min Blender setup + 15 min raycast)
+## Raycast the real curved tunnel to a clean baseline point cloud
 
-**Output:** `T0.las` (364 points, clean reference, ~0mm deformation)
+**Output:** `data/blender_lidar_t0t5/T0_raycast.txt` (+ `T0_raycast.json`)
 
----
-
-## Prerequisites
-
-- Blender MCP connected ✓
-- Python venv ready (`..\.venv\Scripts\python.exe`)
-- Input: `data/blender_lidar_t0t5/tunnel_lidar_scene.blend`
-- Output dir: `data/blender_lidar_t0t5/`
+**Engine:** `tools/raycast_tunnel_epochs.py` (runs inside Blender)
 
 ---
 
-## Step 1: Blender Setup (5 min)
+## What this is
 
-### 1a. Open tunnel scene
-```
-File: tunnel_project/data/blender_lidar_t0t5/tunnel_lidar_scene.blend
-Expected:
-├─ Tunnel_Lining (16,100 vertices) - main scanning target
-├─ Rail_R, Rail_L (curves)
-└─ Sleeper_0..N (floor infrastructure)
-```
+A clean (undeformed) LiDAR point cloud raycast from the **real** tunnel mesh in
+`tunnel_lidar_scene.blend`. It is the reference epoch for the T0→Tn validation in
+Phase C. The same engine produces every epoch, so T0 and any Tn share identical
+scanner geometry — there is no "config must match" risk.
 
-### 1b. Verify Tunnel_Lining mesh
-```
-Object: Tunnel_Lining
-├─ Type: MESH
-├─ Vertices: 16,100
-├─ State: Clean (no deformation)
-└─ Location: (0, 0, 0)
-```
+The geometry is the actual dataset geometry (verified against `manifest.json`):
 
-**Action:** In Blender, click on Tunnel_Lining, check properties panel.
+| Property | Value |
+| --- | --- |
+| Tunnel | circular arch, radius ~4.25 m (8.5 m bore), length 80 m |
+| Alignment | horizontal curve R = 500 m (NOT a straight cylinder) |
+| Chainage | **arc length** along the curved centerline (0–80 m) |
+| Crown direction | local +Z in the cross-section frame |
+| Scanner | 3 TLS stations at arc-length 10 / 40 / 70 m, tripod z = -1.3 m |
+| Ray grid | azimuth 1° × elevation 1° (-25°…90°), max range 60 m |
+| Noise | range σ(d) = 0.002 + 0.00006·d m (per manifest) |
+| Mesh | `Tunnel_Lining`, 16,100 verts (raycast via BVHTree) |
 
 ---
 
-## Step 2: Python Raycast (25 min)
+## Run it
 
-### 2a. Run raycasting script
-
-```bash
-cd tunnel_project
-..\.venv\Scripts\python.exe phase_a_raycast.py
+Option 1 — Blender CLI:
+```powershell
+cd "C:\Users\ssl\Desktop\Code Python\data python cusor\tunnel_project"
+blender -b data\blender_lidar_t0t5\tunnel_lidar_scene.blend ^
+        -P tools\raycast_tunnel_epochs.py -- --epoch T0
 ```
 
-**Script does:**
-1. Opens tunnel_lidar_scene.blend
-2. Creates UV sphere @ (0, 10, 3) with 512 rays
-3. Raycasts each ray to Tunnel_Lining
-4. Gets 364 hit positions
-5. Adds distance-dependent noise (5mm + 2mm per 10m)
-6. Exports T0.las
-7. Saves T0.json metadata
+Option 2 — Blender MCP (Blender already open): run `tools/raycast_tunnel_epochs.py`
+with `EPOCH = "T0"`.
 
-**Expected output:**
+**Expected:**
 ```
-✓ Raycast complete!
-  Rays cast: 482
-  Hits: 364 (75.5% coverage)
-  Distance range: 1.157m - 45.027m
-  Noise applied: 5mm + 2mm per 10m
-
-✓ LAS file created!
-  Path: data/blender_lidar_t0t5/T0.las
-  Points: 364
-  X: -4.230 to 4.920 m
-  Y: 0.310 to 55.120 m
-  Z: -2.780 to 4.270 m
+RAYCAST TUNNEL EPOCH: T0
+  hits: ~112,500
+  -> data/blender_lidar_t0t5/T0_raycast.txt
+  -> data/blender_lidar_t0t5/T0_raycast.json
+  clean .blend restored
 ```
 
-### 2b. Record T0 metadata
-
-After raycast, file saved: `T0.json`
-```json
-{
-  "source": "raycasting_TLSynth_protocol_phase_a",
-  "mesh_source": "tunnel_lidar_scene.blend (clean)",
-  "scanner_location": [0, 10, 3],
-  "scanner_sphere_subdivisions": "32x16",
-  "noise_model": "5mm + 2mm per 10m distance",
-  "point_count": 364,
-  "radius_design": 3.0,
-  "deformation_prescribed": "none (reference)",
-  "registration_status": "identity (no transformation)",
-  "created_date": "2026-06-23",
-  "validated": false
-}
-```
+The on-disk `.blend` is reopened at the end, so nothing is overwritten.
 
 ---
 
-## Step 3: Verify T0 (5 min)
+## Verify
 
-### 3a. Load and check LAS
-
-```bash
-..\.venv\Scripts\python.exe verify_synthetic_las.py
+```powershell
+..\.venv\Scripts\python.exe -c "import numpy as np,math; a=np.loadtxt(r'data\blender_lidar_t0t5\T0_raycast.txt'); a=a[a[:,4]==1]; s=500*np.arcsin(np.clip(a[:,1]/500,-1,1)); cx=500*(1-np.cos(s/500)); r=np.hypot(a[:,0]-cx,a[:,2]); print('points',len(a),'radius mean %.3f'%r.mean())"
 ```
 
-Expected output:
-```
-Synthetic LAS verification:
-  Points: 364
-  X range: -4.230 to 4.920 m
-  Y range: 0.310 to 55.120 m
-  Z range: -2.780 to 4.270 m
-  File: data/blender_lidar_t0t5/T0.las
-
-Ready to test with tunnel_analysis tool!
-```
-
-### 3b. Quick validation checklist
-
-- [ ] T0.las exists (364 points)
-- [ ] X range ~ [-4.2, 4.9] m (tunnel cross-section)
-- [ ] Y range ~ [0.3, 55.1] m (tunnel length)
-- [ ] Z range ~ [-2.7, 4.2] m (height)
-- [ ] T0.json metadata file present
-- [ ] File size ~40-50 KB
-
----
-
-## Step 4: Optional - Load into Tool (optional, 10 min)
-
-### Test in tunnel_analysis app
-
-```bash
-..\.venv\Scripts\python.exe run_tunnel_analysis.py
-```
-
-In app:
-1. Load T0.las
-2. Step 1-2: Load & process
-3. Step 3: Auto-align (skip if identity registration)
-4. Step 4-5: Extract geometry
-5. Step 6: Check section view
-   - Should see circle with ~3m radius
-   - Eccentricity should be near 0
-   - Ovality should be < 0.1%
-
-**Record baseline:**
-```
-T0 baseline metrics:
-├─ Radius (fitted): 3.0000 m (design: 3.0 m) ✓
-├─ Eccentricity: 0.1 mm (should be ~0) ✓
-├─ Ovality: 0.05% (should be minimal) ✓
-└─ Section fit: converged, clean ✓
-```
-
----
-
-## Troubleshooting
-
-| Issue | Cause | Fix |
-|-------|-------|-----|
-| **Raycast: 0 hits** | Scanner sphere inside/outside tunnel | Adjust scanner location (0, 10, 3) |
-| **Few hits (<300)** | Low sphere subdivisions | Increase to 64x32 (1024 rays) |
-| **LAS file missing** | laspy not installed | `pip install laspy` in venv |
-| **File can't open in app** | Corrupted LAS format | Re-run raycast, check laspy version |
-| **Radius ≠ 3.0m** | Mesh deformation (shouldn't be) | Verify tunnel_lidar_scene.blend is clean |
+- [ ] ~112k lining points
+- [ ] radius mean ≈ 4.25 m (clean, consistent along the curve)
+- [ ] `T0_raycast.json` present, `deformation_prescribed` all 0
 
 ---
 
 ## Next: Phase B
 
-Once T0 is verified:
-1. **Phase B:** Inject deformation into mesh
-2. Create tunnel_deformed.blend
-3. Raycast deformed mesh → Tn.las
-
-See: `PHASE_B_GUIDE.md`
-
----
-
-## Command Summary
-
-```bash
-cd tunnel_project
-
-# Run Phase A raycast
-..\.venv\Scripts\python.exe phase_a_raycast.py
-
-# Verify output
-..\.venv\Scripts\python.exe verify_synthetic_las.py
-
-# Optional: test in app
-..\.venv\Scripts\python.exe run_tunnel_analysis.py
-```
-
----
-
-**Expected time:** 30 min ⏱️  
-**Output:** T0.las + T0.json (clean reference)  
-**Status:** ✓ Phase A ready to execute
+Generate a deformed epoch (T1–T5) with the same engine. See `PHASE_B_GUIDE.md`.

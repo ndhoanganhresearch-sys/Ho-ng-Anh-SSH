@@ -9,6 +9,26 @@
 
 ---
 
+> **⚠️ Updated 2026-06-29 — read this first.**
+> This document was originally written against a *simplified* tunnel (straight,
+> radius 3.0 m, single scanner, invented -7/-5/-15 mm). The **real**
+> `blender_lidar_t0t5` dataset differs: curved alignment **R=500 m**, radius
+> **~4.25 m**, chainage = **arc length**, crown in the **local** cross-section
+> frame, **3** TLS stations (arc-length 10/40/70 m), noise **σ=0.002+0.00006·d**,
+> and **progressive** deformation T1–T5 (T5 = crown -45 / convergence -35 /
+> local -40 mm) at θ = 90°/0°/55°.
+>
+> The conceptual A→B→C protocol below still holds, but the **working,
+> tested** implementation is:
+> - Phase A/B engine: `tools/raycast_tunnel_epochs.py` (`--epoch T0..T5`)
+> - Phase C validator: `phase_c_validate.py`
+> - Step-by-step: `PHASE_A_GUIDE.md`, `PHASE_B_GUIDE.md`, `PHASE_C_GUIDE.md`
+>
+> Treat the 3.0 m / straight / -7 mm numbers in the sections below as
+> illustrative only; use the values above for the real dataset.
+
+---
+
 ## 1. TLSynth Workflow Overview
 
 ```
