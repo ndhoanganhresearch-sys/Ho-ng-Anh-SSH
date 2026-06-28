@@ -1,0 +1,4 @@
+metric,chainage_m,ground_truth_mm,tool_m3c2_peak_mm,abs_err_mm,n_corepoints
+crown_settlement,20.0,-5.0,-6.0,1.0,19
+sidewall_convergence,45.0,0.0,-0.0,0.0,50
+local_damage,65.0,0.0,0.0,0.0,81
