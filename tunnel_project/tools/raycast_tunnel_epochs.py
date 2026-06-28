@@ -50,7 +50,13 @@ if "--" in sys.argv:
     if "--epoch" in extra:
         EPOCH = extra[extra.index("--epoch") + 1]
 
-DATA = os.path.join("data", "blender_lidar_t0t5")
+# Resolve paths relative to this file (tools/ -> project root), so the script
+# works under `blender -b -P` regardless of the launch cwd.
+try:
+    _PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+except NameError:
+    _PROJECT = os.getcwd()
+DATA = os.path.join(_PROJECT, "data", "blender_lidar_t0t5")
 BLEND = os.path.join(DATA, "tunnel_lidar_scene.blend")
 LINING = "Tunnel_Lining"
 

@@ -10,15 +10,20 @@
 
 ## What it does
 
-Reproduces the Step-6 geometric measurement directly on the point clouds, in the
-same curved cross-section frame they were generated in, then compares the peak
-deformation per zone against the answer key in `ground_truth.csv`.
+Measures the deformation directly on the point clouds, in the same curved
+cross-section frame they were generated in, then compares per zone against the
+answer key in `ground_truth.csv`.
 
-- **Crown settlement** — change in mean crown-Z in a tight window around (s=20, θ=90°).
+- **Crown settlement** — change in mean crown-Z in a window around (s=20, θ=90°).
 - **Sidewall convergence** — change in mean half-width |lateral| around (s=45, θ=0/180°).
 - **Local damage** — change in mean radius around (s=65, θ=55°).
 
-Window: ±0.75 m arc-length, ±10° angular around each peak. Tolerance: 8 mm on peak.
+Window: ±0.75 m arc-length, ±10° angular. The measured value is the **window-mean**
+(a lower bound on the GT peak — narrow features read low). Tolerance: 8 mm.
+
+> **Scope:** this checks **raycast fidelity** (deformation injected ≈ recovered),
+> using the same frame the deformation was applied in. It does **not** prove the
+> PyQt tool's Step 6 is correct — for that, do the in-app cross-check below.
 
 ---
 

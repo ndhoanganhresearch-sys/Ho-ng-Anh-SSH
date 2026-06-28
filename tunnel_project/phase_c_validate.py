@@ -27,10 +27,17 @@ import math
 import numpy as np
 
 R = 500.0
-DATA = os.path.join("data", "blender_lidar_t0t5")
-TOL_MM = 8.0          # acceptance tolerance on peak deformation
+try:
+    _BASE = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    _BASE = os.getcwd()
+DATA = os.path.join(_BASE, "data", "blender_lidar_t0t5")
+TOL_MM = 8.0          # acceptance tolerance (mm) on window-mean deformation
 S_WIN = 0.75          # arc-length half-window (m) around each chainage
 ANG_WIN_DEG = 10.0    # angular half-window (deg) around each theta
+# NOTE: measured values are window-MEANS over the windows above, so they are a
+# lower bound on the true peak GT (the bias grows for narrow features like the
+# local-damage patch). This validates raycast fidelity, NOT the PyQt tool.
 
 EPOCH = "T5"
 if "--epoch" in sys.argv:
@@ -73,7 +80,11 @@ def read_ground_truth(epoch):
 
 
 def measure(t0, tn, kind, chainage, theta0):
-    """Peak deformation (mm) for one zone, measured T0->Tn."""
+    """Window-mean deformation (mm) for one zone, measured T0->Tn.
+
+    A lower bound on the true peak: it averages over the s/angle window, so
+    narrow features read low. Compared against the GT peak value_mm.
+    """
     s0, _, lat0, up0, th0 = frame(t0)
     sn, _, latn, upn, thn = frame(tn)
     m0 = zone_mask(s0, th0, chainage, theta0)
@@ -133,13 +144,15 @@ def main():
         lines.append("| %s | %.0f | %+.1f | %+.1f | %.1f | %s |" % (
             r["metric"], r["chainage_m"], r["ground_truth_mm"],
             r["measured_mm"], r["error_mm"], r["status"]))
-    lines += ["", "**MAE:** %.1f mm  | tolerance %.0f mm/peak" % (mae, TOL_MM), "",
+    lines += ["", "**MAE:** %.1f mm  | tolerance %.0f mm (window-mean vs GT peak)" % (mae, TOL_MM), "",
               "## Verdict", "",
               ("PASS - raycast deformation recovered within tolerance."
                if allpass else "FAIL - some zones exceed tolerance."),
               "",
-              "Window: +/-%.2f m arc-length, +/-%.0f deg angular around each peak."
-              % (S_WIN, ANG_WIN_DEG)]
+              "Measured = window-MEAN over +/-%.2f m arc-length, +/-%.0f deg angular "
+              "around each peak (lower bound on the GT peak; narrow features read low)."
+              % (S_WIN, ANG_WIN_DEG),
+              "This checks raycast fidelity (injected ~ recovered), not the PyQt tool's Step 6."]
     with open(os.path.join(DATA, "validation_report.md"), "w") as f:
         f.write("\n".join(lines) + "\n")
 

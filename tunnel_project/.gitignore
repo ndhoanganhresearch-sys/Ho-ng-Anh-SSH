@@ -2,3 +2,6 @@
 .headroom_wsl/
 __pycache__/
 *.py[cod]
+
+# Regenerable raycast point clouds (rebuild: tools/raycast_tunnel_epochs.py --epoch Tn)
+data/blender_lidar_t0t5/*_raycast.txt
