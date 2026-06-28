@@ -174,7 +174,7 @@ Once T0 is verified:
 2. Create tunnel_deformed.blend
 3. Raycast deformed mesh → Tn.las
 
-See: `PHASE_B_GUIDE.md` (coming next)
+See: `PHASE_B_GUIDE.md`
 
 ---
 
