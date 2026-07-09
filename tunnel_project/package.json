@@ -1,0 +1,19 @@
+{
+  "name": "tunnel_project",
+  "version": "1.0.0",
+  "description": "Python tool for tunnel point-cloud monitoring. The maintained application is the\r `tunnel_analysis` package, launched through `run_tunnel_analysis.py`.",
+  "main": "create_presentation.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "pptxgenjs": "^4.0.1"
+  }
+}

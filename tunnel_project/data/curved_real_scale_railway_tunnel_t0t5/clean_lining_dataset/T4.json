@@ -1,0 +1,20 @@
+{
+  "time": "T4",
+  "txt": "T4.txt",
+  "las": "data\\curved_real_scale_railway_tunnel_t0t5\\clean_lining_dataset\\las_export\\T4.las",
+  "points": 171600,
+  "removed_interior_points": 22740,
+  "kept_labels": {
+    "1": 171600
+  },
+  "bounds_min": [
+    -12.824091,
+    0.0,
+    -0.4
+  ],
+  "bounds_max": [
+    12.824091,
+    119.614113,
+    7.4
+  ]
+}

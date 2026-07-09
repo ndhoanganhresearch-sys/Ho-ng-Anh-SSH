@@ -1,6 +1,7 @@
 from .common import *
 from .models import PointCloudBundle, PipelineContext
 from .io_layer import BaseLayer
+from .section_warnings import SECTION_DELTA_CAUTION_MM, SECTION_DELTA_CRITICAL_MM
 # ------------------------------------------------------------------------------
 # TimeSeriesLayer
 # ------------------------------------------------------------------------------
@@ -186,6 +187,26 @@ class TimeSeriesLayer:
         median_mm = np.array([float(np.nanmedian(r)) for r in matrix])
         p95_abs_mm = np.array([float(np.nanpercentile(np.abs(r), 95)) for r in matrix])
         max_abs_mm = np.array([float(np.nanmax(np.abs(r))) for r in matrix])
+
+        # ── Incremental (Tn-1 -> Tn) deformation ──────────────────────────
+        # matrix rows are cumulative signed displacement vs T0 per corepoint.
+        # Prepend a zero T0 row, then diff along epochs to get the per-step
+        # incremental displacement (what changed THIS interval, not since T0).
+        full = np.vstack([np.zeros((1, matrix.shape[1]), dtype=np.float64), matrix])
+        inc_matrix = np.diff(full, axis=0)                  # (T, M) signed, by construction cumsum == matrix
+        inc_median_mm = np.array([float(np.nanmedian(r)) for r in inc_matrix])
+        inc_p95_abs_mm = np.array([float(np.nanpercentile(np.abs(r), 95)) for r in inc_matrix])
+        inc_max_abs_mm = np.array([float(np.nanmax(np.abs(r))) for r in inc_matrix])
+
+        # ── Rate (velocity) & acceleration of the monitored magnitude ──────
+        # Track the cumulative p95 magnitude (T0 implied = 0). Velocity is the
+        # per-epoch change (mm/epoch); acceleration its change (mm/epoch^2).
+        # Accelerating epochs (acc > ~1 mm/epoch^2) are the early-warning signal.
+        cum_mag = np.concatenate([[0.0], p95_abs_mm])       # len T+1
+        velocity_mm_per_epoch = np.diff(cum_mag)            # len T
+        acc_full = np.concatenate([[0.0], velocity_mm_per_epoch])
+        acceleration_mm_per_epoch2 = np.diff(acc_full)      # len T
+        accelerating = (acceleration_mm_per_epoch2 > 1.0).tolist()
         return {
             "labels": list(labels),
             "corepoints": cp,
@@ -193,15 +214,260 @@ class TimeSeriesLayer:
             "median_mm": median_mm,
             "p95_abs_mm": p95_abs_mm,
             "max_abs_mm": max_abs_mm,
+            "incremental_matrix_mm": inc_matrix,
+            "incremental_median_mm": inc_median_mm,
+            "incremental_p95_abs_mm": inc_p95_abs_mm,
+            "incremental_max_abs_mm": inc_max_abs_mm,
+            "velocity_mm_per_epoch": velocity_mm_per_epoch,
+            "acceleration_mm_per_epoch2": acceleration_mm_per_epoch2,
+            "accelerating": accelerating,
             "method": method,
         }
+
+
+    @staticmethod
+    def _crown_zone_value(
+        points: np.ndarray,
+        chainage_m: float,
+        chainage_window_m: float = 5.0,
+        lateral_window_m: float = 12.0,
+        crown_percentile: float = 98.0,
+        curve_radius_m: Optional[float] = 420.0,
+    ) -> Tuple[float, int]:
+        """Robust local crown value for settlement checks.
+
+        This is intentionally a local crown metric, not a whole-cloud metric:
+        it measures the upper tunnel band around one chainage and is suitable
+        for comparing against crown settlement ground truth.
+        """
+        pts = validate_xyz(points)
+        if pts.shape[0] == 0:
+            return float("nan"), 0
+        x = pts[:, 0]
+        y = pts[:, 1]
+        z = pts[:, 2]
+        if curve_radius_m and curve_radius_m > 0:
+            radius = float(curve_radius_m)
+            angle = np.arctan2(y, radius - x)
+            chainage = radius * angle
+            cx = radius * (1.0 - np.cos(angle))
+            cy = radius * np.sin(angle)
+            lateral = (x - cx) * np.cos(angle) + (y - cy) * (-np.sin(angle))
+        else:
+            # Stable axis-aligned chainage (longest horizontal span). Avoids
+            # independent PCA frames per epoch that can shift the probe location.
+            span_x = float(np.nanmax(x) - np.nanmin(x))
+            span_y = float(np.nanmax(y) - np.nanmin(y))
+            if span_y >= span_x:
+                chainage = y - float(np.nanmin(y))
+                lateral = x - float(np.nanmedian(x))
+            else:
+                chainage = x - float(np.nanmin(x))
+                lateral = y - float(np.nanmedian(y))
+        mask = ((np.abs(chainage - float(chainage_m)) <= float(chainage_window_m)) &
+                (np.abs(lateral) <= float(lateral_window_m)))
+        zone_pts = pts[mask]
+        if zone_pts.shape[0] < 20:
+            return float("nan"), int(zone_pts.shape[0])
+        # Keep the upper lining of this slice so sidewall / invert noise does not
+        # dominate the crown percentile.
+        z_thr = float(np.nanpercentile(zone_pts[:, 2], 75.0))
+        upper = zone_pts[zone_pts[:, 2] >= z_thr]
+        if upper.shape[0] < 20:
+            upper = zone_pts
+        zone = upper[:, 2]
+        return float(np.nanpercentile(zone, float(crown_percentile))), int(zone.size)
+
+
+    def suggest_crown_chainage(
+        self,
+        epochs: List[np.ndarray],
+        chainage_window_m: float = 5.0,
+        lateral_window_m: float = 12.0,
+        crown_percentile: float = 98.0,
+        curve_radius_m: Optional[float] = None,
+        step_m: float = 5.0,
+        preferred_chainage_m: Optional[float] = None,
+    ) -> Dict[str, object]:
+        """Pick a crown probe chainage from data (or an optional preferred value).
+
+        Preference order:
+        1. ``preferred_chainage_m`` when finite
+        2. chainage with largest |T0->Tn crown settlement| on a coarse scan
+        3. mid-tunnel fallback
+        """
+        if len(epochs) < 2:
+            raise RuntimeError("Need at least two epochs (T0 and one monitoring epoch).")
+
+        if preferred_chainage_m is not None and np.isfinite(float(preferred_chainage_m)):
+            ch = float(preferred_chainage_m)
+            return {
+                "chainage_m": ch,
+                "source": "preferred",
+                "settlement_mm": float("nan"),
+                "curve_radius_m": None if curve_radius_m is None else float(curve_radius_m),
+            }
+
+        t0 = validate_xyz(epochs[0])
+        tn = validate_xyz(epochs[-1])
+        # Estimate usable chainage range from T0 with the same mapping as crown probe.
+        if curve_radius_m and curve_radius_m > 0:
+            radius = float(curve_radius_m)
+            angle = np.arctan2(t0[:, 1], radius - t0[:, 0])
+            chainage = radius * angle
+        else:
+            span_x = float(np.nanmax(t0[:, 0]) - np.nanmin(t0[:, 0]))
+            span_y = float(np.nanmax(t0[:, 1]) - np.nanmin(t0[:, 1]))
+            if span_y >= span_x:
+                chainage = t0[:, 1] - float(np.nanmin(t0[:, 1]))
+            else:
+                chainage = t0[:, 0] - float(np.nanmin(t0[:, 0]))
+        cmin = float(np.nanpercentile(chainage, 5))
+        cmax = float(np.nanpercentile(chainage, 95))
+        if not np.isfinite(cmin) or not np.isfinite(cmax) or cmax - cmin < 1.0:
+            mid = 0.5 * (cmin + cmax) if np.isfinite(cmin) and np.isfinite(cmax) else 0.0
+            return {
+                "chainage_m": float(mid),
+                "source": "midpoint-fallback",
+                "settlement_mm": float("nan"),
+                "curve_radius_m": None if curve_radius_m is None else float(curve_radius_m),
+            }
+
+        step = max(float(step_m), 1.0)
+        candidates = np.arange(cmin + step, cmax - step + 1e-9, step, dtype=np.float64)
+        if candidates.size == 0:
+            candidates = np.asarray([0.5 * (cmin + cmax)], dtype=np.float64)
+
+        best_ch = float(candidates[len(candidates) // 2])
+        best_sett = float("nan")
+        best_abs = -1.0
+        for ch in candidates:
+            z0, n0 = self._crown_zone_value(
+                t0, chainage_m=float(ch), chainage_window_m=chainage_window_m,
+                lateral_window_m=lateral_window_m, crown_percentile=crown_percentile,
+                curve_radius_m=curve_radius_m,
+            )
+            zn, nn = self._crown_zone_value(
+                tn, chainage_m=float(ch), chainage_window_m=chainage_window_m,
+                lateral_window_m=lateral_window_m, crown_percentile=crown_percentile,
+                curve_radius_m=curve_radius_m,
+            )
+            if n0 < 20 or nn < 20 or not np.isfinite(z0) or not np.isfinite(zn):
+                continue
+            sett = (zn - z0) * 1000.0
+            if abs(sett) > best_abs:
+                best_abs = abs(sett)
+                best_sett = float(sett)
+                best_ch = float(ch)
+
+        source = "auto-peak" if best_abs >= 0.0 and np.isfinite(best_sett) else "midpoint-fallback"
+        if source == "midpoint-fallback":
+            best_ch = float(0.5 * (cmin + cmax))
+        return {
+            "chainage_m": best_ch,
+            "source": source,
+            "settlement_mm": best_sett,
+            "curve_radius_m": None if curve_radius_m is None else float(curve_radius_m),
+            "search_min_m": cmin,
+            "search_max_m": cmax,
+        }
+
+    def crown_settlement_series(
+        self,
+        epochs: List[np.ndarray],
+        labels: Optional[List[str]] = None,
+        chainage_m: float = 52.0,
+        chainage_window_m: float = 5.0,
+        lateral_window_m: float = 12.0,
+        crown_percentile: float = 98.0,
+        curve_radius_m: Optional[float] = 420.0,
+    ) -> Dict[str, object]:
+        """Measure crown settlement at one chainage for T0..Tn.
+
+        Returns signed settlement in millimetres relative to T0. Negative means
+        the crown moved downward. Use this when ground truth is crown settlement;
+        keep ``spatiotemporal_series`` for whole-cloud M3C2/p95 trend checks.
+        """
+        if len(epochs) < 2:
+            raise RuntimeError("Need at least two epochs (T0 and one monitoring epoch).")
+        if labels is None:
+            labels = [f"T{i}" for i in range(len(epochs))]
+        values = []
+        counts = []
+        for epoch in epochs:
+            value, count = self._crown_zone_value(
+                epoch,
+                chainage_m=chainage_m,
+                chainage_window_m=chainage_window_m,
+                lateral_window_m=lateral_window_m,
+                crown_percentile=crown_percentile,
+                curve_radius_m=curve_radius_m,
+            )
+            values.append(value)
+            counts.append(count)
+        crown_z = np.asarray(values, dtype=np.float64)
+        settlement = (crown_z - crown_z[0]) * 1000.0
+        return {
+            "labels": list(labels),
+            "crown_z_m": crown_z,
+            "crown_settlement_mm": settlement,
+            "zone_points": np.asarray(counts, dtype=np.int64),
+            "chainage_m": float(chainage_m),
+            "chainage_window_m": float(chainage_window_m),
+            "lateral_window_m": float(lateral_window_m),
+            "crown_percentile": float(crown_percentile),
+            "curve_radius_m": None if curve_radius_m is None else float(curve_radius_m),
+            "metric": "crown_settlement_mm",
+        }
+
+    @staticmethod
+    def compare_to_ground_truth(
+        series: Dict[str, object], gt_csv_path: str, metric: str = "max_abs_mm",
+    ) -> Dict[str, object]:
+        """Validate measured per-epoch deformation against a ground-truth CSV.
+
+        ``ground_truth.csv`` has columns ``epoch, chainage_m, deformation_type,
+        value_mm, ...``. For each epoch we take the GT peak ``|value_mm|`` over
+        all features and compare it to the tool's measured per-epoch magnitude
+        (``metric``, default ``max_abs_mm`` from :meth:`spatiotemporal_series`),
+        matched by epoch label. Returns per-epoch errors plus MAE and max
+        absolute error (mm) — a quantitative accuracy figure for the report.
+        """
+        import csv
+        gt_by_epoch: Dict[str, float] = {}
+        for row in csv.DictReader(open(gt_csv_path, newline="")):
+            ep = (row.get("epoch") or "").strip()
+            try:
+                v = abs(float(row["value_mm"]))
+            except (KeyError, ValueError, TypeError):
+                continue
+            gt_by_epoch[ep] = max(gt_by_epoch.get(ep, 0.0), v)
+
+        labels = list(series.get("labels", []))
+        measured = np.asarray(series.get(metric, []), dtype=np.float64).ravel()
+        per_epoch: List[Dict[str, float]] = []
+        errs: List[float] = []
+        for i, lbl in enumerate(labels):
+            if lbl not in gt_by_epoch or i >= measured.size:
+                continue
+            gt = float(gt_by_epoch[lbl]); meas = float(measured[i])
+            per_epoch.append({"epoch": lbl, "gt_peak_mm": gt,
+                              "measured_mm": meas, "error_mm": meas - gt})
+            errs.append(abs(meas - gt))
+        mae = float(np.mean(errs)) if errs else float("nan")
+        maxe = float(np.max(errs)) if errs else float("nan")
+        summary = (f"Ground-truth validation ({metric}): {len(per_epoch)} epochs, "
+                   f"MAE={mae:.1f} mm, max error={maxe:.1f} mm"
+                   if errs else "Ground-truth validation: no matching epochs")
+        return {"metric": metric, "per_epoch": per_epoch, "mae_mm": mae,
+                "max_abs_error_mm": maxe, "n": len(per_epoch), "summary": summary}
 
     def forecast_threshold_crossing(
         self,
         series: Dict[str, object],
         times: Optional[List[float]] = None,
-        caution_mm: float = 10.0,
-        critical_mm: float = 25.0,
+        caution_mm: float = SECTION_DELTA_CAUTION_MM,
+        critical_mm: float = SECTION_DELTA_CRITICAL_MM,
         degree: int = 1,
         min_epochs: int = 3,
         metric: str = "p95_abs_mm",
@@ -275,6 +541,14 @@ class TimeSeriesLayer:
         dt_caution = (t_caution - t_last) if t_caution is not None else None
         dt_critical = (t_critical - t_last) if t_critical is not None else None
 
+        # Fitted-curve samples from the latest epoch out to the crossing horizon,
+        # for the chart overlay. Aliases (*_crossing_epoch / forecast_*) match
+        # what MultiEpochTimeSeriesWidget reads.
+        horizon = next((c for c in (t_critical, t_caution) if c is not None),
+                       t_last + max(3.0, float(n)))
+        horizon = max(float(horizon), t_last + 1.0)
+        fc_t = np.linspace(t_last, horizon, 20)
+        fc_v = fit(fc_t)
         result.update({
             "ok": True,
             "rate_per_unit": rate,
@@ -282,6 +556,10 @@ class TimeSeriesLayer:
             "t_caution": t_caution, "t_critical": t_critical,
             "dt_caution": dt_caution, "dt_critical": dt_critical,
             "low_confidence": bool(r2 < 0.5),
+            "caution_crossing_epoch": t_caution,
+            "critical_crossing_epoch": t_critical,
+            "forecast_epochs": fc_t.tolist(),
+            "forecast_values": fc_v.tolist(),
         })
 
         def _phrase(label, thr, v_now, dt):

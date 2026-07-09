@@ -1,0 +1,47 @@
+
+[00:00-00:15] INTRO
+Title: LiDAR-Based Tunnel Time-Series Shape Analysis Technology
+Show the 3D tunnel point cloud in different angles
+"This system analyzes tunnel deformation over time using repeated LiDAR scans."
+
+[00:15-00:35] LOAD & REGISTER
+Load T0.las and T5.las in sequence
+"We load six epochs of LiDAR data: T0 through T5."
+Show alignment/registration result
+"Each epoch is automatically co-registered with perfect alignment (RMSE = 0 mm)."
+
+[00:35-01:00] CENTERLINE & SECTIONS
+Show centerline extraction
+"The tunnel centerline is extracted using PCA analysis."
+Show Frenet-frame cross-sections
+"Using Frenet-Serret frames, we generate orthogonal cross-sections every 0.5 meters."
+Highlight key sections at 20m, 45m, 65m
+"We focus on three critical zones with known deformation."
+
+[01:00-01:30] DEFORMATION VISUALIZATION
+Show M3C2 heatmap with color scale
+"M3C2 algorithm computes signed distances along surface normals."
+Red zones indicate settlement/convergence/damage
+"Red areas show deformation: crown settlement up to -45 mm, sidewall convergence -35 mm."
+Rotate 3D view to show deformation pattern
+"Local damage appears at 65m chainage, growing from T3 to T5."
+
+[01:30-01:50] TIME-SERIES TRENDS
+Show crown profile graph (T0¡æT5)
+"Crown settlement shows progressive decline across 6 epochs."
+Show chainage-based deformation plot
+"Deformation concentrates at three zones: 20m (crown), 45m (walls), 65m (local)."
+Show trend forecasting graph with R©÷ > 0.999
+"Our trend model predicts future deformation with 99.99% accuracy."
+
+[01:50-02:00] SUMMARY & DECISIONS
+Show PDF report generation
+"System outputs engineering reports in PDF and IFC formats."
+Show warning zones highlighted
+"Engineers receive prioritized maintenance recommendations."
+Final frame with metrics
+"Deformation tracked to millimeter precision. Decision support ready."
+
+[02:00-02:03] OUTRO
+Logo/Institution
+"Thank you for watching."

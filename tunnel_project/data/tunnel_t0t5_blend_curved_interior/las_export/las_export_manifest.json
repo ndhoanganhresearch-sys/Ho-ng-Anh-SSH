@@ -1,0 +1,167 @@
+{
+  "source": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\tunnel_t0t5_blend_curved_interior",
+  "note": "LAS files converted from the curved point-cloud TXT files. Structures are already bent with the tunnel centerline, not exported from side-by-side Blender vertices.",
+  "exports": [
+    {
+      "file": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\tunnel_t0t5_blend_curved_interior\\las_export\\T0.las",
+      "points": 86485,
+      "bounds_min": [
+        -2.505224,
+        0.0,
+        -1.73825
+      ],
+      "bounds_max": [
+        12.097993,
+        79.708307,
+        3.382766
+      ],
+      "label_counts": {
+        "1": 60000,
+        "2": 4152,
+        "3": 3120,
+        "4": 3000,
+        "5": 4488,
+        "6": 10608,
+        "7": 192,
+        "8": 495,
+        "10": 430
+      }
+    },
+    {
+      "file": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\tunnel_t0t5_blend_curved_interior\\las_export\\T1.las",
+      "points": 86485,
+      "bounds_min": [
+        -2.505224,
+        0.0,
+        -1.73825
+      ],
+      "bounds_max": [
+        12.097993,
+        79.708307,
+        3.382244
+      ],
+      "label_counts": {
+        "1": 60000,
+        "2": 4152,
+        "3": 3120,
+        "4": 3000,
+        "5": 4488,
+        "6": 10608,
+        "7": 192,
+        "8": 495,
+        "10": 430
+      }
+    },
+    {
+      "file": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\tunnel_t0t5_blend_curved_interior\\las_export\\T2.las",
+      "points": 86485,
+      "bounds_min": [
+        -2.505224,
+        0.0,
+        -1.73825
+      ],
+      "bounds_max": [
+        12.097992,
+        79.708307,
+        3.381693
+      ],
+      "label_counts": {
+        "1": 58713,
+        "2": 4152,
+        "3": 3120,
+        "4": 3000,
+        "5": 4488,
+        "6": 10608,
+        "7": 192,
+        "8": 495,
+        "10": 430,
+        "20": 821,
+        "21": 466
+      }
+    },
+    {
+      "file": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\tunnel_t0t5_blend_curved_interior\\las_export\\T3.las",
+      "points": 86485,
+      "bounds_min": [
+        -2.505224,
+        0.0,
+        -1.73825
+      ],
+      "bounds_max": [
+        12.097994,
+        79.708306,
+        3.381064
+      ],
+      "label_counts": {
+        "1": 58109,
+        "2": 4152,
+        "3": 3120,
+        "4": 3000,
+        "5": 4488,
+        "6": 10608,
+        "7": 192,
+        "8": 495,
+        "10": 430,
+        "20": 820,
+        "21": 468,
+        "22": 603
+      }
+    },
+    {
+      "file": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\tunnel_t0t5_blend_curved_interior\\las_export\\T4.las",
+      "points": 86485,
+      "bounds_min": [
+        -2.505224,
+        0.0,
+        -1.73825
+      ],
+      "bounds_max": [
+        12.097994,
+        79.708307,
+        3.380278
+      ],
+      "label_counts": {
+        "1": 58110,
+        "2": 4152,
+        "3": 3120,
+        "4": 3000,
+        "5": 4488,
+        "6": 10608,
+        "7": 192,
+        "8": 495,
+        "10": 430,
+        "20": 820,
+        "21": 466,
+        "22": 604
+      }
+    },
+    {
+      "file": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\tunnel_t0t5_blend_curved_interior\\las_export\\T5.las",
+      "points": 86485,
+      "bounds_min": [
+        -2.505224,
+        0.0,
+        -1.73825
+      ],
+      "bounds_max": [
+        12.097994,
+        79.708307,
+        3.379099
+      ],
+      "label_counts": {
+        "1": 58107,
+        "2": 4152,
+        "3": 3120,
+        "4": 3000,
+        "5": 4488,
+        "6": 10608,
+        "7": 192,
+        "8": 495,
+        "10": 430,
+        "20": 824,
+        "21": 468,
+        "22": 601
+      }
+    }
+  ]
+}

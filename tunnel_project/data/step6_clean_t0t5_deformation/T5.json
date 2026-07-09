@@ -1,0 +1,14 @@
+{
+  "epoch": "T5",
+  "las_file": "T5.las",
+  "txt_file": "T5.txt",
+  "points": 158720,
+  "deformation_mm": {
+    "upper_deflection_chainage_20m": -45.0,
+    "local_damage_chainage_65m": -40.0
+  },
+  "registration": {
+    "status": "pre-registered",
+    "transform": "identity"
+  }
+}

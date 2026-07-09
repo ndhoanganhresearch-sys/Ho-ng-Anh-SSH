@@ -38,6 +38,12 @@ prunes `local-packages` before importing NumPy/SciPy.
 
 ## Quick Verification
 
+Claude/agent sessions should use the unified verification gate first:
+
+```powershell
+.\agent_verify.ps1 quick
+```
+
 Use the stable smoke gate before committing changes:
 
 ```powershell
@@ -50,9 +56,21 @@ For Step 6 / T0-Tn deformation work, run the focused regression gate:
 .\verify_step6.ps1
 ```
 
+or through the agent gate:
+
+```powershell
+.\agent_verify.ps1 step6
+```
+
 The script covers T0-reference detection, epoch registration, curved-tunnel
 eccentricity, ground-truth deformation, 2D/3D section consistency, and the
 end-to-end auto pipeline.
+
+For AI/Headroom/RAG changes, use:
+
+```powershell
+.\agent_verify.ps1 ai
+```
 
 ## Core Workflow
 
@@ -62,6 +80,22 @@ end-to-end auto pipeline.
 4. Extract centerline and Frenet frames from the reference geometry.
 5. Build cross-sections and compute T0/Tn deltas.
 6. Show warnings only on affected chainage sections in 2D and 3D.
+
+## 7-Step User Guide
+
+For the simplified UI workflow, see `docs/USER_GUIDE_7_STEPS.md`.
+For easy/low-risk maintenance tasks, see `docs/EASY_WORK_CHECKLIST.md`.
+## Roadmap
+
+See `PROJECT_ROADMAP.md` for the current 3-phase plan: core stability, benchmark hardening, and AI/document automation. Baseline expectations are tracked in `BENCHMARK_BASELINES.md`.
+
+## Parameters Register
+
+Use `docs/standards/STANDARD_PARAMETERS.md` as the live register for code parameters, standard claims, document provenance, and verification status.
+
+## Reference Repositories
+
+See `../REPO_INVENTORY.md` for the local reference repos, their remotes, relevance, and integration priority.
 
 ## Data Notes
 
@@ -78,3 +112,4 @@ end-to-end auto pipeline.
 - PaddleOCR is optional and should support reports/labels/documents, not core
   point-cloud deformation math.
 - Docker compose starts Ollama/Chroma/headless services, not the desktop GUI.
+

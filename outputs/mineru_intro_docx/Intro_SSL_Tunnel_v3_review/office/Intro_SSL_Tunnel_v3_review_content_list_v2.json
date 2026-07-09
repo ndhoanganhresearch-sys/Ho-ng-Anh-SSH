@@ -1,0 +1,466 @@
+[
+    [
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "Tunnel Monitoring System: An Automated LiDAR-Based Point Cloud",
+                        "style": [
+                            "bold"
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "Processing Pipeline for Structural Health Monitoring of Underground Tunnels",
+                        "style": [
+                            "bold"
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "Keywords: ",
+                        "style": [
+                            "bold"
+                        ]
+                    },
+                    {
+                        "type": "text",
+                        "content": "LiDAR point cloud; tunnel structural health monitoring; automatic denoising; Frenet frame; M3C2 change detection; IFC4X3; retrieval-augmented generation"
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "Abstract",
+                        "style": [
+                            "bold"
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "Automated structural health monitoring (SHM) of underground tunnels using terrestrial LiDAR remains challenging due to the presence of non-structural clutter (cables, lighting fixtures, and personnel) that contaminates raw point clouds and causes systematic errors in geometric analysis. Conventional workflows require extensive manual preprocessing, limiting scalability to large tunnel networks. This paper presents the SSL Smart Tunnel Monitoring System, an end-to-end Python-based pipeline that automates the full analysis chain from raw LiDAR ingestion to engineering-grade report generation. The proposed system introduces three principal contributions: (1) a three-stage cascaded auto-denoising algorithm combining morphological PCA-based classification (linearity threshold 0.30, sphericity threshold 0.12), radial median-absolute-deviation (MAD) statistical filtering (k = 2.5), and cylindrical-grid wall-cable protrusion detection that eliminates non-structural clutter without labelled training data; (2) a Frenet-frame-based cross-section extraction method using cubic B-spline (C2 continuity) centerline fitting and gravity-anchored Frenet frames that guarantees geometric orthogonality to the tunnel axis, removing an apparent ovality error of up to 15% present in axis-aligned slicing approaches; and (3) a local Retrieval-Augmented Generation (RAG) assistant powered by an on-device large language model that translates structured measurement data into engineer-readable safety assessments without transmitting data to external servers. Experimental validation on real tunnel scan datasets demonstrates per-section deformation metric extraction (crown settlement, lateral convergence, ovality via Fitzgibbon ellipse fitting, and eccentricity) in full compliance with Korean Railway Safety Standards (KR C-08080) and Korean Design Standards for Tunnels (KDS 27 25 00). The pipeline produces IFC4X3-compatible Building Information Models and professional PDF reports suitable for direct handover to infrastructure owners."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "1. Introduction",
+                        "style": [
+                            "bold"
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "Underground tunnels constitute critical components of modern transportation networks, yet they remain among the most vulnerable assets in aging infrastructure inventories. The catastrophic fire in the Frejus road tunnel between France and Italy (2005) and the Gleinalm Tunnel blowout in Austria (2001) exposed the consequences of undetected lining deterioration, prompting the European Union to mandate periodic geometric inspections for all rail and road tunnels exceeding 500 m [1,2]. In South Korea, the national railway network operates more than 700 tunnels with a total length exceeding 850 km; both KR C-08080 and KDS 27 25 00 require geometric surveys at intervals of not less than six months for tunnels in deformation-sensitive ground conditions [3,4]. A single unplanned closure of a metropolitan rail tunnel results in a direct loss estimated at USD 1–3 million per day in Seoul’s urban network [5]. These safety and economic imperatives make automated, high-accuracy structural health monitoring (SHM) of underground tunnels a pressing engineering priority."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "Terrestrial LiDAR scanning has emerged as the dominant technology for tunnel SHM owing to its ability to capture full-section, sub-millimetre-resolution 3D point clouds in a single survey pass without disrupting traffic operations [6,7]. Prior studies have demonstrated the effectiveness of LiDAR-based approaches for specific subtasks within the inspection workflow. Jung et al. [8] extracted ovality metrics from mobile laser scanning data using iterative circle fitting. Gikas [9] applied least-squares cylinder fitting for long-term convergence monitoring of highway tunnels during excavation. Ye et al. [10] combined 3D semantic segmentation with point cloud processing to detect surface cracks at millimetre scale. Attard et al. [11] benchmarked five commercial software packages on tunnel inspection accuracy, reporting significant variability in results depending on preprocessing quality."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "Concurrent advances in point cloud registration have improved multi-station co-registration to sub-millimetre root mean square error (RMSE) under sparse-feature tunnel conditions. Segal et al. [12] introduced the Generalised Iterative Closest Point (GICP) algorithm, which models local surface geometry as Gaussian distributions and achieves more robust alignment than standard ICP in environments with planar surfaces. Yang et al. [13] proposed Go-ICP, a globally optimal solution to the 3D ICP problem that guarantees convergence regardless of initialisation. For multi-epoch change detection, Lague et al. [14] developed the Multiscale Model to Model Cloud Comparison (M3C2) algorithm, which provides statistically principled Level-of-Detection (LoD) thresholding that accounts for local point cloud roughness and registration uncertainty. More recently, Retrieval-Augmented Generation (RAG) architectures [15] have been applied to structural assessment by grounding large language model (LLM) outputs in retrieved engineering standards, reducing hallucination rates in safety-critical contexts [16,17]."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "Despite these individual advances, three persistent gaps prevent their deployment as a unified, production-grade inspection pipeline. First, raw tunnel scans contain 5–30% non-structural points (cables, lighting fixtures, survey targets, and personnel) that corrupt downstream geometric estimators if not removed. Existing statistical outlier removal methods [18] are designed for random Gaussian noise and fail against the structured, elongated geometry of wall-mounted cable runs, which exhibit high linearity values that evade purely distance-based filters. Second, cross-section extraction in curved tunnels requires slicing perpendicular to the local tunnel axis; axis-aligned (world-frame) sectioning introduces oblique cuts that systematically overestimate ovality by up to 15% in arcs with radius below 300 m, yet no existing open-source tool automatically applies axis-orthogonal Frenet-frame sectioning. Third, translating geometric metrics (crown settlement "
+                    },
+                    {
+                        "type": "text",
+                        "content": "δ",
+                        "style": [
+                            "italic"
+                        ]
+                    },
+                    {
+                        "type": "text",
+                        "content": "v, lateral convergence "
+                    },
+                    {
+                        "type": "text",
+                        "content": "δ",
+                        "style": [
+                            "italic"
+                        ]
+                    },
+                    {
+                        "type": "text",
+                        "content": "h, ovality "
+                    },
+                    {
+                        "type": "text",
+                        "content": "ε",
+                        "style": [
+                            "italic"
+                        ]
+                    },
+                    {
+                        "type": "text",
+                        "content": ", and eccentricity "
+                    },
+                    {
+                        "type": "text",
+                        "content": "e",
+                        "style": [
+                            "italic"
+                        ]
+                    },
+                    {
+                        "type": "text",
+                        "content": ") into prioritised engineering actions currently demands manual review by a qualified structural engineer for every report cycle, creating a bottleneck that limits monitoring frequency and scalability. No existing open-source system addresses all three gaps within a single, standards-compliant, end-to-end pipeline."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "To address these challenges, this paper presents the SSL Smart Tunnel Monitoring System, a fully automated, Python-based LiDAR processing pipeline that closes all three gaps simultaneously. The system ingests raw multi-station scans in standard formats (LAS, LAZ, PLY, TXT), applies a novel cascaded denoising algorithm composed of morphological PCA-based classification, radial MAD statistical filtering, and cylindrical-grid wall-cable protrusion detection. Multi-scan registration is performed through a fallback chain consisting of target-based rigid alignment, FPFH feature matching with graph-based reliability filtering (GROR), and two-stage point-to-plane ICP with Trimmed ICP (TrICP) for deformation-safe convergence. Geometrically correct cross-sections are extracted via gravity-anchored Frenet frames derived from a cubic B-spline (C2 continuity) centerline fitted with adaptive smoothing. All KR C-08080-specified deformation metrics are computed per section using Kasa least-squares circle fitting and Fitzgibbon direct least-squares ellipse fitting. Engineering-grade outputs, including CSV/Excel summaries, professional PDF reports with per-section cross-section plots and warning annotations, and IFC4X3 Building Information Models with status-coloured deformed-lining shells, are produced without any manual intervention. A local RAG assistant, powered by an on-device LLM (Ollama with Qwen2.5:3b) and ChromaDB vector storage with SentenceTransformer embeddings, generates safety assessments grounded in retrieved Korean railway safety standards entirely on-device, with no dependency on external API services."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "The principal contributions of this paper are as follows:"
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "1. A three-stage cascaded auto-denoising algorithm combining morphological PCA-based classification (linearity, sphericity, and planarity features with k = 20 neighbours), radial median-absolute-deviation filtering (k = 2.5, MAD-to-sigma conversion factor 1.4826), and cylindrical-grid wall-cable detection (60 axial × 180 angular bins, protrusion threshold 0.05 m with axial continuity filtering) that eliminates non-structural clutter from raw tunnel scans without any labelled training data or manual parameter tuning. A safety guard automatically disables any classification gate that flags more than 30% of total points, preventing over-removal on dense or merged datasets."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "2. A Frenet-frame cross-section extraction method using cubic B-spline (C2 continuity) centerline fitting with Kasa least-squares circle fitting per axial chunk (angular-coverage guard requiring arc span > 220° or occupancy ≥ 24/36 sectors), gravity-anchored Frenet frames (tangent from central differencing, normal from global-Z projection, binormal completing the right-handed basis), and adaptive slice thickness (ε = 0.55 × median spacing, clipped to [0.05 m, 0.5 m]) that guarantees geometric orthogonality to the instantaneous tunnel axis, removing the systematic ovality bias of up to 15% introduced by world-frame slicing in curved tunnel segments."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "3. A local RAG-LLM engineering assistant built on ChromaDB vector storage with SentenceTransformer (all-MiniLM-L6-v2) embeddings and Ollama on-device inference (Qwen2.5:3b, temperature 0.15) that retrieves relevant Korean railway safety standard excerpts from a curated knowledge base of 15+ safety standards covering crown settlement, convergence, ovality, eccentricity, and clearance thresholds, generates prioritised maintenance recommendations, and produces structured work orders mapping flagged sections to governing standards (KR C-08080, KDS 27 25 00) entirely on-device, with no dependency on external API services. A rule-based fallback assessment operates when the LLM is unavailable."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "4. An end-to-end open-source pipeline producing IFC4X3-compatible BIM models (with IfcAlignment linear referencing and status-coloured deformed-lining tessellated surfaces), professional PDF inspection reports (cover page, summary tables, per-section 2D cross-section plots with dimension annotations, and warning action items), and structured CSV/Excel output with multi-sheet workbooks from a single LiDAR scan input, validated against real tunnel datasets and compliant with Korean railway safety standards."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "The remainder of this paper is organised as follows. Section 2 surveys related work across the four constituent domains. Section 3 describes the overall system architecture and module interfaces. Sections 4 through 8 present each processing stage in detail, including the denoising cascade (Section 4), multi-scan registration (Section 5), Frenet-frame geometric analysis (Section 6), parameter extraction (Section 7), and multi-epoch change detection (Section 8). Section 9 covers the output generation modules. Section 10 reports experimental validation on real tunnel scan datasets. Section 11 concludes with a summary and directions for future work."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "References",
+                        "style": [
+                            "bold"
+                        ]
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[1] European Commission, Directive 2004/54/EC on Minimum Safety Requirements for Tunnels in the Trans-European Road Network, Official Journal of the European Union, 2004."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[2] P. Carvel, A. Beard, Eds., The Handbook of Tunnel Fire Safety, 2nd ed. Thomas Telford, London, 2012."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[3] Ministry of Land, Infrastructure and Transport, Korean Railway Safety Standards KR C-08080, Korea National Railway, Seoul, 2020."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[4] Ministry of Land, Infrastructure and Transport, Korean Design Standard for Tunnels KDS 27 25 00, Seoul, 2021."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[5] Korea Infrastructure Safety Corporation (KISTEC), Annual Infrastructure Safety Report, Seoul, 2023."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[6] M. Alba, L. Fregonese, F. Prandi, M. Scaioni, P. Valgoi, \"Structural Monitoring of a Large Dam by Terrestrial Laser Scanning,\" ISPRS Archives, vol. XXXVI-5, 2006."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[7] A. Nuttens, A. De Wulf, L. Bral, et al., \"High Resolution Terrestrial Laser Scanning for Tunnel Ovalization Monitoring,\" in Proc. FIG Working Week, 2010."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[8] J. Jung, S. Kim, Y. Yoon, \"Automated ovality measurement for precast concrete tunnel segment inspection using mobile laser scanning,\" Automation in Construction, vol. 121, p. 103424, 2021."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[9] V. Gikas, \"Three-Dimensional Laser Scanning for Geometry Documentation and Construction Management of Highway Tunnels during Excavation,\" Sensors, vol. 12, no. 8, pp. 10827–10843, 2012."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[10] X. Ye, J. Liu, L. Shen, et al., \"Automated tunnel defect detection using semantic segmentation on 3D point clouds from terrestrial laser scanning,\" Advanced Engineering Informatics, vol. 55, p. 101874, 2023."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[11] L. Attard, C. J. Debono, G. Valentino, M. Di Castro, \"Tunnel inspection using photogrammetric techniques and image processing: a review,\" ISPRS Journal of Photogrammetry and Remote Sensing, vol. 144, pp. 180–188, 2018."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[12] A. Segal, D. Haehnel, S. Thrun, \"Generalized-ICP,\" in Proc. Robotics: Science and Systems (RSS), Seattle, WA, 2009."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[13] J. Yang, H. Li, D. Campbell, Y. Jia, \"Go-ICP: A Globally Optimal Solution to 3D ICP Point-Set Registration,\" IEEE Transactions on Pattern Analysis and Machine Intelligence, vol. 38, no. 11, pp. 2241–2254, 2016."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[14] D. Lague, N. Brodu, J. Leroux, \"Accurate 3D comparison of complex topography with terrestrial laser scanner: application to the Rangitikei canyon (N-Z),\" ISPRS Journal of Photogrammetry and Remote Sensing, vol. 82, pp. 171–184, 2013."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[15] P. Lewis, E. Perez, A. Piktus, et al., \"Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks,\" in Proc. NeurIPS, 2020."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[16] X. Jiang, Y. Li, W. Chen, \"Large Language Model-Aided Vision-Based Structural Health Monitoring,\" Computer-Aided Civil and Infrastructure Engineering, vol. 39, no. 12, pp. 1888–1905, 2024."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[17] Y. Zheng, Q. Liu, H. Zhang, \"GPT-4 for structural damage assessment: a RAG-augmented framework with engineering standard retrieval,\" Structural Control and Health Monitoring, vol. 30, e3251, 2024."
+                    }
+                ]
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": {
+                "paragraph_content": [
+                    {
+                        "type": "text",
+                        "content": "[18] R. B. Rusu, Z. C. Marton, N. Blodow, M. Beetz, \"Towards 3D Point Cloud Based Object Maps for Household Environments,\" Robotics and Autonomous Systems, vol. 56, no. 11, pp. 927–941, 2008."
+                    }
+                ]
+            }
+        }
+    ]
+]

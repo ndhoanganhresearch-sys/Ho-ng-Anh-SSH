@@ -1,0 +1,362 @@
+{
+  "dataset": "field_like_raycast_dataset",
+  "source_blend": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\real_scale_railway_tunnel_t0t5\\real_scale_railway_tunnel_t0t5.blend",
+  "purpose": "Field-like TLS raycast dataset for Step 6 tunnel settlement validation",
+  "columns": "x y z nx ny nz intensity label station_id range_m",
+  "coordinate_policy": "T0-T5 share same tunnel coordinates; scanner pose has small epoch bias like real setup",
+  "scanner": {
+    "type": "simulated terrestrial laser scanner",
+    "stations_chainage_m": [
+      8.0,
+      25.0,
+      42.0,
+      59.0,
+      76.0,
+      93.0,
+      110.0
+    ],
+    "ray_step_deg": 1.2,
+    "max_range_m": 55.0,
+    "noise_model": "range + incidence dependent Gaussian; dropout for grazing/long range"
+  },
+  "labels": {
+    "lining": 1,
+    "rail": 2,
+    "sleeper": 3,
+    "walkway": 4,
+    "cable_tray": 5,
+    "pipe": 6,
+    "light": 7,
+    "equipment": 8,
+    "target": 9,
+    "sign": 10,
+    "damage": 20
+  },
+  "epochs": [
+    {
+      "time": "T0",
+      "txt": "T0.txt",
+      "points": 199008,
+      "label_counts": {
+        "1": 159112,
+        "6": 12360,
+        "4": 11919,
+        "5": 4585,
+        "3": 8526,
+        "2": 2419,
+        "7": 60,
+        "9": 27
+      },
+      "station_counts": [
+        {
+          "station": 0,
+          "chainage_m": 8.0,
+          "hits": 27273
+        },
+        {
+          "station": 1,
+          "chainage_m": 25.0,
+          "hits": 28738
+        },
+        {
+          "station": 2,
+          "chainage_m": 42.0,
+          "hits": 28799
+        },
+        {
+          "station": 3,
+          "chainage_m": 59.0,
+          "hits": 28842
+        },
+        {
+          "station": 4,
+          "chainage_m": 76.0,
+          "hits": 28773
+        },
+        {
+          "station": 5,
+          "chainage_m": 93.0,
+          "hits": 28761
+        },
+        {
+          "station": 6,
+          "chainage_m": 110.0,
+          "hits": 27822
+        }
+      ]
+    },
+    {
+      "time": "T1",
+      "txt": "T1.txt",
+      "points": 199052,
+      "label_counts": {
+        "1": 159140,
+        "6": 12338,
+        "4": 11916,
+        "5": 4588,
+        "3": 8504,
+        "2": 2422,
+        "7": 53,
+        "20": 63,
+        "9": 28
+      },
+      "station_counts": [
+        {
+          "station": 0,
+          "chainage_m": 8.0,
+          "hits": 27325
+        },
+        {
+          "station": 1,
+          "chainage_m": 25.0,
+          "hits": 28719
+        },
+        {
+          "station": 2,
+          "chainage_m": 42.0,
+          "hits": 28812
+        },
+        {
+          "station": 3,
+          "chainage_m": 59.0,
+          "hits": 28814
+        },
+        {
+          "station": 4,
+          "chainage_m": 76.0,
+          "hits": 28839
+        },
+        {
+          "station": 5,
+          "chainage_m": 93.0,
+          "hits": 28711
+        },
+        {
+          "station": 6,
+          "chainage_m": 110.0,
+          "hits": 27832
+        }
+      ]
+    },
+    {
+      "time": "T2",
+      "txt": "T2.txt",
+      "points": 199061,
+      "label_counts": {
+        "1": 159129,
+        "6": 12371,
+        "4": 11885,
+        "5": 4597,
+        "3": 8495,
+        "2": 2436,
+        "7": 58,
+        "9": 33,
+        "20": 57
+      },
+      "station_counts": [
+        {
+          "station": 0,
+          "chainage_m": 8.0,
+          "hits": 27329
+        },
+        {
+          "station": 1,
+          "chainage_m": 25.0,
+          "hits": 28688
+        },
+        {
+          "station": 2,
+          "chainage_m": 42.0,
+          "hits": 28794
+        },
+        {
+          "station": 3,
+          "chainage_m": 59.0,
+          "hits": 28857
+        },
+        {
+          "station": 4,
+          "chainage_m": 76.0,
+          "hits": 28835
+        },
+        {
+          "station": 5,
+          "chainage_m": 93.0,
+          "hits": 28733
+        },
+        {
+          "station": 6,
+          "chainage_m": 110.0,
+          "hits": 27825
+        }
+      ]
+    },
+    {
+      "time": "T3",
+      "txt": "T3.txt",
+      "points": 198967,
+      "label_counts": {
+        "1": 159032,
+        "6": 12337,
+        "4": 11920,
+        "5": 4590,
+        "3": 8503,
+        "2": 2439,
+        "7": 61,
+        "20": 55,
+        "9": 30
+      },
+      "station_counts": [
+        {
+          "station": 0,
+          "chainage_m": 8.0,
+          "hits": 27311
+        },
+        {
+          "station": 1,
+          "chainage_m": 25.0,
+          "hits": 28692
+        },
+        {
+          "station": 2,
+          "chainage_m": 42.0,
+          "hits": 28822
+        },
+        {
+          "station": 3,
+          "chainage_m": 59.0,
+          "hits": 28824
+        },
+        {
+          "station": 4,
+          "chainage_m": 76.0,
+          "hits": 28803
+        },
+        {
+          "station": 5,
+          "chainage_m": 93.0,
+          "hits": 28707
+        },
+        {
+          "station": 6,
+          "chainage_m": 110.0,
+          "hits": 27808
+        }
+      ]
+    },
+    {
+      "time": "T4",
+      "txt": "T4.txt",
+      "points": 199111,
+      "label_counts": {
+        "1": 159146,
+        "6": 12342,
+        "4": 11917,
+        "5": 4622,
+        "3": 8509,
+        "2": 2425,
+        "9": 28,
+        "7": 62,
+        "20": 60
+      },
+      "station_counts": [
+        {
+          "station": 0,
+          "chainage_m": 8.0,
+          "hits": 27318
+        },
+        {
+          "station": 1,
+          "chainage_m": 25.0,
+          "hits": 28724
+        },
+        {
+          "station": 2,
+          "chainage_m": 42.0,
+          "hits": 28793
+        },
+        {
+          "station": 3,
+          "chainage_m": 59.0,
+          "hits": 28851
+        },
+        {
+          "station": 4,
+          "chainage_m": 76.0,
+          "hits": 28828
+        },
+        {
+          "station": 5,
+          "chainage_m": 93.0,
+          "hits": 28753
+        },
+        {
+          "station": 6,
+          "chainage_m": 110.0,
+          "hits": 27844
+        }
+      ]
+    },
+    {
+      "time": "T5",
+      "txt": "T5.txt",
+      "points": 199035,
+      "label_counts": {
+        "1": 159171,
+        "6": 12325,
+        "4": 11913,
+        "5": 4594,
+        "3": 8470,
+        "2": 2418,
+        "7": 61,
+        "20": 56,
+        "9": 27
+      },
+      "station_counts": [
+        {
+          "station": 0,
+          "chainage_m": 8.0,
+          "hits": 27300
+        },
+        {
+          "station": 1,
+          "chainage_m": 25.0,
+          "hits": 28712
+        },
+        {
+          "station": 2,
+          "chainage_m": 42.0,
+          "hits": 28825
+        },
+        {
+          "station": 3,
+          "chainage_m": 59.0,
+          "hits": 28850
+        },
+        {
+          "station": 4,
+          "chainage_m": 76.0,
+          "hits": 28820
+        },
+        {
+          "station": 5,
+          "chainage_m": 93.0,
+          "hits": 28737
+        },
+        {
+          "station": 6,
+          "chainage_m": 110.0,
+          "hits": 27791
+        }
+      ]
+    }
+  ],
+  "ground_truth_settlement_mm": {
+    "T0": 0,
+    "T1": -10,
+    "T2": -22,
+    "T3": -38,
+    "T4": -58,
+    "T5": -80
+  }
+}

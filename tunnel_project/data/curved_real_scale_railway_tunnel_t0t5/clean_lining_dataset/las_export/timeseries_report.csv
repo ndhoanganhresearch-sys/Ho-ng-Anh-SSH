@@ -1,0 +1,6 @@
+﻿time,location,measured_point,crown_settlement_mm,new_crown_move_mm,result
+T1,Ch 52.0m,Crown / Đỉnh hầm,-9.90,-9.90,OK
+T2,Ch 52.0m,Crown / Đỉnh hầm,-21.70,-11.80,Warning
+T3,Ch 52.0m,Crown / Đỉnh hầm,-37.60,-15.90,Danger
+T4,Ch 52.0m,Crown / Đỉnh hầm,-57.30,-19.70,Danger
+T5,Ch 52.0m,Crown / Đỉnh hầm,-79.10,-21.80,Danger

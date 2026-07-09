@@ -1,0 +1,21 @@
+{
+  "epoch": "T5",
+  "points": 686013,
+  "las_file": "T5.las",
+  "txt_file": "T5.txt",
+  "bounds_min": [
+    -91.10543458103747,
+    -21.943413276615825,
+    -2.1406299343418973
+  ],
+  "bounds_max": [
+    70.76257115468073,
+    30.3702312120199,
+    9.440051300576025
+  ],
+  "deformation_mm": {
+    "crown_settlement": -45.0,
+    "sidewall_convergence": -35.0,
+    "local_damage": -40.0
+  }
+}

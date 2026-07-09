@@ -1,0 +1,21 @@
+{
+  "time": "T1",
+  "file": "T1.txt",
+  "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\current_visual_blend_interior_t0t5\\las_export\\T1.las",
+  "points": 18628,
+  "objects": 181,
+  "label_counts": {
+    "1": 9600,
+    "2": 1236,
+    "3": 1950,
+    "5": 186,
+    "6": 308,
+    "7": 912,
+    "8": 488,
+    "9": 2688,
+    "10": 390,
+    "20": 270,
+    "21": 300,
+    "22": 300
+  }
+}

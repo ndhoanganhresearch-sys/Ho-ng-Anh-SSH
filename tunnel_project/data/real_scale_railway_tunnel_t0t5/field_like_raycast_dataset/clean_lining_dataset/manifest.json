@@ -1,0 +1,88 @@
+{
+  "dataset": "field_like_raycast_clean_lining_dataset",
+  "source_blend": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\real_scale_railway_tunnel_t0t5\\real_scale_railway_tunnel_t0t5.blend",
+  "purpose": "Lining-only subset from field-like TLS raycast for Step 6 settlement measurement",
+  "columns": "x y z nx ny nz intensity label station_id range_m",
+  "coordinate_policy": "T0-T5 share same tunnel coordinates; scanner pose has small epoch bias like real setup",
+  "scanner": {
+    "type": "simulated terrestrial laser scanner",
+    "stations_chainage_m": [
+      8.0,
+      25.0,
+      42.0,
+      59.0,
+      76.0,
+      93.0,
+      110.0
+    ],
+    "ray_step_deg": 1.2,
+    "max_range_m": 55.0,
+    "noise_model": "range + incidence dependent Gaussian; dropout for grazing/long range"
+  },
+  "labels": {
+    "lining": 1,
+    "rail": 2,
+    "sleeper": 3,
+    "walkway": 4,
+    "cable_tray": 5,
+    "pipe": 6,
+    "light": 7,
+    "equipment": 8,
+    "target": 9,
+    "sign": 10,
+    "damage": 20
+  },
+  "epochs": [
+    {
+      "time": "T0",
+      "txt": "T0.txt",
+      "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\real_scale_railway_tunnel_t0t5\\field_like_raycast_dataset\\clean_lining_dataset\\las_export\\T0.las",
+      "points": 159112,
+      "removed_non_lining_points": 39896
+    },
+    {
+      "time": "T1",
+      "txt": "T1.txt",
+      "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\real_scale_railway_tunnel_t0t5\\field_like_raycast_dataset\\clean_lining_dataset\\las_export\\T1.las",
+      "points": 159140,
+      "removed_non_lining_points": 39912
+    },
+    {
+      "time": "T2",
+      "txt": "T2.txt",
+      "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\real_scale_railway_tunnel_t0t5\\field_like_raycast_dataset\\clean_lining_dataset\\las_export\\T2.las",
+      "points": 159129,
+      "removed_non_lining_points": 39932
+    },
+    {
+      "time": "T3",
+      "txt": "T3.txt",
+      "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\real_scale_railway_tunnel_t0t5\\field_like_raycast_dataset\\clean_lining_dataset\\las_export\\T3.las",
+      "points": 159032,
+      "removed_non_lining_points": 39935
+    },
+    {
+      "time": "T4",
+      "txt": "T4.txt",
+      "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\real_scale_railway_tunnel_t0t5\\field_like_raycast_dataset\\clean_lining_dataset\\las_export\\T4.las",
+      "points": 159146,
+      "removed_non_lining_points": 39965
+    },
+    {
+      "time": "T5",
+      "txt": "T5.txt",
+      "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\real_scale_railway_tunnel_t0t5\\field_like_raycast_dataset\\clean_lining_dataset\\las_export\\T5.las",
+      "points": 159171,
+      "removed_non_lining_points": 39864
+    }
+  ],
+  "ground_truth_settlement_mm": {
+    "T0": 0,
+    "T1": -10,
+    "T2": -22,
+    "T3": -38,
+    "T4": -58,
+    "T5": -80
+  },
+  "source_dataset": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\real_scale_railway_tunnel_t0t5\\field_like_raycast_dataset"
+}

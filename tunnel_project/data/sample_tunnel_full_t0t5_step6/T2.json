@@ -1,0 +1,21 @@
+{
+  "epoch": "T2",
+  "points": 686013,
+  "las_file": "T2.las",
+  "txt_file": "T2.txt",
+  "bounds_min": [
+    -91.11026015346063,
+    -21.939206152385292,
+    -2.1417242033481307
+  ],
+  "bounds_max": [
+    70.75914877025954,
+    30.37407957444131,
+    9.43907127152517
+  ],
+  "deformation_mm": {
+    "crown_settlement": -12.0,
+    "sidewall_convergence": -5.0,
+    "local_damage": 0.0
+  }
+}

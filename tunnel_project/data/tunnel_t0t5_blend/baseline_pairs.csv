@@ -1,0 +1,6 @@
+pair,d_crown_mm,d_damage_mm,note
+T0->T1,5,0,cumulative vs reference
+T0->T2,12,0,cumulative vs reference
+T0->T3,20,15,cumulative vs reference (damage onset T3)
+T0->T4,30,25,cumulative vs reference
+T0->T5,45,40,cumulative vs reference (final state)

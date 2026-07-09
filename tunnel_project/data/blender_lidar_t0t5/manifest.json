@@ -1,0 +1,124 @@
+{
+  "dataset": "blender_lidar_t0t5",
+  "purpose": "Blender raycasting LiDAR simulation for realistic time-series deformation testing with occlusion, density gradient, and intensity.",
+  "method": "scene.ray_cast() from 3 scanner positions per epoch, spherical grid 0.5deg resolution",
+  "units": "meters; deformation values in ground_truth.csv are millimeters",
+  "registration": {
+    "synthetic_registered": false,
+    "scanner_positions_identical": true,
+    "transform": "per-epoch rigid (rotation + translation), NOT identity",
+    "reference_epoch": "T0",
+    "rmse_mm_before_alignment": "up to ~170mm at tunnel ends (T5)",
+    "expected_rmse_mm_after_alignment": "~2-6mm (noise floor)",
+    "ground_truth_files": ["registration_ground_truth.csv", "registration_transforms.json"],
+    "pivot": [0.0, 40.0, 1.5],
+    "note": "Each epoch Tn (n>=1) point cloud is stored in its own scanner frame, simulating an unknown TLS setup pose. registration_transforms.json maps T0->epoch; apply its inverse to align an epoch back to T0. Use the 3 target spheres (label 5) for target-based registration, then verify recovered transform against ground truth. This dataset now exercises Step 3 Auto-align end-to-end, not just deformation analysis.",
+    "rotation_deg_range": [0.08, 0.25],
+    "translation_mm_range_at_pivot": [5, 30]
+  },
+  "scanner": {
+    "type": "simulated_TLS",
+    "positions_note": "Scanners sit on the curved centerline at arc-length (chainage) 10/40/70 m, tripod height z=-1.3 m (~1.5 m above the track bed). X/Y follow the alignment, so they are NOT on a straight Y axis.",
+    "positions": [
+      {"station": 1, "arc_length_m": 10, "z": -1.3},
+      {"station": 2, "arc_length_m": 40, "z": -1.3},
+      {"station": 3, "arc_length_m": 70, "z": -1.3}
+    ],
+    "h_resolution_deg": 0.5,
+    "v_resolution_deg": 0.5,
+    "v_fov_deg": [-35, 90],
+    "max_range_m": 60.0,
+    "noise_model": "sigma_m = 0.002 + 0.00006 * distance_m",
+    "intensity_model": "base_reflectivity[label] * Lambert cosine * distance falloff",
+    "base_reflectivity": {"1_concrete": 0.35, "2_ballast_walkway": 0.22, "3_metal": 0.55, "4_LED": 0.90, "5_target": 0.95, "9_person": 0.40}
+  },
+  "tunnel": {
+    "type": "circular TBM rail tunnel",
+    "geometry": "circular ARCH above the floor (NOT a full ring); lining spans crown down to the springline at floor level z=-2.8 m. Below the floor there is no lining (invert/fill), matching a real tunnel scanned from ground up.",
+    "scale_source": "real dimensions measured from sample_pcd/circle_tunnel_dw.las (local PCA circle fit: bore radius ~4.25 m)",
+    "length_m": 80.0,
+    "radius_m": 4.25,
+    "diameter_m": 8.5,
+    "alignment": "gentle horizontal curve, radius 500 m, turning toward +X; end lateral offset 6.39 m at arc-length 80 m",
+    "chainage_definition": "arc length along the curved centerline (0..80 m)",
+    "crown_direction": "local +Z (up) in the cross-section frame",
+    "track": {"gauge_m": 1.435, "sleeper_spacing_m": 0.6, "bed_top_z_m": -2.8},
+    "surface_undulation_m": "baked as-built waviness ~1.0-1.5 cm RMS (low-freq sin + 5 mm random), constant across epochs (NOT scan noise)",
+    "rings": 161,
+    "segments_per_ring": 120
+  },
+  "scene_objects": {
+    "rails": 2,
+    "sleepers": 134,
+    "floor_slab": 1,
+    "cable_trays": 2,
+    "conduits": 2,
+    "handrails": 2,
+    "led_lights_both_walls": 32,
+    "people_scale_reference": 3,
+    "target_spheres": 3,
+    "target_radius_m": 0.09,
+    "note": "Built in a clean metric scene at real scale; detail set (rails/sleepers/cable trays/lights/targets) styled after the reference Blender model. All fixtures follow the curved alignment. People are scale references (label 9), filterable as non-structure."
+  },
+  "epochs": ["T0", "T1", "T2", "T3", "T4", "T5"],
+  "points_per_epoch": 527418,
+  "labels": {
+    "0": "unknown",
+    "1": "structure (tunnel lining arch)",
+    "2": "floor / sleepers",
+    "3": "metal (rail / cable tray / conduit / handrail)",
+    "4": "LED light fixture",
+    "5": "target sphere",
+    "9": "person (scale reference, non-structure)"
+  },
+  "files": [
+    {"epoch": "T0", "txt": "T0.txt", "points": 527418},
+    {"epoch": "T1", "txt": "T1.txt", "points": 527418},
+    {"epoch": "T2", "txt": "T2.txt", "points": 527418},
+    {"epoch": "T3", "txt": "T3.txt", "points": 527418},
+    {"epoch": "T4", "txt": "T4.txt", "points": 527418},
+    {"epoch": "T5", "txt": "T5.txt", "points": 527418}
+  ],
+  "deformation_specs": [
+    {
+      "type": "crown_settlement",
+      "chainage_m": 20.0,
+      "sigma_m": 3.0,
+      "theta_deg": 90.0,
+      "values_mm": {"T0": 0, "T1": -5, "T2": -12, "T3": -20, "T4": -30, "T5": -45},
+      "description": "Progressive upper/crown deflection"
+    },
+    {
+      "type": "sidewall_convergence",
+      "chainage_m": 45.0,
+      "sigma_m": 3.0,
+      "theta_deg": 0.0,
+      "values_mm": {"T0": 0, "T1": 0, "T2": -5, "T3": -12, "T4": -22, "T5": -35},
+      "description": "Progressive bilateral sidewall convergence"
+    },
+    {
+      "type": "local_damage",
+      "chainage_m": 65.0,
+      "sigma_m": 1.2,
+      "theta_deg": 55.0,
+      "values_mm": {"T0": 0, "T1": 0, "T2": 0, "T3": -15, "T4": -25, "T5": -40},
+      "description": "Small localized lining damage patch"
+    }
+  ],
+  "features": [
+    "Real-scale circular TBM rail tunnel (8.5 m bore, sized from circle_tunnel_dw.las)",
+    "Curved horizontal alignment (R=500 m) - realistic, not a straight cylinder",
+    "Full rail track: 2 rails (1.435 m gauge), sleepers, ballast bed, side walkways",
+    "Both-wall LED lighting system + cable trays / conduits / handrails (styled after reference model)",
+    "3 human figures as scale reference (label 9, filterable as non-structure)",
+    "Baked as-built surface undulation (~1.5 cm) so the lining is not perfectly smooth",
+    "Material-dependent intensity (concrete/ballast/metal/LED/target/person reflectivity)",
+    "Raycasting-based occlusion (real shadow zones behind track, fixtures, people)",
+    "Distance-dependent point density (near scanner = dense, far = sparse)",
+    "Range noise sigma(d) = 2mm + 0.06mm/m",
+    "Per-epoch rigid mis-registration to exercise Step 3 Auto-align",
+    "Semantic labels for lining/ballast-walkway/metal/LED/target/person",
+    "3 registration target spheres at known positions"
+  ],
+  "deformation_note": "Deformation chainages (20/45/65 m) are measured as arc length along the curved centerline. Crown/sidewall directions are defined in the local cross-section frame (rotated with the curve)."
+}

@@ -1,0 +1,6 @@
+times,cumulative_p95_mm,cumulative_max_mm,incremental_p95_mm,rate_mm_per_epoch,accel_mm_per_epoch2,accelerating,gt_peak_mm,error_mm
+T1,5.75,241.55,5.75,5.75,5.75,yes,,
+T2,12.69,253.54,6.90,6.94,1.19,yes,,
+T3,21.94,207.71,9.20,9.25,2.31,yes,,
+T4,33.53,188.77,11.76,11.59,2.33,yes,,
+T5,47.00,140.93,13.58,13.47,1.88,yes,,

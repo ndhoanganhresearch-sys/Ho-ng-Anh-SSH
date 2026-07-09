@@ -1,0 +1,21 @@
+{
+  "epoch": "T4",
+  "points": 686013,
+  "las_file": "T4.las",
+  "txt_file": "T4.txt",
+  "bounds_min": [
+    -91.11137364166086,
+    -21.942125384728158,
+    -2.1409993736710287
+  ],
+  "bounds_max": [
+    70.7580419431546,
+    30.370937121774496,
+    9.439846436575287
+  ],
+  "deformation_mm": {
+    "crown_settlement": -30.0,
+    "sidewall_convergence": -22.0,
+    "local_damage": -25.0
+  }
+}

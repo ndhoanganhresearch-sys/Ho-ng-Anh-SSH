@@ -1,0 +1,47 @@
+{
+  "dataset": "blender_lidar_t0t5_realistic_regular",
+  "created_by": "tools/create_realistic_regular_groundtruth.py",
+  "purpose": "Non-raycast regular surface ground truth for comparison with Blender raycast/TLS output.",
+  "columns": "x y z nx ny nz intensity label",
+  "curve_radius_m": 420.0,
+  "length_m": 96.0,
+  "radius_m": 4.25,
+  "times": [
+    {
+      "time": "T0",
+      "txt": "T0_regular.txt",
+      "las": "T0_regular.las",
+      "points": 49408
+    },
+    {
+      "time": "T1",
+      "txt": "T1_regular.txt",
+      "las": "T1_regular.las",
+      "points": 49408
+    },
+    {
+      "time": "T2",
+      "txt": "T2_regular.txt",
+      "las": "T2_regular.las",
+      "points": 49408
+    },
+    {
+      "time": "T3",
+      "txt": "T3_regular.txt",
+      "las": "T3_regular.las",
+      "points": 49408
+    },
+    {
+      "time": "T4",
+      "txt": "T4_regular.txt",
+      "las": "T4_regular.las",
+      "points": 49408
+    },
+    {
+      "time": "T5",
+      "txt": "T5_regular.txt",
+      "las": "T5_regular.las",
+      "points": 49408
+    }
+  ]
+}

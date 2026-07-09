@@ -1,0 +1,25 @@
+time,damage_type,chainage_m,theta_deg,value_mm,description
+T0,crown_settlement,40,90,0,standard blend crown settlement
+T0,local_damage,60,62,0,standard blend local right-shoulder dent
+T0,spalling,58,50,0,added spalling/delamination label on standard geometry
+T0,crack,36,132,0,added crack label on standard geometry
+T1,crown_settlement,40,90,-5,standard blend crown settlement
+T1,local_damage,60,62,0,standard blend local right-shoulder dent
+T1,spalling,58,50,0,added spalling/delamination label on standard geometry
+T1,crack,36,132,0,added crack label on standard geometry
+T2,crown_settlement,40,90,-12,standard blend crown settlement
+T2,local_damage,60,62,0,standard blend local right-shoulder dent
+T2,spalling,58,50,-8,added spalling/delamination label on standard geometry
+T2,crack,36,132,2,added crack label on standard geometry
+T3,crown_settlement,40,90,-20,standard blend crown settlement
+T3,local_damage,60,62,-15,standard blend local right-shoulder dent
+T3,spalling,58,50,-20,added spalling/delamination label on standard geometry
+T3,crack,36,132,5,added crack label on standard geometry
+T4,crown_settlement,40,90,-30,standard blend crown settlement
+T4,local_damage,60,62,-25,standard blend local right-shoulder dent
+T4,spalling,58,50,-34,added spalling/delamination label on standard geometry
+T4,crack,36,132,8,added crack label on standard geometry
+T5,crown_settlement,40,90,-45,standard blend crown settlement
+T5,local_damage,60,62,-40,standard blend local right-shoulder dent
+T5,spalling,58,50,-48,added spalling/delamination label on standard geometry
+T5,crack,36,132,12,added crack label on standard geometry

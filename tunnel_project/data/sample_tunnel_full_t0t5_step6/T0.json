@@ -1,0 +1,21 @@
+{
+  "epoch": "T0",
+  "points": 686013,
+  "las_file": "T0.las",
+  "txt_file": "T0.txt",
+  "bounds_min": [
+    -91.10900231933594,
+    -21.93950080871582,
+    -2.141
+  ],
+  "bounds_max": [
+    70.76099768066408,
+    30.372499191284177,
+    9.439
+  ],
+  "deformation_mm": {
+    "crown_settlement": 0.0,
+    "sidewall_convergence": 0.0,
+    "local_damage": 0.0
+  }
+}

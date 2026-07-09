@@ -1,0 +1,6 @@
+pair,d_crown_mm,d_damage_mm,note
+T0->T1,5,0,incremental
+T1->T2,7,0,incremental
+T2->T3,8,15,incremental (damage onset)
+T3->T4,10,10,incremental
+T4->T5,15,15,incremental

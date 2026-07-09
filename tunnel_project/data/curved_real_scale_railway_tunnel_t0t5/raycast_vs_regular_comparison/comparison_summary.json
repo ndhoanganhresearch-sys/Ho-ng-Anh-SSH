@@ -1,0 +1,22 @@
+{
+  "regular_dir": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\curved_real_scale_railway_tunnel_t0t5\\clean_lining_dataset",
+  "raycast_dir": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\curved_real_scale_railway_tunnel_t0t5\\field_like_raycast_dataset\\clean_lining_dataset",
+  "output_dir": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\curved_real_scale_railway_tunnel_t0t5\\raycast_vs_regular_comparison",
+  "method": "Curved centerline chainage zone, p98 crown z value relative to T0",
+  "chainage_m": 52.0,
+  "chainage_window_m": 5.0,
+  "lateral_window_m": 12.0,
+  "regular_mae_to_gt_mm": 0.4,
+  "raycast_mae_to_gt_mm": 0.839,
+  "raycast_mae_to_regular_mm": 0.472,
+  "regular_trend_ok": true,
+  "raycast_trend_ok": true,
+  "epochs": [
+    "T0",
+    "T1",
+    "T2",
+    "T3",
+    "T4",
+    "T5"
+  ]
+}

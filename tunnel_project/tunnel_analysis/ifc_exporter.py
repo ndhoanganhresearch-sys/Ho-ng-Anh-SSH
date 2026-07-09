@@ -4,6 +4,7 @@ Per PDF section 3.6.
 """
 from .common import *
 from .models import PipelineContext, SectionGeometry
+from .section_warnings import classify_sections, section_warning_text
 from pathlib import Path
 from datetime import datetime
 
@@ -16,15 +17,31 @@ class TunnelIFCExporter:
                    engineer: str = "CBNU Smart Structure Lab",
                    schema: str = "IFC4",
                    wall_thickness: float = 0.3,
-                   include_components: bool = False) -> str:
+                   include_components: bool = False,
+                   ref_sections=None) -> str:
+        sections = list(getattr(context, "sections", []) or [])
+        centerline = getattr(context, "centerline", None)
+        has_centerline = centerline is not None and len(centerline) >= 2
+        if not sections:
+            raise RuntimeError("IFC export needs computed tunnel sections. Run Step 6.3 (or Step 5.7 in advanced mode) first.")
+        if not has_centerline and len(sections) < 2:
+            raise RuntimeError("IFC export needs a centerline from Step 4.3b or at least two computed sections.")
+        if include_components and not (getattr(context, "component_points", None) or {}):
+            raise RuntimeError("IFC + Components needs detected components. Run auto-denoise (Step 2.5) first.")
+
         try:
             import ifcopenshell
             import ifcopenshell.api
         except ImportError:
-            raise RuntimeError("ifcopenshell required: pip install ifcopenshell")
+            raise RuntimeError("ifcopenshell is required for Step 7 IFC export. Install it with: pip install ifcopenshell")
 
         path = Path(out_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.suffix.lower() != ".ifc":
+            raise RuntimeError("IFC export path must end with .ifc")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            raise RuntimeError(f"Could not create IFC output directory '{path.parent}': {exc}") from exc
 
         # IFC4 keeps maximum viewer compatibility; IFC4X3* adds IfcAlignment
         # for the centerline (infrastructure-standard linear referencing).
@@ -66,6 +83,8 @@ class TunnelIFCExporter:
         # Set True once the continuous deformation-following lining shell is
         # built, so the per-section solid slices below are skipped (no overlap).
         mesh_built = False
+        ref_sections = list(ref_sections or getattr(context, "reference_sections", []) or [])
+        section_statuses = classify_sections(context.sections, ref_sections or None) if context.sections else []
 
         # Centerline: IfcAlignment (IFC4X3 infrastructure standard) or
         # IfcAnnotation (IFC4 fallback). Both carry the same Curve3D polyline.
@@ -93,7 +112,7 @@ class TunnelIFCExporter:
             # slices below are skipped to avoid overlapping (Z-fighting) bodies.
             try:
                 lining_shape = self._deformed_lining_facetset(
-                    ifc, body_ctx, context, float(wall_thickness))
+                    ifc, body_ctx, context, float(wall_thickness), section_statuses=section_statuses)
             except Exception as e:
                 lining_shape = None
                 warnings.warn(f"Deformed lining mesh skipped: {e}")
@@ -163,14 +182,10 @@ class TunnelIFCExporter:
                 elem.ObjectPlacement = placement
             if shape is not None:
                 elem.Representation = ifc.createIfcProductDefinitionShape(None, None, [shape])
-                # Colour the slice by assessment: red = clearance violation,
-                # amber = high ovality (>= 1%), green = OK.
-                if sec.clearance_violation:
-                    rgb = (0.86, 0.15, 0.15)
-                elif np.isfinite(sec.ovality) and sec.ovality >= 1.0:
-                    rgb = (0.85, 0.47, 0.04)
-                else:
-                    rgb = (0.02, 0.59, 0.41)
+                # Colour the slice by the same section classifier used by the
+                # 2D view, 3D markers, dashboard, and work order.
+                status, _issues = section_statuses[i] if i < len(section_statuses) else ("OK", [])
+                rgb = self._status_rgb(status)
                 if shape.Items:
                     self._apply_color(ifc, shape.Items[0], rgb, name="SectionStatus")
             # Property set
@@ -184,6 +199,9 @@ class TunnelIFCExporter:
             if np.isfinite(sec.ovality):      props["Ovality_pct"]      = float(sec.ovality)
             if np.isfinite(sec.eccentricity): props["Eccentricity_mm"]  = float(sec.eccentricity)
             if np.isfinite(sec.radius_fit):   props["RadiusFit_m"]      = float(sec.radius_fit)
+            status, issues = section_statuses[i] if i < len(section_statuses) else ("OK", [])
+            props["SectionStatus"] = status
+            props["SectionIssues"] = section_warning_text(issues) if issues else "OK"
             props["ClearanceViolation"] = bool(sec.clearance_violation)
             if np.isfinite(sec.min_clearance_dist):
                 props["MinClearance_m"] = float(sec.min_clearance_dist)
@@ -253,14 +271,14 @@ class TunnelIFCExporter:
         try:
             ifc.write(str(tmp))
             _os.replace(str(tmp), str(path))
-        except Exception:
+        except Exception as exc:
             try:
                 if tmp.exists():
                     tmp.unlink()
             except OSError:
                 import warnings
                 warnings.warn(f"Could not remove temp IFC file left behind: {tmp}")
-            raise
+            raise RuntimeError(f"Could not write IFC file '{path}': {exc}") from exc
         return str(path)
 
     def _export_components(self, ifc, body_ctx, storey, context):
@@ -385,6 +403,14 @@ class TunnelIFCExporter:
         shape = ifc.createIfcShapeRepresentation(body_ctx, 'Body', 'SweptSolid', [solid])
         return placement, shape
     @staticmethod
+    def _status_rgb(status: str):
+        if status == "CRITICAL":
+            return (0.86, 0.15, 0.15)
+        if status == "CAUTION":
+            return (0.85, 0.47, 0.04)
+        return (0.62, 0.66, 0.71)
+
+    @staticmethod
     def _apply_color(ifc, item, rgb, name="Color"):
         """Attach an RGB surface style to a geometry item (IFC4).
 
@@ -448,7 +474,7 @@ class TunnelIFCExporter:
         return [(float(x), float(y)) for x, y in outer_arr], inner
     @staticmethod
     def _deformed_lining_facetset(ifc, body_ctx, context, wall_thickness,
-                                  K=48, radial_pct=92.0):
+                                  K=48, radial_pct=92.0, section_statuses=None):
         """Continuous tunnel lining that FOLLOWS the measured deformation.
 
         Lofts the per-section measured rings into one tessellated hollow shell
@@ -511,9 +537,12 @@ class TunnelIFCExporter:
             o3d = C[None, :] + ox[:, None] * N[None, :] + oy[:, None] * B[None, :]
             i3d = C[None, :] + ix[:, None] * N[None, :] + iy[:, None] * B[None, :]
             outers.append(o3d); inners.append(i3d)
-            if getattr(sec, "clearance_violation", False):
+            status = "OK"
+            if section_statuses is not None and i < len(section_statuses):
+                status = section_statuses[i][0]
+            if status == "CRITICAL":
                 ranks.append(2)
-            elif _np.isfinite(getattr(sec, "ovality", _np.nan)) and sec.ovality >= 1.0:
+            elif status == "CAUTION":
                 ranks.append(1)
             else:
                 ranks.append(0)
@@ -542,7 +571,7 @@ class TunnelIFCExporter:
             faces[0].append([o(S - 1, j), o(S - 1, jn), inr(S - 1, jn), inr(S - 1, j)])
 
         pts_list = ifc.createIfcCartesianPointList3D(coords)
-        rgb_by_rank = {0: (0.62, 0.66, 0.71), 1: (0.85, 0.47, 0.04), 2: (0.86, 0.15, 0.15)}
+        rgb_by_rank = {0: TunnelIFCExporter._status_rgb("OK"), 1: TunnelIFCExporter._status_rgb("CAUTION"), 2: TunnelIFCExporter._status_rgb("CRITICAL")}
         items = []
         for rank, flist in faces.items():
             if not flist:

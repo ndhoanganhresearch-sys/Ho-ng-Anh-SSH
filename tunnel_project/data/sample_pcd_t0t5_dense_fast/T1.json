@@ -1,0 +1,27 @@
+{
+  "epoch": "T1",
+  "las_file": "T1.las",
+  "txt_file": "T1.txt",
+  "points": 166186,
+  "source": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\sample_pcd\\u-type_tunnel_0k630 cut_1.las",
+  "bounds_min": [
+    -1.4392533884191643,
+    -20.06997878386529,
+    -1.1369944363376516
+  ],
+  "bounds_max": [
+    7.719832835888558,
+    -9.10965337163777,
+    8.745335259041624
+  ],
+  "deformation_mm": {
+    "crown_settlement": -4.0,
+    "sidewall_convergence": -1.0,
+    "local_damage": 0.0
+  },
+  "pose_bias_m": [
+    0.002,
+    -0.003,
+    0.001
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "raycast_dir": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\blender_lidar_t0t5_realistic",
+  "regular_dir": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\blender_lidar_t0t5_realistic_regular",
+  "rows": 15,
+  "regular_mae_to_gt_mm": 1.101,
+  "raycast_mae_to_gt_mm": 1.659,
+  "raycast_mae_to_regular_mm": 0.574,
+  "window": {
+    "chainage_m": 3.0,
+    "angle_deg": 18.0
+  }
+}

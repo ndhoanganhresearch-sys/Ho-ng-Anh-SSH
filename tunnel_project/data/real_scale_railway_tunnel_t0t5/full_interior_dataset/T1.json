@@ -1,0 +1,18 @@
+{
+  "time": "T1",
+  "file": "T1.txt",
+  "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\real_scale_railway_tunnel_t0t5\\full_interior_dataset\\las_export\\T1.las",
+  "points": 178948,
+  "objects": 213,
+  "label_counts": {
+    "1": 171600,
+    "2": 120,
+    "3": 5520,
+    "4": 60,
+    "5": 60,
+    "6": 508,
+    "7": 240,
+    "8": 30,
+    "9": 810
+  }
+}

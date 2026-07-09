@@ -6,6 +6,7 @@ from .common import *
 from .models import PipelineContext, SectionGeometry
 from pathlib import Path
 from datetime import datetime
+from .section_warnings import SECTION_DELTA_CAUTION_MM, SECTION_DELTA_CRITICAL_MM
 
 
 class TunnelExporter:
@@ -33,6 +34,136 @@ class TunnelExporter:
             writer = csv.DictWriter(fh, fieldnames=rows[0].keys())
             writer.writeheader()
             writer.writerows(rows)
+        return str(path)
+
+    # ------------------------------------------------------ Time-series xlsx --
+    def export_timeseries_excel(self, series: dict, out_path: str,
+                                gt: dict = None, forecast: dict = None,
+                                project_name: str = "Tunnel Analysis") -> str:
+        """Export the Step 6 crown-first time-series table to Excel."""
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+            from openpyxl.chart import LineChart, Reference
+            from openpyxl.utils import get_column_letter
+        except ImportError:
+            raise RuntimeError("openpyxl required: pip install openpyxl")
+
+        labels = list(series.get("labels", []))
+        if not labels:
+            raise RuntimeError("No time-series data. Run Step 6 trend first.")
+
+        def arr(key):
+            return np.asarray(series.get(key, []), dtype=np.float64).ravel()
+
+        median = arr("median_mm")
+        p95 = arr("p95_abs_mm")
+        max_abs = arr("max_abs_mm")
+        inc_p95 = arr("incremental_p95_abs_mm")
+        velocity = arr("velocity_mm_per_epoch")
+        acceleration = arr("acceleration_mm_per_epoch2")
+        crown = arr("crown_settlement_mm")
+        if crown.size == len(labels) + 1:
+            crown = crown[1:]
+        try:
+            _ch = float(series.get("crown_chainage_m", float("nan")))
+            location_txt = f"Ch {_ch:.1f}m" if np.isfinite(_ch) else "Ch --"
+        except Exception:
+            location_txt = "Ch --"
+        measured_point_txt = "Tunnel crown"
+        caution, critical = SECTION_DELTA_CAUTION_MM, SECTION_DELTA_CRITICAL_MM
+
+        path = Path(out_path); path.parent.mkdir(parents=True, exist_ok=True)
+        wb = openpyxl.Workbook()
+        ws = wb.active; ws.title = "Time-Series"
+        hf = Font(name="Arial", size=10, bold=True, color="FFFFFF")
+        hfill = PatternFill("solid", fgColor="0F4C81")
+        thin = Side(style="thin", color="CBD5E1")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        crit_fill = PatternFill("solid", fgColor="FEE2E2")
+        caut_fill = PatternFill("solid", fgColor="FEF3C7")
+
+        ws["A1"] = f"{project_name} - Step 6 Time-Series ({series.get('method','')})"
+        ws["A1"].font = Font(name="Arial", size=14, bold=True, color="0F4C81")
+        ws.merge_cells("A1:K1")
+        ws["A2"] = "Main metric"; ws["B2"] = "Crown settlement + deformation summary"
+        ws["A3"] = "Measured point"; ws["B3"] = measured_point_txt
+        ws["A4"] = "Location"; ws["B4"] = location_txt
+        for cell in ("A2", "A3", "A4"):
+            ws[cell].font = Font(name="Arial", size=10, bold=True, color="0F4C81")
+
+        headers = ["Epoch", "Location", "Measured point", "Crown settlement (mm)",
+                   "New crown move (mm)", "Median displacement (mm)",
+                   "Cumulative p95 abs (mm)", "Cumulative max abs (mm)",
+                   "Incremental p95 abs (mm)", "Velocity (mm/epoch)",
+                   "Acceleration (mm/epoch^2)", "Result"]
+        hrow = 6
+        for col, h in enumerate(headers, 1):
+            c = ws.cell(row=hrow, column=col, value=h)
+            c.font = hf; c.fill = hfill; c.border = border
+            c.alignment = Alignment(horizontal="center", wrap_text=True)
+            ws.column_dimensions[get_column_letter(col)].width = max(14, len(h) // 2 + 8)
+
+        def value_at(values, idx):
+            return float(values[idx]) if idx < values.size and np.isfinite(values[idx]) else None
+
+        prev_crown = 0.0
+        for i, lbl in enumerate(labels):
+            r = hrow + 1 + i
+            crown_val = value_at(crown, i)
+            new_move = crown_val - prev_crown if crown_val is not None else None
+            p95_val = value_at(p95, i)
+            score = abs(crown_val) if crown_val is not None else (p95_val or 0.0)
+            result = "Danger" if score >= critical else ("Warning" if score >= caution else "OK")
+            vals = [lbl,
+                    location_txt,
+                    measured_point_txt,
+                    round(crown_val, 2) if crown_val is not None else None,
+                    round(new_move, 2) if new_move is not None else None,
+                    round(value_at(median, i), 2) if value_at(median, i) is not None else None,
+                    round(p95_val, 2) if p95_val is not None else None,
+                    round(value_at(max_abs, i), 2) if value_at(max_abs, i) is not None else None,
+                    round(value_at(inc_p95, i), 2) if value_at(inc_p95, i) is not None else None,
+                    round(value_at(velocity, i), 2) if value_at(velocity, i) is not None else None,
+                    round(value_at(acceleration, i), 2) if value_at(acceleration, i) is not None else None,
+                    result]
+            for col, v in enumerate(vals, 1):
+                cell = ws.cell(row=r, column=col, value=v)
+                cell.border = border; cell.alignment = Alignment(horizontal="center")
+            if result == "Danger":
+                ws.cell(row=r, column=4).fill = crit_fill
+                ws.cell(row=r, column=12).fill = crit_fill
+            elif result == "Warning":
+                ws.cell(row=r, column=4).fill = caut_fill
+                ws.cell(row=r, column=12).fill = caut_fill
+            if crown_val is not None:
+                prev_crown = crown_val
+
+        last = hrow + len(labels)
+        chart = LineChart(); chart.title = "Crown settlement trend"
+        chart.y_axis.title = "mm"; chart.x_axis.title = "Time"; chart.height = 9; chart.width = 18
+        data = Reference(ws, min_col=4, max_col=4, min_row=hrow, max_row=last)
+        cats = Reference(ws, min_col=1, min_row=hrow + 1, max_row=last)
+        chart.add_data(data, titles_from_data=True); chart.set_categories(cats)
+        ws.add_chart(chart, f"A{last + 3}")
+
+        ws2 = wb.create_sheet("Summary")
+        ws2.column_dimensions["A"].width = 34; ws2.column_dimensions["B"].width = 48
+        srow = 1
+        def put(k, v):
+            nonlocal srow
+            ws2.cell(row=srow, column=1, value=k).font = Font(bold=True)
+            ws2.cell(row=srow, column=2, value=v); srow += 1
+        put("Metric", "crown_settlement_mm")
+        put("Times", ", ".join(labels))
+        put("Caution / Danger", "10 mm / 25 mm")
+        if gt:
+            put("Ground-truth MAE (mm)", round(float(gt.get("mae_mm", float("nan"))), 2))
+            put("GT summary", gt.get("summary", ""))
+        if forecast and forecast.get("ok"):
+            put("Forecast metric", forecast.get("metric", ""))
+            put("Forecast summary", forecast.get("summary", ""))
+        wb.save(str(path))
         return str(path)
 
     # ---------------------------------------------------------------- Excel --

@@ -1,0 +1,142 @@
+{
+  "dataset": "clean_lining_dataset",
+  "source_dataset": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\real_scale_railway_tunnel_t0t5\\full_interior_dataset",
+  "source_blend": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\real_scale_railway_tunnel_t0t5\\real_scale_railway_tunnel_t0t5.blend",
+  "purpose": "Clean lining-only T0-T5 dataset for Step 6 settlement/deformation validation.",
+  "columns": "x y z nx ny nz intensity label damage_type",
+  "coordinate_policy": "T0-T5 share one tunnel coordinate frame; no visual offsets.",
+  "profile_policy": "Smooth horseshoe railway tunnel profile with smooth invert; regenerated after jagged-profile review.",
+  "kept_labels": {
+    "1": "lining"
+  },
+  "exports": [
+    {
+      "time": "T0",
+      "txt": "T0.txt",
+      "las": "data\\real_scale_railway_tunnel_t0t5\\clean_lining_dataset\\las_export\\T0.las",
+      "points": 171600,
+      "removed_interior_points": 7318,
+      "kept_labels": {
+        "1": 171600
+      },
+      "bounds_min": [
+        -4.4,
+        0.0,
+        -0.4
+      ],
+      "bounds_max": [
+        4.4,
+        120.0,
+        7.4
+      ]
+    },
+    {
+      "time": "T1",
+      "txt": "T1.txt",
+      "las": "data\\real_scale_railway_tunnel_t0t5\\clean_lining_dataset\\las_export\\T1.las",
+      "points": 171600,
+      "removed_interior_points": 7348,
+      "kept_labels": {
+        "1": 171600
+      },
+      "bounds_min": [
+        -4.4,
+        0.0,
+        -0.4
+      ],
+      "bounds_max": [
+        4.4,
+        120.0,
+        7.4
+      ]
+    },
+    {
+      "time": "T2",
+      "txt": "T2.txt",
+      "las": "data\\real_scale_railway_tunnel_t0t5\\clean_lining_dataset\\las_export\\T2.las",
+      "points": 171600,
+      "removed_interior_points": 7348,
+      "kept_labels": {
+        "1": 171600
+      },
+      "bounds_min": [
+        -4.4,
+        0.0,
+        -0.4
+      ],
+      "bounds_max": [
+        4.4,
+        120.0,
+        7.4
+      ]
+    },
+    {
+      "time": "T3",
+      "txt": "T3.txt",
+      "las": "data\\real_scale_railway_tunnel_t0t5\\clean_lining_dataset\\las_export\\T3.las",
+      "points": 171600,
+      "removed_interior_points": 7348,
+      "kept_labels": {
+        "1": 171600
+      },
+      "bounds_min": [
+        -4.4,
+        0.0,
+        -0.4
+      ],
+      "bounds_max": [
+        4.4,
+        120.0,
+        7.4
+      ]
+    },
+    {
+      "time": "T4",
+      "txt": "T4.txt",
+      "las": "data\\real_scale_railway_tunnel_t0t5\\clean_lining_dataset\\las_export\\T4.las",
+      "points": 171600,
+      "removed_interior_points": 7348,
+      "kept_labels": {
+        "1": 171600
+      },
+      "bounds_min": [
+        -4.4,
+        0.0,
+        -0.4
+      ],
+      "bounds_max": [
+        4.4,
+        120.0,
+        7.4
+      ]
+    },
+    {
+      "time": "T5",
+      "txt": "T5.txt",
+      "las": "data\\real_scale_railway_tunnel_t0t5\\clean_lining_dataset\\las_export\\T5.las",
+      "points": 171600,
+      "removed_interior_points": 7348,
+      "kept_labels": {
+        "1": 171600
+      },
+      "bounds_min": [
+        -4.4,
+        0.0,
+        -0.4
+      ],
+      "bounds_max": [
+        4.4,
+        120.0,
+        7.4
+      ]
+    }
+  ],
+  "ground_truth_settlement_mm": {
+    "T0": 0,
+    "T1": -10,
+    "T2": -22,
+    "T3": -38,
+    "T4": -58,
+    "T5": -80
+  }
+}

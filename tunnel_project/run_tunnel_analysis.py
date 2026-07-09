@@ -3,6 +3,13 @@ import sys
 import warnings
 import logging
 
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_venv_python = os.path.join(_project_root, ".venv", "Scripts", "python.exe")
+if __name__ == "__main__" and os.name == "nt" and os.path.exists(_venv_python):
+    _current_python = os.path.abspath(sys.executable)
+    if os.path.normcase(_current_python) != os.path.normcase(_venv_python):
+        os.execv(_venv_python, [_venv_python, os.path.abspath(__file__), *sys.argv[1:]])
+
 # ── Isolate from Microsoft Store Python user-site ───────────────────────────
 # The MS Store Python injects its per-user site-packages
 # (…\LocalCache\local-packages\Python312\site-packages) onto sys.path even
@@ -58,3 +65,4 @@ from tunnel_analysis.main import main
 
 if __name__ == "__main__":
     raise SystemExit(main())
+    print("Tunnel analysis completed successfully.")                        

@@ -1,0 +1,19 @@
+epoch,chainage_m,deformation_type,value_mm,sigma_m,theta_deg,description
+T0,20.0,crown_settlement,0.0,3.0,90.0,Progressive upper/crown deflection
+T0,45.0,sidewall_convergence,0.0,3.0,0.0,Progressive bilateral sidewall convergence
+T0,65.0,local_damage,0.0,1.2,55.0,Small localized lining damage patch
+T1,20.0,crown_settlement,-5.0,3.0,90.0,Progressive upper/crown deflection
+T1,45.0,sidewall_convergence,0.0,3.0,0.0,Progressive bilateral sidewall convergence
+T1,65.0,local_damage,0.0,1.2,55.0,Small localized lining damage patch
+T2,20.0,crown_settlement,-12.0,3.0,90.0,Progressive upper/crown deflection
+T2,45.0,sidewall_convergence,-5.0,3.0,0.0,Progressive bilateral sidewall convergence
+T2,65.0,local_damage,0.0,1.2,55.0,Small localized lining damage patch
+T3,20.0,crown_settlement,-20.0,3.0,90.0,Progressive upper/crown deflection
+T3,45.0,sidewall_convergence,-12.0,3.0,0.0,Progressive bilateral sidewall convergence
+T3,65.0,local_damage,-15.0,1.2,55.0,Small localized lining damage patch
+T4,20.0,crown_settlement,-30.0,3.0,90.0,Progressive upper/crown deflection
+T4,45.0,sidewall_convergence,-22.0,3.0,0.0,Progressive bilateral sidewall convergence
+T4,65.0,local_damage,-25.0,1.2,55.0,Small localized lining damage patch
+T5,20.0,crown_settlement,-45.0,3.0,90.0,Progressive upper/crown deflection
+T5,45.0,sidewall_convergence,-35.0,3.0,0.0,Progressive bilateral sidewall convergence
+T5,65.0,local_damage,-40.0,1.2,55.0,Small localized lining damage patch

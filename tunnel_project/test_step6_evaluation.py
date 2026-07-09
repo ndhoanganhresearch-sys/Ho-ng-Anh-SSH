@@ -58,6 +58,9 @@ def auto_gauge(points):
     gauge = max(0.3, r_inner - 0.20)
     return gauge, 2.0 * gauge, gauge   # (w, h, r)
 
+def in_any_band(chainage, bands):
+    return any(lo <= chainage <= hi for lo, hi in bands)
+
 PASS = FAIL = 0
 def ck(name, cond, info=""):
     global PASS, FAIL
@@ -143,10 +146,28 @@ def run_version(folder, expected_level, gt_crown_mm, warn_band, secondary_band=N
     band_idx = [i for i in range(n) if lo <= secs_tn[i].chainage <= hi]
     band_warned = [i for i in band_idx if statuses[i][0] != "OK"]
     recall = (len(band_warned) / len(band_idx)) if band_idx else 0.0
-    warned_ch = [secs_tn[i].chainage for i, (s, _) in enumerate(statuses) if s != "OK"]
     ck(f"GT band {warn_band} m is flagged (recall>=0.8)",
        recall >= 0.8,
        f"recall={recall:.0%} ({len(band_warned)}/{len(band_idx)} band sections warned)")
+
+    # Track warning precision as a guard against overly broad warning spread.
+    # The complex dataset has a secondary deformation band, so count both known
+    # GT bands as true-positive warning locations.
+    gt_bands = [warn_band]
+    if secondary_band is not None:
+        gt_bands.append(secondary_band)
+    warned_idx = [i for i, (s, _) in enumerate(statuses) if s != "OK"]
+    true_warning_idx = [i for i in warned_idx if in_any_band(secs_tn[i].chainage, gt_bands)]
+    false_warning_idx = [i for i in warned_idx if i not in true_warning_idx]
+    precision = (len(true_warning_idx) / len(warned_idx)) if warned_idx else 1.0
+    if false_warning_idx:
+        false_ch = [secs_tn[i].chainage for i in false_warning_idx]
+        false_span = f" false_span={min(false_ch):.1f}-{max(false_ch):.1f}m"
+    else:
+        false_span = " false_span=none"
+    ck("warning precision stays informative (>=0.5)",
+       precision >= 0.5,
+       f"precision={precision:.0%} ({len(true_warning_idx)}/{len(warned_idx)} warnings in GT bands); false={len(false_warning_idx)};{false_span}")
 
     # ── Clearance intrusion (v02 only) ──────────────────────────────────────
     if gt.get("clearance_intrusion"):

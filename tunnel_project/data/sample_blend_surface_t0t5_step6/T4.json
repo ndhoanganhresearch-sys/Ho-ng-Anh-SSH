@@ -1,0 +1,21 @@
+{
+  "epoch": "T4",
+  "txt_file": "T4.txt",
+  "preview_file": "T4_preview.xyz",
+  "points": 500000,
+  "bounds_min": [
+    -1.023711085319519,
+    -1.0227360725402832,
+    -0.029702480882406235
+  ],
+  "bounds_max": [
+    6.390835285186768,
+    78.86743927001953,
+    1.682783842086792
+  ],
+  "deformation_mm": {
+    "crown_settlement": -25.0,
+    "sidewall_convergence": -15.0,
+    "local_damage": -17.0
+  }
+}

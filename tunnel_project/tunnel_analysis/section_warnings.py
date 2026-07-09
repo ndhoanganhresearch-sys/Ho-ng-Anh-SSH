@@ -86,7 +86,42 @@ def section_warning_status(sg: SectionGeometry, ref_sg: SectionGeometry = None):
     return status, issues
 
 
-def classify_sections(sections, ref_sections=None):
+_SEVERITY = {"OK": 0, "CAUTION": 1, "CRITICAL": 2}
+
+
+def classify_sections_worst_epoch(epoch_sections):
+    """Worst-per-section status across several epochs (T0~Tn).
+
+    ``epoch_sections`` is one per-chainage section list per epoch, T0 first.
+    Each later epoch is classified against T0 with the normal
+    ``classify_sections`` rules, then per section we keep the worst epoch's
+    (status, issues). This is what the 2D warning track / ruler / dashboard use
+    when a multi-epoch overlay is loaded, so a section that only becomes
+    critical at, say, T5 is still flagged even if the active epoch looks calm.
+    """
+    epoch_sections = [e for e in (epoch_sections or []) if e]
+    if len(epoch_sections) < 2:
+        return classify_sections(epoch_sections[0] if epoch_sections else [], None)
+    ref = epoch_sections[0]
+    per_epoch = [classify_sections(epoch_sections[k], ref)
+                 for k in range(1, len(epoch_sections))]
+    n = max((len(st) for st in per_epoch), default=0)
+    out = []
+    for i in range(n):
+        best_status, best_issues = "OK", []
+        for st_list in per_epoch:
+            if i >= len(st_list):
+                continue
+            st, iss = st_list[i]
+            if (_SEVERITY[st] > _SEVERITY[best_status]
+                    or (_SEVERITY[st] == _SEVERITY[best_status]
+                        and len(iss) > len(best_issues))):
+                best_status, best_issues = st, iss
+        out.append((best_status, best_issues))
+    return out
+
+
+def classify_sections(sections, ref_sections=None, epoch_sections=None):
     """Classify every section as OK / CAUTION / CRITICAL.
 
     Uses **robust intra-dataset statistics** so it works even when no T0
@@ -106,7 +141,13 @@ def classify_sections(sections, ref_sections=None):
     This is the single source-of-truth used by the 2D warning track,
     chainage ruler, 3D markers and dashboard alerts so all views stay
     consistent.
+
+    When ``epoch_sections`` (a list of per-epoch section lists, T0 first) is
+    supplied, the status is taken as the worst across all epochs vs T0 — see
+    ``classify_sections_worst_epoch``.
     """
+    if epoch_sections and len([e for e in epoch_sections if e]) >= 2:
+        return classify_sections_worst_epoch(epoch_sections)
     if not sections:
         return []
 

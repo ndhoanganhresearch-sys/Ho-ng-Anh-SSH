@@ -1,0 +1,8 @@
+{
+  "dataset": "tunnel_t0t5_blend_curved_visual",
+  "purpose": "Visual-only curved Blender scene; source analysis point clouds unchanged",
+  "source_dataset": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\tunnel_t0t5_blend_combined_damage_interior",
+  "visual_time": "T5",
+  "curve_radius_m": 260.0,
+  "blend": "tunnel_t0t5_curved_visual_T5.blend"
+}

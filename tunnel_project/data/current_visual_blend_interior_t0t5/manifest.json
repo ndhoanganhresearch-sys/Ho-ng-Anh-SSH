@@ -1,0 +1,158 @@
+{
+  "dataset": "current_visual_blend_interior_t0t5",
+  "created_by": "tools/export_current_visual_blend_interior_t0t5.py",
+  "source_blend": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\blend_files_for_review\\tunnel_t0t5_blend_curved_visual__tunnel_t0t5_curved_visual_T5.blend",
+  "columns": "x y z nx ny nz intensity label damage_type",
+  "labels": {
+    "lining": 1,
+    "rail": 2,
+    "sleeper": 3,
+    "walkway": 4,
+    "cable_tray": 5,
+    "pipe": 6,
+    "light": 7,
+    "equipment": 8,
+    "target": 9,
+    "sign": 10,
+    "spalling": 20,
+    "crack": 21,
+    "leak": 22
+  },
+  "damage_types": {
+    "none": 0,
+    "crown_settlement": 1,
+    "sidewall_convergence": 2,
+    "spalling": 3,
+    "crack": 4,
+    "leak": 5
+  },
+  "times": [
+    {
+      "time": "T0",
+      "file": "T0.txt",
+      "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\current_visual_blend_interior_t0t5\\las_export\\T0.las",
+      "points": 18628,
+      "objects": 181,
+      "label_counts": {
+        "1": 9600,
+        "2": 1236,
+        "3": 1950,
+        "5": 186,
+        "6": 308,
+        "7": 912,
+        "8": 488,
+        "9": 2688,
+        "10": 390,
+        "20": 270,
+        "21": 300,
+        "22": 300
+      }
+    },
+    {
+      "time": "T1",
+      "file": "T1.txt",
+      "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\current_visual_blend_interior_t0t5\\las_export\\T1.las",
+      "points": 18628,
+      "objects": 181,
+      "label_counts": {
+        "1": 9600,
+        "2": 1236,
+        "3": 1950,
+        "5": 186,
+        "6": 308,
+        "7": 912,
+        "8": 488,
+        "9": 2688,
+        "10": 390,
+        "20": 270,
+        "21": 300,
+        "22": 300
+      }
+    },
+    {
+      "time": "T2",
+      "file": "T2.txt",
+      "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\current_visual_blend_interior_t0t5\\las_export\\T2.las",
+      "points": 18628,
+      "objects": 181,
+      "label_counts": {
+        "1": 9600,
+        "2": 1236,
+        "3": 1950,
+        "5": 186,
+        "6": 308,
+        "7": 912,
+        "8": 488,
+        "9": 2688,
+        "10": 390,
+        "20": 270,
+        "21": 300,
+        "22": 300
+      }
+    },
+    {
+      "time": "T3",
+      "file": "T3.txt",
+      "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\current_visual_blend_interior_t0t5\\las_export\\T3.las",
+      "points": 18628,
+      "objects": 181,
+      "label_counts": {
+        "1": 9600,
+        "2": 1236,
+        "3": 1950,
+        "5": 186,
+        "6": 308,
+        "7": 912,
+        "8": 488,
+        "9": 2688,
+        "10": 390,
+        "20": 270,
+        "21": 300,
+        "22": 300
+      }
+    },
+    {
+      "time": "T4",
+      "file": "T4.txt",
+      "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\current_visual_blend_interior_t0t5\\las_export\\T4.las",
+      "points": 18628,
+      "objects": 181,
+      "label_counts": {
+        "1": 9600,
+        "2": 1236,
+        "3": 1950,
+        "5": 186,
+        "6": 308,
+        "7": 912,
+        "8": 488,
+        "9": 2688,
+        "10": 390,
+        "20": 270,
+        "21": 300,
+        "22": 300
+      }
+    },
+    {
+      "time": "T5",
+      "file": "T5.txt",
+      "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\current_visual_blend_interior_t0t5\\las_export\\T5.las",
+      "points": 18628,
+      "objects": 181,
+      "label_counts": {
+        "1": 9600,
+        "2": 1236,
+        "3": 1950,
+        "5": 186,
+        "6": 308,
+        "7": 912,
+        "8": 488,
+        "9": 2688,
+        "10": 390,
+        "20": 270,
+        "21": 300,
+        "22": 300
+      }
+    }
+  ],
+  "coordinate_policy": "visual X offsets removed; T0-T5 are exported in the same tunnel coordinate frame for time-series settlement comparison"
+}

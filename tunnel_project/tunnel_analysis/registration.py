@@ -137,6 +137,25 @@ class RegistrationLayer:
                 "method": method, "n_targets": int(n_matched)}
 
 
+    def register_times(
+        self, context: PipelineContext, ref_index: int = 0,
+        min_targets: int = 3, max_match_dist: float = 2.0,
+        detect_max_points: int = 200_000,
+    ) -> Dict:
+        """Compatibility wrapper for T0/Tn time alignment.
+
+        The UI calls this method for the time-series wording, while the
+        implementation lives in ``register_epochs`` for backwards-compatible
+        dataset terminology. Both perform the same Tn -> T0 rigid alignment.
+        """
+        return self.register_epochs(
+            context,
+            ref_index=ref_index,
+            min_targets=min_targets,
+            max_match_dist=max_match_dist,
+            detect_max_points=detect_max_points,
+        )
+
     def merge_scans(self, context: PipelineContext) -> Tuple[np.ndarray, List[float]]:
         """Merge all loaded scan stations into one point cloud.
 

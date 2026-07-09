@@ -1,0 +1,12 @@
+metric,value
+source_blend,C:\Users\ssl\Desktop\Code Python\data python cusor\tunnel_project\data\blender_lidar_t0t5_realistic\blender_lidar_t0t5_realistic.blend
+lining_object,Tunnel_Lining_T5
+regular_points,147584
+raycast_points,161972
+raycast_lining_points,155006
+exact_surface_mae_mm,0.000363
+exact_surface_p95_mm,0.000983
+nearest_regular_mae_mm,70.822
+nearest_regular_median_mm,69.04
+nearest_regular_p95_mm,122.258
+nearest_regular_max_mm,136.297

@@ -1,0 +1,18 @@
+﻿Group,Parameter,Value,Unit,Meaning
+Scene,BLEND,tunnel_lidar_scene.blend,file,Blender scene used for raycasting
+Scene,LINING,Tunnel_Lining,object,Mesh object used for ray intersections
+Epoch,EPOCH,T0-T5,epoch,Time/deformation epoch to generate
+Geometry,R,500.0,m,Horizontal tunnel alignment radius
+Geometry,radius_m,4.25,m,Tunnel cross-section radius in metadata
+Geometry,chainage,arc length,m,Chainage measured along curve length
+Scanner,STATION_S,"10, 40, 70",m,Three TLS station locations by chainage
+Scanner,STATION_Z,-1.3,m,Tripod/scanner height
+Ray grid,DA,1.0,degree,Azimuth angular step
+Ray grid,DE,1.0,degree,Elevation angular step
+Ray grid,EL0,-25.0,degree,Starting elevation angle
+Ray grid,EL1,90.0,degree,Ending elevation angle
+Ray grid,MAXR,60.0,m,Maximum raycast range
+Noise,SEED,0,-,Fixed random seed for matched T0/Tn noise
+Noise,sigma,0.002 + 0.00006 * dist,m,Range-dependent scanner noise model
+Output,Format,x y z intensity label,txt,Per-point raycast output columns
+Output,label,1,class,Tunnel lining class label

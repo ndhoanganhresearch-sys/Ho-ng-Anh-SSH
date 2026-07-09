@@ -1,0 +1,39 @@
+{
+  "dataset": "curved_real_scale_railway_tunnel_t0t5",
+  "purpose": "Curved real-scale single railway tunnel, T0-T5 share one coordinate frame for centerline and settlement testing",
+  "dimensions_m": {
+    "length": 120.0,
+    "curve_radius": 420.0,
+    "inner_width": 8.8,
+    "crown_height": 7.4,
+    "track_gauge": 1.435
+  },
+  "coordinate_policy": "No visual offsets: all epochs occupy the same curved tunnel",
+  "epochs": [
+    "T0",
+    "T1",
+    "T2",
+    "T3",
+    "T4",
+    "T5"
+  ],
+  "settlement_m": {
+    "T0": 0.0,
+    "T1": -0.01,
+    "T2": -0.022,
+    "T3": -0.038,
+    "T4": -0.058,
+    "T5": -0.08
+  },
+  "components": [
+    "curved lining",
+    "curved rails",
+    "sleepers",
+    "walkways",
+    "drainage channels",
+    "pipes",
+    "cable trays",
+    "lights",
+    "registration targets"
+  ]
+}

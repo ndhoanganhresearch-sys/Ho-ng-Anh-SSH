@@ -1,0 +1,10 @@
+﻿main_metric,Crown settlement
+measured_point,Tunnel crown
+location,Ch 52.0m
+
+time,location,measured_point,crown_settlement_mm,new_crown_move_mm,result
+T1,Ch 52.0m,Tunnel crown,-8.98,-8.98,OK
+T2,Ch 52.0m,Tunnel crown,-19.75,-10.78,Warning
+T3,Ch 52.0m,Tunnel crown,-34.12,-14.37,Danger
+T4,Ch 52.0m,Tunnel crown,-52.08,-17.96,Danger
+T5,Ch 52.0m,Tunnel crown,-72.00,-19.92,Danger

@@ -1,0 +1,10 @@
+{
+  "time": "T4",
+  "file": "T4.txt",
+  "points": 86485,
+  "source_npy": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\tunnel_t0t5_blend\\las_export\\T4.npy",
+  "crown_settlement_mm": -30,
+  "local_damage_mm": -25,
+  "spalling_depth_mm": -34,
+  "crack_opening_mm": 8
+}

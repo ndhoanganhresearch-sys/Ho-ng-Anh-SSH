@@ -1,0 +1,71 @@
+{
+  "dataset": "blender_mesh_t0t5_step6",
+  "created_by": "tools/create_blender_mesh_t0t5_las.py",
+  "method": "Blender mesh vertices exported to LAS; no raycasting",
+  "length_m": 80.0,
+  "radius_m": 3.0,
+  "points_per_epoch": 166400,
+  "columns": "x y z nx ny nz intensity label",
+  "epochs": [
+    {
+      "epoch": "T0",
+      "txt_file": "T0.txt",
+      "points": 166400,
+      "deformation_mm": {
+        "crown_settlement_chainage_20m": 0.0,
+        "sidewall_convergence_chainage_45m": 0.0,
+        "local_damage_chainage_65m": 0.0
+      }
+    },
+    {
+      "epoch": "T1",
+      "txt_file": "T1.txt",
+      "points": 166400,
+      "deformation_mm": {
+        "crown_settlement_chainage_20m": -5.0,
+        "sidewall_convergence_chainage_45m": 0.0,
+        "local_damage_chainage_65m": 0.0
+      }
+    },
+    {
+      "epoch": "T2",
+      "txt_file": "T2.txt",
+      "points": 166400,
+      "deformation_mm": {
+        "crown_settlement_chainage_20m": -12.0,
+        "sidewall_convergence_chainage_45m": -5.0,
+        "local_damage_chainage_65m": 0.0
+      }
+    },
+    {
+      "epoch": "T3",
+      "txt_file": "T3.txt",
+      "points": 166400,
+      "deformation_mm": {
+        "crown_settlement_chainage_20m": -20.0,
+        "sidewall_convergence_chainage_45m": -12.0,
+        "local_damage_chainage_65m": -15.0
+      }
+    },
+    {
+      "epoch": "T4",
+      "txt_file": "T4.txt",
+      "points": 166400,
+      "deformation_mm": {
+        "crown_settlement_chainage_20m": -30.0,
+        "sidewall_convergence_chainage_45m": -22.0,
+        "local_damage_chainage_65m": -25.0
+      }
+    },
+    {
+      "epoch": "T5",
+      "txt_file": "T5.txt",
+      "points": 166400,
+      "deformation_mm": {
+        "crown_settlement_chainage_20m": -45.0,
+        "sidewall_convergence_chainage_45m": -35.0,
+        "local_damage_chainage_65m": -40.0
+      }
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+pair,crown_delta_mm,sidewall_delta_mm,local_delta_mm
+T0-T1,-4.0,-1.0,0.0
+T0-T2,-9.0,-4.0,0.0
+T0-T3,-16.0,-9.0,-8.0
+T0-T4,-25.0,-15.0,-17.0
+T0-T5,-36.0,-24.0,-30.0

@@ -8,6 +8,7 @@ from ..geometry import GeometricLayer
 from ..segmentation import SegmentationLayer
 from ..parameters import ParameterExtractionLayer
 from ..timeseries import TimeSeriesLayer
+from ..section_warnings import SECTION_DELTA_CAUTION_MM, SECTION_DELTA_CRITICAL_MM
 from ..digital_twin import DigitalTwinAILayer
 from ..worker import PipelineWorker
 from ..exporter import TunnelExporter
@@ -40,12 +41,12 @@ DISPLAY_MAX_POINTS = 600_000
 # Sidebar sub-actions kept in core mode, keyed by the step code at the start
 # of each button label (e.g. "4.3b"). Edit this set to fine-tune the scope.
 CORE_STEP_CODES = {
-    "1.1", "1.3", "1.9",                              # acquire: import/add scan + load epoch folder (1.2 viewport auto-inits; 1.4 merge / 1.8 times hidden)
+    "1.1", "1.3", "1.9b",                             # acquire + demo T0~T5 (1.9 folder loader stays advanced-only)
     "2.1", "2.5",                                     # preprocessing (2.5 = all-in-one denoise)
     "3.0",                                            # times auto-align (includes anchor+ICP and reports RMSE)
     "4.3b",                                           # B-spline centerline (builds its own section frames; 4.4 hidden)
     "5.1", "5.2", "5.5", "5.6",                       # deformation parameters (5.3/5.8 3D maps hidden — redundant)
-    "6.1", "6.2", "6.3", "6.6",                           # 4D time-series (6.1=trend+forecast) + export
+    "6.1", "6.2", "6.3", "6.6",                           # 4D: 6.1 trend, 6.2 M3C2, 6.3 sections, 6.6 export
     "7.1", "7.2",                                     # BIM export (IFC tunnel structure, no components) + AI assistant
     "8.1", "8.2", "8.3", "8.5",                       # export results: CSV / Excel / PDF report / AI work order
 }
@@ -542,6 +543,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             (1, "LiDAR data acquisition", "Base", [
                 ("1.1  Import / add scan station(s)", self._slot_1_1_import),
                 ("1.9  Load epoch folder T0→Tn", self._slot_1_9_epoch_folder),
+                ("1.9b Load demo T0~T5 (time_series_deformation)", self._slot_1_9_demo_timeseries),
                 ("1.2  Initialize 3D viewport", self._slot_1_2_viewport),
                 ("1.4  Register & merge all stations", self._slot_1_4_merge),
                 ("1.8  Load T0 and Tn times", self._slot_1_8_times),
@@ -1373,7 +1375,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self._activate_times(t0, tn)
             self._log(_tr("T0/Tn times loaded. T0 is reference; Tn is active for Steps 2-5.", self.current_language))
 
-        elif key == "6.2_plot":
+        elif key in ("6.1_plot", "6.2_plot"):  # 6.2_plot legacy alias
             # Combined trend + forecast: worker returns {"series", "forecast"};
             # accept a bare series dict too (back-compat).
             forecast = None
@@ -1400,6 +1402,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 if len(p95):
                     crown_log = np.round(crown, 2).tolist() if crown.size else []
                     self._log(f"Time-series trend [{method}]: times={list(labels)} crown_settlement_mm={crown_log}")
+                    if result.get("crown_chainage_m") is not None:
+                        self._log(
+                            f"  Crown probe chainage: {float(result.get('crown_chainage_m')):.1f} m"
+                            f" (source={result.get('crown_chainage_source', 'n/a')})"
+                        )
+                    self._log_step6_status_banner(result, forecast)
                     self._report_timeseries_extras(result, labels)
                     self._trend_hotspots = self._trend_hotspots_from_series(result)
                     hotspots = self._sync_step6_measured_point()
@@ -1412,8 +1420,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 self._forecast_data = forecast
                 if forecast and forecast.get("ok"):
                     self._log("  " + forecast.get("summary", ""))
+                # Keep latest trend for export (pair T0/Tn and multi-epoch).
+                self._multi_epoch_series = result
                 if len(labels) >= 2:
-                    self._multi_epoch_series = result
                     self.multi_epoch_widget.set_series(result, forecast)
                     self.right_tabs.setCurrentIndex(self._multi_epoch_tab_idx)
                 else:
@@ -1423,7 +1432,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 self.ts_plot.set_values(series, "Crown-height trend across chainage (mm)")
                 self.right_tabs.setCurrentIndex(self._ts_tab_idx)
 
-        elif key == "6.3_m3c2":
+        elif key in ("6.2_m3c2", "6.3_m3c2"):  # 6.3_m3c2 legacy alias
             res = result
             self.context.m3c2_result = res
             pts = np.asarray(res["corepoints"], dtype=np.float64)
@@ -1658,6 +1667,37 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 scans.append(bundle)
             return scans
         self._start_worker("1.9_epoch_folder", _load_epochs)
+
+    def _slot_1_9_demo_timeseries(self) -> None:
+        """One-click load of the built-in T0~T5 deformation demo folder."""
+        self._hdr("Load Demo T0~T5",
+                  "Load data/time_series_deformation (registered T0~T5) for Step 6 demo.")
+        demo_dir = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", "..", "data", "time_series_deformation"))
+        if not os.path.isdir(demo_dir):
+            self._log(f"Demo folder not found: {demo_dir}")
+            return
+        from ..io_layer import BaseLayer
+        files, skipped = BaseLayer.discover_epoch_files(demo_dir)
+        if skipped:
+            self._log(f"Demo folder skipped: {', '.join(skipped[:6])}")
+        if len(files) < 2 or not os.path.basename(files[0]).lower().startswith("t0."):
+            self._log("Demo folder must contain T0 and at least one Tn epoch.")
+            return
+        max_pts = 120_000
+        self._log(f"Loading demo epochs: {[os.path.basename(f) for f in files]} (max_points={max_pts})")
+        def _load_demo():
+            bl = BaseLayer()
+            scans = []
+            for idx, fp in enumerate(files):
+                bundle = bl.load_scan(fp, max_points=max_pts)
+                bundle.metadata = dict(bundle.metadata or {})
+                bundle.metadata["epoch_label"] = f"T{idx}"
+                bundle.metadata["epoch_role"] = "T0 reference" if idx == 0 else "monitoring epoch"
+                bundle.metadata["demo_dataset"] = "time_series_deformation"
+                scans.append(bundle)
+            return scans
+        self._start_worker("1.9_epoch_folder", _load_demo)
 
     def _activate_times(self, t0: PointCloudBundle, tn: PointCloudBundle) -> None:
         t0.metadata = dict(t0.metadata or {})
@@ -2932,7 +2972,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if crown.size == len(labels) + 1:
             crown = crown[1:]
         try:
-            location_txt = f"Ch {float(series.get('crown_chainage_m', 52.0)):.1f}m"
+            location_txt = f"Ch {float(series.get('crown_chainage_m', float('nan'))):.1f}m"
         except Exception:
             location_txt = "Ch --"
         measured_point_txt = _tr("Tunnel crown", self.current_language)
@@ -2985,6 +3025,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                   "extrapolate the caution/critical threshold crossing.")
         if len(self.context.scans) < 2:
             self._log(_tr("Load at least 2 scans (T0 and Tn) first.", self.current_language)); return
+        if self.context.registered_points is None and len(self.context.scans) >= 2:
+            self._log(_tr("Tip: run 3.0 Auto-align first if T0/Tn scanner poses differ.", self.current_language))
         import os as _os
 
         # If T0~Tn are loaded, use all times. For a normal two-scan workflow,
@@ -3011,7 +3053,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
         # Combined trend + forecast: compute the series, then (3+ times)
         # extrapolate threshold crossing in the same worker.
-        self._start_worker("6.2_plot",
+        self._start_worker("6.1_plot",
             lambda: self._compute_trend_and_forecast(times, labels))
 
     def _compute_trend_and_forecast(self, times, labels) -> dict:
@@ -3019,16 +3061,33 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         series = self.ts_mod.spatiotemporal_series(
             times, labels=labels, cyl_radius=0.5, normal_radius=0.6)
         try:
+            preferred = None
+            try:
+                preferred = self._preferred_crown_chainage_m()
+            except Exception:
+                preferred = None
+            # Prefer axis-aligned chainage for general tunnels; avoid forced curve radius.
+            pick = self.ts_mod.suggest_crown_chainage(
+                times,
+                chainage_window_m=5.0,
+                lateral_window_m=12.0,
+                crown_percentile=98.0,
+                curve_radius_m=None,
+                preferred_chainage_m=preferred,
+            )
             crown = self.ts_mod.crown_settlement_series(
-                times, labels=["T0"] + list(labels), chainage_m=52.0,
+                times, labels=["T0"] + list(labels),
+                chainage_m=float(pick.get("chainage_m", 0.0)),
                 chainage_window_m=5.0, lateral_window_m=12.0,
-                crown_percentile=98.0, curve_radius_m=420.0)
+                crown_percentile=98.0, curve_radius_m=None)
             series["crown_settlement_mm"] = crown.get("crown_settlement_mm")
             crown_abs = np.abs(np.asarray(crown.get("crown_settlement_mm", []), dtype=np.float64))
             series["crown_settlement_abs_mm"] = crown_abs[1:] if crown_abs.size == len(labels) + 1 else crown_abs
             series["crown_zone_points"] = crown.get("zone_points")
             series["crown_chainage_m"] = crown.get("chainage_m")
             series["crown_metric"] = crown.get("metric")
+            series["crown_chainage_source"] = pick.get("source")
+            series["crown_chainage_search_settlement_mm"] = pick.get("settlement_mm")
         except Exception as exc:
             series["crown_warning"] = str(exc)
         forecast = None
@@ -3037,7 +3096,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 # Forecast on the SAME metric the trend chart plots.
                 forecast_metric = "crown_settlement_abs_mm" if len(series.get("crown_settlement_abs_mm", [])) == len(labels) else "p95_abs_mm"
                 forecast = self.ts_mod.forecast_threshold_crossing(
-                    series, caution_mm=10.0, critical_mm=25.0, degree=2,
+                    series,
+                    caution_mm=SECTION_DELTA_CAUTION_MM,
+                    critical_mm=SECTION_DELTA_CRITICAL_MM,
+                    degree=2,
                     metric=forecast_metric)
         except Exception:
             forecast = None
@@ -3079,6 +3141,101 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if visible:
             self._sync_step6_measured_point()
 
+
+    def _preferred_crown_chainage_m(self):
+        """Optional crown chainage hint from active hotspot or ground_truth.csv."""
+        h = getattr(self, "_active_step6_hotspot", None)
+        if isinstance(h, dict) and h.get("position") == "Crown":
+            try:
+                val = float(h.get("chainage_m"))
+                if np.isfinite(val):
+                    return val
+            except Exception:
+                pass
+        try:
+            import os as _os
+            import csv as _csv
+            s0 = self.context.scans[0] if self.context.scans else None
+            if s0 is None or not getattr(s0, "path", None):
+                return None
+            gt_path = _os.path.join(_os.path.dirname(s0.path), "ground_truth.csv")
+            if not _os.path.exists(gt_path):
+                return None
+            best = None
+            with open(gt_path, "r", encoding="utf-8", newline="") as f:
+                reader = _csv.DictReader(f)
+                for row in reader:
+                    dtype = str(row.get("deformation_type") or row.get("type") or "").lower()
+                    if "crown" not in dtype:
+                        continue
+                    ch = float(row.get("chainage_m") or row.get("chainage") or "nan")
+                    mag = abs(float(row.get("deformation_mm") or row.get("value_mm") or row.get("mm") or 0.0))
+                    if not np.isfinite(ch):
+                        continue
+                    if best is None or mag > best[0]:
+                        best = (mag, ch)
+            return None if best is None else float(best[1])
+        except Exception:
+            return None
+
+    def _log_step6_status_banner(self, series: dict = None, forecast=None) -> None:
+        """One short status block so Step 6 results are easy to read."""
+        series = series or getattr(self.context, "time_series_result", None) or {}
+        labels = list(series.get("labels", []) or [])
+        crown_ch = series.get("crown_chainage_m")
+        crown_src = series.get("crown_chainage_source")
+        crown = np.asarray(series.get("crown_settlement_mm", []), dtype=np.float64)
+        p95 = np.asarray(series.get("p95_abs_mm", []), dtype=np.float64)
+        metric = "crown"
+        value = float("nan")
+        if crown.size:
+            value = float(crown[np.nanargmax(np.abs(crown))]) if np.any(np.isfinite(crown)) else float("nan")
+        elif p95.size:
+            metric = "p95"
+            value = float(np.nanmax(p95)) if np.any(np.isfinite(p95)) else float("nan")
+        # Section warning counts if 2D sections already computed.
+        n_caut = n_crit = 0
+        try:
+            sections = list(getattr(self.context, "sections", []) or [])
+            ref = getattr(self, "_section_ref_sections", None)
+            if sections:
+                for st, _iss in classify_sections(sections, ref, epoch_sections=getattr(self, "_section_epoch_sections", None)):
+                    if st == "CRITICAL":
+                        n_crit += 1
+                    elif st == "CAUTION":
+                        n_caut += 1
+        except Exception:
+            pass
+        parts = [
+            f"epochs={len(labels) + 1 if labels else len(getattr(self.context, 'scans', []) or [])}",
+            f"metric={metric}",
+        ]
+        if np.isfinite(value):
+            parts.append(f"peak={value:+.1f}mm")
+        if crown_ch is not None and np.isfinite(float(crown_ch)):
+            src = f"/{crown_src}" if crown_src else ""
+            parts.append(f"crown_ch={float(crown_ch):.1f}m{src}")
+        if n_crit or n_caut:
+            parts.append(f"sections=CRIT{n_crit}/CAUT{n_caut}")
+        parts.append(f"thresholds={SECTION_DELTA_CAUTION_MM:g}/{SECTION_DELTA_CRITICAL_MM:g}mm")
+        if forecast and forecast.get("ok"):
+            parts.append("forecast=ready")
+        msg = "Step 6 status: " + " | ".join(parts)
+        self._log(msg)
+        try:
+            self.sb_msg.setText(msg)
+        except Exception:
+            pass
+        # Push crown peak into Summary Dashboard cards.
+        try:
+            if hasattr(self, "dashboard_widget") and hasattr(self.dashboard_widget, "update_step6_summary"):
+                self.dashboard_widget.update_step6_summary(series, forecast)
+                # Jump to dashboard so the summary is visible immediately.
+                if hasattr(self, "_dashboard_tab_idx"):
+                    self.right_tabs.setCurrentIndex(self._dashboard_tab_idx)
+        except Exception as exc:
+            self._log(f"  Dashboard Step 6 summary skipped: {exc}")
+
     def _trend_hotspots_from_series(self, series: dict) -> list:
         """Markers for the Step 6 trend.
 
@@ -3091,7 +3248,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             labels = list(series.get("labels", []))
             crown = np.asarray(series.get("crown_settlement_mm", []), dtype=np.float64)
             if crown.size == len(labels) + 1:
-                chainage = float(series.get("crown_chainage_m", 52.0))
+                chainage = float(series.get("crown_chainage_m", float("nan")))
                 hotspots = []
                 for i, lbl in enumerate(labels):
                     signed = float(crown[i + 1])
@@ -3204,10 +3361,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
     def _slot_6_3_m3c2(self) -> None:
         self._hdr("M3C2 Deformation Map",
-                  "Compute supplementary M3C2 displacement for T0 to the latest loaded time.")
+                  "Supplementary map only. Crown settlement / section warnings remain the main Step 6 result.")
         self._sync_step6_measured_point()
         if len(self.context.scans) < 2:
             self._log(_tr("Load at least 2 scans (T0 and Tn) first.", self.current_language)); return
+        self._log(_tr("M3C2 is supplementary. If map looks near zero, trust 6.1 trend and 6.3 sections first.", self.current_language))
         import os as _os
         epoch0 = self.context.scans[0].points
         if len(self.context.scans) > 2:
@@ -3220,7 +3378,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             compare_name = _os.path.splitext(_os.path.basename(compare_scan.path or "Tn"))[0]
         self._m3c2_compare_label = f"T0\u2192{compare_name}"
         self._log(f"  M3C2 compare: {self._m3c2_compare_label} (supplementary; crown settlement remains the Step 6 result).")
-        self._start_worker("6.3_m3c2",
+        self._start_worker("6.2_m3c2",
             lambda: self.ts_mod.m3c2_distances(epoch0, epoch1, cyl_radius=0.5, normal_radius=0.6))
 
     def _slot_6_5_forecast(self) -> None:
@@ -3236,7 +3394,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         metric = "crown_settlement_abs_mm" if crown_abs.size == len(labels) else "p95_abs_mm"
         self._log(f"  Forecast metric: {'crown settlement' if metric == 'crown_settlement_abs_mm' else 'overall movement p95'}")
         self._start_worker("6.5_forecast", lambda: self.ts_mod.forecast_threshold_crossing(
-            series, caution_mm=10.0, critical_mm=25.0, degree=2, metric=metric))
+            series,
+            caution_mm=SECTION_DELTA_CAUTION_MM,
+            critical_mm=SECTION_DELTA_CRITICAL_MM,
+            degree=2, metric=metric))
 
     def _slot_6_6_export_timeseries(self) -> None:
         self._hdr("Export Time-Series Report",
@@ -3244,7 +3405,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._sync_step6_measured_point()
         series = getattr(self, "_multi_epoch_series", None)
         if not series or not series.get("labels"):
-            self._log(_tr("Run Step 6 trend with 3+ times first, then Step 6.6.", self.current_language)); return
+            series = getattr(self.context, "time_series_result", None)
+        if not series or not series.get("labels"):
+            self._log(_tr("Run 6.1 Deformation trend first (works for T0/Tn pair or multi-epoch folder).", self.current_language)); return
+        n_epochs = len(series.get("labels", []))
+        if n_epochs < 2:
+            self._log(_tr("Pair export mode: T0/Tn table will be written. Load 1.9 folder (3+ times) for full multi-epoch forecast columns.", self.current_language))
         import os as _os
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, _tr("Save Time-Series Report", self.current_language),

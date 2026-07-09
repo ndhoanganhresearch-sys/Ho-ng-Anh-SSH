@@ -1,0 +1,62 @@
+{
+  "source_blend": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\blender_lidar_t0t5_realistic\\blender_lidar_t0t5_realistic.blend",
+  "lining_object": "Tunnel_Lining_T5",
+  "ray_step_deg": 1.0,
+  "max_range_m": 55.0,
+  "stations": [
+    [
+      5.404387,
+      7.690399,
+      -1.20452
+    ],
+    [
+      5.404387,
+      27.877697,
+      -1.20452
+    ],
+    [
+      5.404387,
+      48.064995,
+      -1.20452
+    ],
+    [
+      5.404387,
+      68.252289,
+      -1.20452
+    ],
+    [
+      5.404387,
+      88.43959,
+      -1.20452
+    ]
+  ],
+  "regular_points": 147584,
+  "raycast_points": 161972,
+  "hit_counts_by_label": {
+    "1": 155006,
+    "4": 1554,
+    "6": 3371,
+    "8": 163,
+    "2": 506,
+    "3": 1241,
+    "7": 38,
+    "5": 93
+  },
+  "raycast_to_exact_lining_surface": {
+    "mae_mm": 0.00036319735966543204,
+    "median_mm": 0.0002384185791015625,
+    "p95_mm": 0.0009830249609876773,
+    "max_mm": 0.007921813448774628
+  },
+  "labels": {
+    "lining": 1,
+    "rail": 2,
+    "sleeper": 3,
+    "cable": 4,
+    "light": 5,
+    "walkway": 6,
+    "target": 7,
+    "equipment": 8,
+    "other": 9
+  }
+}

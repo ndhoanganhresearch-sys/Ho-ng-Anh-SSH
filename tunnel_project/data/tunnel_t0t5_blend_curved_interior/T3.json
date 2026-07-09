@@ -1,0 +1,13 @@
+{
+  "time": "T3",
+  "file": "T3.txt",
+  "points": 86485,
+  "source_npy": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\tunnel_t0t5_blend\\las_export\\T3.npy",
+  "crown_settlement_mm": -20,
+  "local_damage_mm": -15,
+  "spalling_depth_mm": -20,
+  "crack_opening_mm": 5,
+  "source_file": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\tunnel_t0t5_blend_combined_damage_interior\\T3.txt",
+  "curve_radius_m": 420.0,
+  "curve_model": "horizontal circular arc; chainage y mapped to phi=(y-y_min)/R"
+}

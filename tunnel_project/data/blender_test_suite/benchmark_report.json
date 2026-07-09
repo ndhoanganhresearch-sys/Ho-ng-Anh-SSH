@@ -7,7 +7,7 @@
         "frames": 48,
         "sections": 48,
         "profile": "Circle",
-        "median_radius_m": 3.9999691857362016
+        "median_radius_m": 4.00001786532623
       },
       "c2c": {
         "rmse_mm": 4.224691705403811,
@@ -28,7 +28,7 @@
         "frames": 48,
         "sections": 48,
         "profile": "Circle",
-        "median_radius_m": 3.9944592763755407
+        "median_radius_m": 3.9992994912897513
       },
       "c2c": {
         "rmse_mm": 20.35219685532497,
@@ -90,7 +90,7 @@
         "frames": 48,
         "sections": 48,
         "profile": "Circle",
-        "median_radius_m": 3.9992515175719086
+        "median_radius_m": 3.990806157663843
       },
       "centerline_span_xyz_m": [
         2.03261912294876,
@@ -104,7 +104,7 @@
         "frames": 48,
         "sections": 48,
         "profile": "Circle",
-        "median_radius_m": 3.989055295891027
+        "median_radius_m": 3.999344752737789
       },
       "centerline_span_xyz_m": [
         0.0039019927949254874,
@@ -114,6 +114,6 @@
     }
   },
   "gates": [],
-  "runtime_seconds": 0.689,
+  "runtime_seconds": 0.974,
   "failures": []
 }

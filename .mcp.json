@@ -1,15 +1,43 @@
-{
-  "mcpServers": {
-    "blender": {
-      "command": "C:\\Users\\ssl\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\Scripts\\blender-mcp.exe",
-      "args": []
-    },
-    "headroom": {
-      "command": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\.venv\\Scripts\\headroom.exe",
-      "args": ["mcp", "serve"],
-      "env": {
-        "HEADROOM_MCP_READ": "on"
-      }
-    }
-  }
+﻿{
+    "mcpServers":  {
+                       "blender":  {
+                                       "command":  "C:\\Users\\ssl\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\Scripts\\blender-mcp.exe",
+                                       "args":  [
+
+                                                ]
+                                   },
+                       "headroom":  {
+                                        "command":  "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\.venv\\Scripts\\headroom.exe",
+                                        "args":  [
+                                                     "mcp",
+                                                     "serve"
+                                                 ],
+                                        "env":  {
+                                                    "HEADROOM_MCP_READ":  "on"
+                                                }
+                                    },
+                       "notebooklm":  {
+                                          "command":  "C:\\Users\\ssl\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\Scripts\\notebooklm-mcp.exe",
+                                          "args":  [
+
+                                                   ]
+                                      },
+                       "openalex":  {
+                                        "command":  "C:\\Program Files\\nodejs\\npx.cmd",
+                                        "args":  [
+                                                     "-y",
+                                                     "@cyanheads/openalex-mcp-server"
+                                                 ]
+                                    },
+                       "obsidian":  {
+                                        "command":  "powershell",
+                                        "args":  [
+                                                     "-NoProfile",
+                                                     "-ExecutionPolicy",
+                                                     "Bypass",
+                                                     "-File",
+                                                     "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tools\\start_obsidian_mcp.ps1"
+                                                 ]
+                                    }
+                   }
 }

@@ -1,0 +1,21 @@
+{
+  "epoch": "T3",
+  "points": 686013,
+  "las_file": "T3.las",
+  "txt_file": "T3.txt",
+  "bounds_min": [
+    -91.10557954191744,
+    -21.937933810115993,
+    -2.1401030752890993
+  ],
+  "bounds_max": [
+    70.76329312856203,
+    30.373228266977932,
+    9.439698127790043
+  ],
+  "deformation_mm": {
+    "crown_settlement": -20.0,
+    "sidewall_convergence": -12.0,
+    "local_damage": -15.0
+  }
+}

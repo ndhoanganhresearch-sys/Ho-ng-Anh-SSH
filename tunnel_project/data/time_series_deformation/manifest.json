@@ -1,0 +1,114 @@
+{
+  "dataset": "time_series_deformation",
+  "purpose": "Clean registered T0-T5 synthetic tunnel deformation dataset for time-series analysis.",
+  "units": "meters; deformation values in ground_truth.csv are millimeters",
+  "registration": {
+    "synthetic_registered": true,
+    "transform": "identity",
+    "rmse_mm": 0.0
+  },
+  "tunnel": {
+    "length_m": 80.0,
+    "radius_m": 3.0,
+    "ring_spacing_m": 0.5,
+    "points_per_ring": 96
+  },
+  "epochs": [
+    "T0",
+    "T1",
+    "T2",
+    "T3",
+    "T4",
+    "T5"
+  ],
+  "files": [
+    {
+      "epoch": "T0",
+      "las": "T0.las",
+      "txt": "T0.txt",
+      "points": 15456
+    },
+    {
+      "epoch": "T1",
+      "las": "T1.las",
+      "txt": "T1.txt",
+      "points": 15456
+    },
+    {
+      "epoch": "T2",
+      "las": "T2.las",
+      "txt": "T2.txt",
+      "points": 15456
+    },
+    {
+      "epoch": "T3",
+      "las": "T3.las",
+      "txt": "T3.txt",
+      "points": 15456
+    },
+    {
+      "epoch": "T4",
+      "las": "T4.las",
+      "txt": "T4.txt",
+      "points": 15456
+    },
+    {
+      "epoch": "T5",
+      "las": "T5.las",
+      "txt": "T5.txt",
+      "points": 15456
+    }
+  ],
+  "deformation_specs": [
+    {
+      "type": "crown_settlement",
+      "chainage_m": 20.0,
+      "sigma_m": 3.0,
+      "theta_deg": 90.0,
+      "values_mm": {
+        "T0": 0.0,
+        "T1": -5.0,
+        "T2": -12.0,
+        "T3": -20.0,
+        "T4": -30.0,
+        "T5": -45.0
+      },
+      "description": "Progressive upper/crown deflection"
+    },
+    {
+      "type": "sidewall_convergence",
+      "chainage_m": 45.0,
+      "sigma_m": 3.0,
+      "theta_deg": 0.0,
+      "values_mm": {
+        "T0": 0.0,
+        "T1": 0.0,
+        "T2": -5.0,
+        "T3": -12.0,
+        "T4": -22.0,
+        "T5": -35.0
+      },
+      "description": "Progressive bilateral sidewall convergence"
+    },
+    {
+      "type": "local_damage",
+      "chainage_m": 65.0,
+      "sigma_m": 1.2,
+      "theta_deg": 55.0,
+      "values_mm": {
+        "T0": 0.0,
+        "T1": 0.0,
+        "T2": 0.0,
+        "T3": -15.0,
+        "T4": -25.0,
+        "T5": -40.0
+      },
+      "description": "Small localized lining damage patch"
+    }
+  ],
+  "outputs": [
+    "ground_truth.csv",
+    "baseline_pairs.csv",
+    "incremental_pairs.csv"
+  ]
+}

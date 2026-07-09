@@ -18,8 +18,8 @@ class ChainageRulerWidget(QtWidgets.QWidget):
 
     jumped = QtCore.Signal(int)   # emits section index
 
-    _H_TOTAL  = 50
-    _H_TRI    = 10    # height of triangle above track
+    _H_TOTAL  = 62
+    _H_TRI    = 18    # height of marker row above track
     _H_TRACK  = 14    # track band height
     _H_LABEL  = 16    # chainage label row height
     _ML       = 52    # left margin (for min-ch label)
@@ -39,19 +39,22 @@ class ChainageRulerWidget(QtWidgets.QWidget):
         self._sections: list        = []    # SectionGeometry list
         self._seg_colors: list      = []    # per-section status color hex
         self._marks:    list        = []    # (frac, color, tooltip, idx) — warnings only
+        self._hotspots: list        = []    # p95 trend markers shown as green stars
+        self._hotspot_source: list  = []    # raw hotspot dicts, rebuilt after sections load
         self._fracs:    list        = []    # fraction for every section
         self._cur_frac: float       = -1.0  # current position indicator
 
     # ── Public API ─────────────────────────────────────────────────────────
 
-    def set_sections(self, sections, ref_sections=None) -> None:
+    def set_sections(self, sections, ref_sections=None, epoch_sections=None) -> None:
         """Populate ruler from SectionGeometry list (Tn) and optional T0.
 
         Uses ``classify_sections()`` so the ruler is always consistent with
-        the 2D warning track and 3D flag-pole markers.
+        the 2D warning track and 3D flag-pole markers. When ``epoch_sections``
+        is given, the status is the worst across all epochs vs T0.
         """
         if not sections:
-            self._sections = []; self._seg_colors = []; self._marks = []
+            self._sections = []; self._seg_colors = []; self._marks = []; self._hotspots = []; self._hotspot_source = []
             self._fracs = []; self._min_ch = self._max_ch = 0.0
             self._cur_frac = -1.0; self.update(); return
 
@@ -62,7 +65,8 @@ class ChainageRulerWidget(QtWidgets.QWidget):
         self._fracs = [(c - self._min_ch) / span for c in chs]
 
         # Use the shared classifier so all views stay in sync.
-        statuses = classify_sections(sections, ref_sections or [])
+        statuses = classify_sections(sections, ref_sections or [],
+                                     epoch_sections=epoch_sections)
 
         seg_colors = []
         marks = []
@@ -82,7 +86,38 @@ class ChainageRulerWidget(QtWidgets.QWidget):
 
         self._seg_colors = seg_colors
         self._marks = marks
+        self._rebuild_hotspots()
         self.update()
+
+    def set_hotspots(self, hotspots) -> None:
+        """Add p95 trend markers to the chainage ruler.
+
+        ``hotspots`` is a list of dicts from the time-series trend, each with
+        chainage_m, label, position and value_mm. Markers are separate from
+        warning triangles and are drawn as green stars above the track.
+        """
+        self._hotspot_source = list(hotspots or [])
+        self._rebuild_hotspots()
+        self.update()
+
+    def _rebuild_hotspots(self) -> None:
+        marks = []
+        if self._max_ch > self._min_ch and self._sections:
+            span = self._max_ch - self._min_ch
+            chs = [float(getattr(s, "chainage", 0.0)) for s in self._sections]
+            for hp in self._hotspot_source:
+                try:
+                    ch = float(hp.get("chainage_m"))
+                    frac = max(0.0, min(1.0, (ch - self._min_ch) / span))
+                    idx = min(range(len(chs)), key=lambda i: abs(chs[i] - ch))
+                    val = float(hp.get("p95_abs_mm", hp.get("value_mm", 0.0)))
+                    label = str(hp.get("label", "Tn"))
+                    tip = (f"Trend p95 hotspot  {label}\n"
+                           f"Ch {ch:.1f} m | {hp.get('position', '')} | p95 {val:.1f} mm")
+                    marks.append((frac, "#22C55E", tip, idx, label))
+                except Exception:
+                    continue
+        self._hotspots = marks
 
     def set_current(self, chainage: float) -> None:
         """Move the current-position indicator to the given chainage."""
@@ -149,6 +184,36 @@ class ChainageRulerWidget(QtWidgets.QWidget):
             p.setBrush(QtGui.QColor(color))
             p.setPen(QtGui.QPen(QtGui.QColor(color).darker(140), 1))
             p.drawPath(path)
+
+        # Trend p95 hotspots: green stars with T-labels, drawn above warnings.
+        if self._hotspots:
+            font_hot = QtGui.QFont("Segoe UI", 7, QtGui.QFont.Bold)
+            p.setFont(font_hot)
+            fm_hot = QtGui.QFontMetrics(font_hot)
+            for item in self._hotspots:
+                frac, _color, _tip, _idx, label = item
+                cx = ML + int(frac * TW)
+                cx = max(ML + 8, min(ML + TW - 8, cx))
+                cy = track_y - 6
+                p.setPen(QtGui.QPen(QtGui.QColor("#14532D"), 1))
+                p.setBrush(QtGui.QColor("#22C55E"))
+                path = QtGui.QPainterPath()
+                path.moveTo(cx, cy - 8)
+                path.lineTo(cx + 3, cy - 3)
+                path.lineTo(cx + 8, cy - 3)
+                path.lineTo(cx + 4, cy + 1)
+                path.lineTo(cx + 6, cy + 7)
+                path.lineTo(cx, cy + 4)
+                path.lineTo(cx - 6, cy + 7)
+                path.lineTo(cx - 4, cy + 1)
+                path.lineTo(cx - 8, cy - 3)
+                path.lineTo(cx - 3, cy - 3)
+                path.closeSubpath()
+                p.drawPath(path)
+                text = f"{label} p95"
+                tw = fm_hot.horizontalAdvance(text)
+                p.setPen(QtGui.QColor("#DCFCE7"))
+                p.drawText(cx - tw // 2, max(9, cy - 10), text)
 
         # ── Current position indicator ───────────────────────────────────
         if 0.0 <= self._cur_frac <= 1.0:
@@ -238,6 +303,9 @@ class ChainageRulerWidget(QtWidgets.QWidget):
 
     def _tip_at(self, px: int) -> str:
         TW = max(self.width() - self._ML - self._MR, 1)
+        for frac, _c, tip, _i, *_rest in self._hotspots:
+            if abs(self._ML + int(frac * TW) - px) <= 9:
+                return tip
         for frac, _c, tip, _i in self._marks:
             if abs(self._ML + int(frac * TW) - px) <= 9:
                 return tip
@@ -245,6 +313,9 @@ class ChainageRulerWidget(QtWidgets.QWidget):
 
     def _mark_idx_at(self, px: int) -> int:
         TW = max(self.width() - self._ML - self._MR, 1)
+        for frac, _c, _t, idx, *_rest in self._hotspots:
+            if abs(self._ML + int(frac * TW) - px) <= 9:
+                return idx
         for frac, _c, _t, idx in self._marks:
             if abs(self._ML + int(frac * TW) - px) <= 9:
                 return idx

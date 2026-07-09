@@ -1,5 +1,6 @@
 from .common import *
 from .models import PointCloudBundle
+import re
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
@@ -228,6 +229,30 @@ class BaseLayer:
         if sfx in {".txt", ".xyz", ".pts", ".csv", ".asc"}:
             return _read_txt(fp, max_points=max_points)
         raise ValueError(f"Unsupported format: {sfx}")
+
+    @staticmethod
+    def discover_epoch_files(folder: str) -> tuple[list[str], list[str]]:
+        """Return point-cloud files named T<number> sorted by epoch index."""
+        root = Path(folder)
+        if not root.is_dir():
+            raise ValueError(f"Not a folder: {folder}")
+        supported = {".las", ".laz", ".ply", ".txt", ".xyz", ".pts", ".csv", ".asc"}
+        found: dict[int, Path] = {}
+        skipped: list[str] = []
+        for path in sorted(p for p in root.iterdir() if p.is_file()):
+            if path.suffix.lower() not in supported:
+                skipped.append(path.name)
+                continue
+            match = re.fullmatch(r"T(\d+)", path.stem, flags=re.IGNORECASE)
+            if not match:
+                skipped.append(path.name)
+                continue
+            epoch_idx = int(match.group(1))
+            if epoch_idx in found:
+                skipped.append(path.name)
+                continue
+            found[epoch_idx] = path
+        return [str(found[i]) for i in sorted(found)], skipped
 
     def get_point_count(self, fp: str) -> int:
         """Get total point count without loading full file."""

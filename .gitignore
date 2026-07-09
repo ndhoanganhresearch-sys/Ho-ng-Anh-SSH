@@ -22,6 +22,7 @@ ENV/
 # ---------------------------------------------------------------------------
 .idea/
 .vscode/
+.cursor/
 *.swp
 
 # ---------------------------------------------------------------------------
@@ -43,6 +44,7 @@ tunnel_project/i18n_missing_scan.txt
 # ---------------------------------------------------------------------------
 # Build / runtime output / Kết xuất khi chạy
 # ---------------------------------------------------------------------------
+node_modules/
 *.png
 ssl_tunnel_view.png
 tunnel_project/data/blender_test_suite/benchmark_report.json
@@ -75,3 +77,8 @@ _ref_*/
 
 # Local Claude/Codex agent state
 .claude/
+
+# Local secrets / Obsidian runtime (never commit)
+.obsidian-mcp.env
+.obsidian/
+

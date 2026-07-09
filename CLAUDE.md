@@ -128,6 +128,10 @@ Bang dinh tuyen: loai task -> noi lam viec (trong tunnel_project) -> repo tham k
 | BIM / IFC export | `tunnel_analysis/ifc_exporter.py` | `_ref_Cloud2BIM` (scan-to-BIM) | - | IFC smoke + visual |
 | Clean noise / cable / line | clean/denoise module | `_ref_PowerLine` | - | benchmark denoise |
 | AI / RAG / OCR / digital twin | `rag_ai.py`, `headroom_adapter.py`, `digital_twin.py` | - | `headroom` | `agent_verify.ps1 ai` |
+| Document/PDF/DOCX/PPTX/XLSX -> RAG | `rag_ai.py`, `tools/ingest_mineru_markdown.py`, outputs | `_ref_trending/MinerU` | `headroom` optional | MinerU output + RAG retrieval smoke |
+| Agent codebase memory / structural search | MCP config/docs only until tested | `_ref_trending/codebase-memory-mcp` | optional MCP | isolated MCP/query smoke |
+| Streaming 3D reconstruction ideas | prototype/tools first | `_ref_trending/lingbot-map` | `blender` optional | synthetic/visual smoke |
+| GPU acceleration for NumPy-heavy kernels | prototype first, then target module | `_ref_trending/cupy` | - | CPU-vs-GPU numeric/timing benchmark |
 | Research gap / paper / citation | docs, drafts, ARS skills | `_ref_FY387_calc` (benchmark) | `openalex` | RESEARCH_WORKFLOW |
 | Doc synthesis / review / draft | docs/ | - | `notebooklm` | doc review |
 | 3D scene / render / scene inspect | tools/ | - | `blender` | visual |
@@ -136,6 +140,11 @@ Bang dinh tuyen: loai task -> noi lam viec (trong tunnel_project) -> repo tham k
 Cach chon repo: neu task khop ro mot dong trong bang -> TU DONG lam theo, khong hoi.
 Chi hoi lai khi task mo ho hoac dung cham nhieu module/repo cung luc, hoac khi can trich
 code tu `_ref_*` vao production (vi vi pham quy tac read-only).
+
+Voi cac repo trending moi trong `_ref_trending/`, dung `tunnel_project/docs/TRENDING_REPO_DECISION_GUIDE.md`
+va co the chay `tunnel_project/tools/choose_trending_repo.py "<mo ta task>"` de tu tinh diem chon repo.
+Mac dinh: MinerU duoc phep dung nhu tooling tai lieu/RAG da test; codebase-memory-mcp/lingbot-map/CuPy
+chi dung isolated/reference cho den khi co smoke test rieng va khong sua production code neu chua benchmark.
 
 ## Review focus
 

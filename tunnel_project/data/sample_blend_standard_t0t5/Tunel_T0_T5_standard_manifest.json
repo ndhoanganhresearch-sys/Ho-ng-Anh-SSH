@@ -1,0 +1,83 @@
+{
+  "source_blend": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\sample_pcd\\Tunel.blend",
+  "output_blend": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\sample_blend_standard_t0t5\\Tunel_T0_T5_standard.blend",
+  "method": "duplicate sample Tunel.blend meshes into T0-T5 epoch collections and deform lining meshes only",
+  "source_bounds_min": [
+    -1.023711085319519,
+    -1.0227360725402832,
+    -0.029702480882406235
+  ],
+  "source_bounds_max": [
+    6.390835285186768,
+    78.86743927001953,
+    1.682783842086792
+  ],
+  "epochs": [
+    {
+      "epoch": "T0",
+      "collection": "T0_sample_blend_epoch",
+      "objects": 10,
+      "x_offset": 0.0,
+      "deformation_mm": {
+        "crown_settlement": 0.0,
+        "sidewall_convergence": 0.0,
+        "local_damage": 0.0
+      }
+    },
+    {
+      "epoch": "T1",
+      "collection": "T1_sample_blend_epoch",
+      "objects": 10,
+      "x_offset": 5.5,
+      "deformation_mm": {
+        "crown_settlement": -4.0,
+        "sidewall_convergence": -1.0,
+        "local_damage": 0.0
+      }
+    },
+    {
+      "epoch": "T2",
+      "collection": "T2_sample_blend_epoch",
+      "objects": 10,
+      "x_offset": 11.0,
+      "deformation_mm": {
+        "crown_settlement": -9.0,
+        "sidewall_convergence": -4.0,
+        "local_damage": 0.0
+      }
+    },
+    {
+      "epoch": "T3",
+      "collection": "T3_sample_blend_epoch",
+      "objects": 10,
+      "x_offset": 16.5,
+      "deformation_mm": {
+        "crown_settlement": -16.0,
+        "sidewall_convergence": -9.0,
+        "local_damage": -8.0
+      }
+    },
+    {
+      "epoch": "T4",
+      "collection": "T4_sample_blend_epoch",
+      "objects": 10,
+      "x_offset": 22.0,
+      "deformation_mm": {
+        "crown_settlement": -25.0,
+        "sidewall_convergence": -15.0,
+        "local_damage": -17.0
+      }
+    },
+    {
+      "epoch": "T5",
+      "collection": "T5_sample_blend_epoch",
+      "objects": 10,
+      "x_offset": 27.5,
+      "deformation_mm": {
+        "crown_settlement": -36.0,
+        "sidewall_convergence": -24.0,
+        "local_damage": -30.0
+      }
+    }
+  ]
+}

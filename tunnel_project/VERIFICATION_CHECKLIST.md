@@ -2,6 +2,21 @@
 
 Use this checklist after code changes. Keep verification proportional to the blast radius.
 
+## Agent Gate
+
+Prefer the unified gate during Claude/agent sessions:
+
+```powershell
+.\agent_verify.ps1 quick
+.\agent_verify.ps1 step6
+.\agent_verify.ps1 ai
+.\agent_verify.ps1 compile <changed_files>
+```
+
+Use `quick` for default smoke coverage, `step6` for T0/Tn deformation work,
+`ai` for Headroom/RAG/digital twin changes, and `compile` for narrow Python
+edits.
+
 ## Small Python Change
 
 ```powershell

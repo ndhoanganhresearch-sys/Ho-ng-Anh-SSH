@@ -1,0 +1,56 @@
+{
+  "epoch": "T4",
+  "file": "T4.txt",
+  "points": 907517,
+  "hit_counts_by_label": {
+    "1": 758793,
+    "8": 36184,
+    "2": 67930,
+    "6": 23818,
+    "4": 20725,
+    "5": 67
+  },
+  "station_counts": [
+    {
+      "station": 0,
+      "hits": 41060
+    },
+    {
+      "station": 1,
+      "hits": 60422
+    },
+    {
+      "station": 2,
+      "hits": 370977
+    },
+    {
+      "station": 3,
+      "hits": 371116
+    },
+    {
+      "station": 4,
+      "hits": 63942
+    }
+  ],
+  "pose_bias_m_yaw_deg": [
+    -0.009,
+    -0.008,
+    0.003,
+    -0.025
+  ],
+  "deformation_mm": {
+    "crown_settlement": -24.0,
+    "sidewall_convergence": -14.0,
+    "local_damage": -16.0
+  },
+  "source_bounds_min": [
+    -1.023711085319519,
+    -1.0227360725402832,
+    -0.029702480882406235
+  ],
+  "source_bounds_max": [
+    6.390835285186768,
+    78.86743927001953,
+    1.682783842086792
+  ]
+}

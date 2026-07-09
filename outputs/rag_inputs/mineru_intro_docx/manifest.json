@@ -1,0 +1,7 @@
+﻿{
+    "rag_ready_content_list":  "outputs/rag_inputs/mineru_intro_docx/Intro_SSL_Tunnel_v3_review_content_list.json",
+    "rag_ready_markdown":  "outputs/rag_inputs/mineru_intro_docx/Intro_SSL_Tunnel_v3_review.md",
+    "mineru_output":  "outputs/mineru_intro_docx/Intro_SSL_Tunnel_v3_review/office",
+    "source":  "Intro_SSL_Tunnel_v3_review.docx",
+    "created_by":  "MinerU 3.4.0 smoke test"
+}

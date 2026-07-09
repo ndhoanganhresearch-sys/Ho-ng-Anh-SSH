@@ -1,0 +1,11 @@
+{
+  "metric": "crown_settlement_mm",
+  "chainage_m": 52.0,
+  "chainage_window_m": 5.0,
+  "lateral_window_m": 12.0,
+  "crown_percentile": 98.0,
+  "regular_mae_mm": 0.48,
+  "raycast_mae_mm": 1.007,
+  "regular_mape_pct": 1.15,
+  "raycast_mape_pct": 2.315
+}

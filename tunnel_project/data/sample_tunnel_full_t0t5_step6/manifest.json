@@ -1,0 +1,140 @@
+{
+  "dataset": "sample_tunnel_full_t0t5_step6",
+  "created_by": "tools/create_t0t5_from_tunnel_sample_autoaxis.py",
+  "source": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\sample_pcd\\circle_tunnel_dw.las",
+  "method": "full tunnel sample point cloud deformation; no raycasting",
+  "axes": {
+    "chain_axis": 0,
+    "lateral_axis": 1,
+    "vertical_axis": 2
+  },
+  "points_per_epoch": 686013,
+  "epochs": [
+    {
+      "epoch": "T0",
+      "points": 686013,
+      "las_file": "T0.las",
+      "txt_file": "T0.txt",
+      "bounds_min": [
+        -91.10900231933594,
+        -21.93950080871582,
+        -2.141
+      ],
+      "bounds_max": [
+        70.76099768066408,
+        30.372499191284177,
+        9.439
+      ],
+      "deformation_mm": {
+        "crown_settlement": 0.0,
+        "sidewall_convergence": 0.0,
+        "local_damage": 0.0
+      }
+    },
+    {
+      "epoch": "T1",
+      "points": 686013,
+      "las_file": "T1.las",
+      "txt_file": "T1.txt",
+      "bounds_min": [
+        -91.10789688944074,
+        -21.940812017073497,
+        -2.140276244259346
+      ],
+      "bounds_max": [
+        70.76247625497483,
+        30.370847231307707,
+        9.437907768853398
+      ],
+      "deformation_mm": {
+        "crown_settlement": -5.0,
+        "sidewall_convergence": 0.0,
+        "local_damage": 0.0
+      }
+    },
+    {
+      "epoch": "T2",
+      "points": 686013,
+      "las_file": "T2.las",
+      "txt_file": "T2.txt",
+      "bounds_min": [
+        -91.11026015346063,
+        -21.939206152385292,
+        -2.1417242033481307
+      ],
+      "bounds_max": [
+        70.75914877025954,
+        30.37407957444131,
+        9.43907127152517
+      ],
+      "deformation_mm": {
+        "crown_settlement": -12.0,
+        "sidewall_convergence": -5.0,
+        "local_damage": 0.0
+      }
+    },
+    {
+      "epoch": "T3",
+      "points": 686013,
+      "las_file": "T3.las",
+      "txt_file": "T3.txt",
+      "bounds_min": [
+        -91.10557954191744,
+        -21.937933810115993,
+        -2.1401030752890993
+      ],
+      "bounds_max": [
+        70.76329312856203,
+        30.373228266977932,
+        9.439698127790043
+      ],
+      "deformation_mm": {
+        "crown_settlement": -20.0,
+        "sidewall_convergence": -12.0,
+        "local_damage": -15.0
+      }
+    },
+    {
+      "epoch": "T4",
+      "points": 686013,
+      "las_file": "T4.las",
+      "txt_file": "T4.txt",
+      "bounds_min": [
+        -91.11137364166086,
+        -21.942125384728158,
+        -2.1409993736710287
+      ],
+      "bounds_max": [
+        70.7580419431546,
+        30.370937121774496,
+        9.439846436575287
+      ],
+      "deformation_mm": {
+        "crown_settlement": -30.0,
+        "sidewall_convergence": -22.0,
+        "local_damage": -25.0
+      }
+    },
+    {
+      "epoch": "T5",
+      "points": 686013,
+      "las_file": "T5.las",
+      "txt_file": "T5.txt",
+      "bounds_min": [
+        -91.10543458103747,
+        -21.943413276615825,
+        -2.1406299343418973
+      ],
+      "bounds_max": [
+        70.76257115468073,
+        30.3702312120199,
+        9.440051300576025
+      ],
+      "deformation_mm": {
+        "crown_settlement": -45.0,
+        "sidewall_convergence": -35.0,
+        "local_damage": -40.0
+      }
+    }
+  ]
+}

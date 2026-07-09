@@ -1,0 +1,54 @@
+{
+  "epoch": "T0",
+  "file": "T0.txt",
+  "points": 1038340,
+  "hit_counts_by_label": {
+    "1": 1009497,
+    "2": 2072,
+    "3": 8328,
+    "4": 5682,
+    "5": 770,
+    "6": 10337,
+    "7": 139,
+    "8": 1515
+  },
+  "station_counts": [
+    {
+      "station": 0,
+      "chainage_m": 8.0,
+      "hits": 201005
+    },
+    {
+      "station": 1,
+      "chainage_m": 28.0,
+      "hits": 211884
+    },
+    {
+      "station": 2,
+      "chainage_m": 48.0,
+      "hits": 212410
+    },
+    {
+      "station": 3,
+      "chainage_m": 68.0,
+      "hits": 211852
+    },
+    {
+      "station": 4,
+      "chainage_m": 88.0,
+      "hits": 201189
+    }
+  ],
+  "pose_bias_m_yaw_deg": [
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "deformation_mm": {
+    "crown_settlement_chainage_24m": 0.0,
+    "sidewall_convergence_chainage_50m": 0.0,
+    "local_damage_chainage_72m": 0.0,
+    "ring_joint_offset_chainage_60m": 0.0
+  }
+}

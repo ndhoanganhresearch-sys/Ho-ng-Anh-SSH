@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 import os
 import json
+import hashlib
 
 
 # ???? Korean/International tunnel safety standards knowledge base ????????????????????????
@@ -295,6 +296,62 @@ class TunnelRAGAssistant:
         except Exception as e:
             return f"RAG initialization failed: {e}"
 
+    @staticmethod
+    def _chunk_text(text: str, chunk_size: int = 1200, overlap: int = 150) -> list[str]:
+        """Split plain/Markdown text into small overlapping chunks."""
+        clean = "\n".join(line.rstrip() for line in text.splitlines()).strip()
+        if not clean:
+            return []
+        if chunk_size <= overlap:
+            raise ValueError("chunk_size must be greater than overlap")
+
+        chunks = []
+        start = 0
+        while start < len(clean):
+            end = min(start + chunk_size, len(clean))
+            if end < len(clean):
+                boundary = max(clean.rfind("\n\n", start, end), clean.rfind(". ", start, end))
+                if boundary > start + chunk_size // 2:
+                    end = boundary + 1
+            chunk = clean[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+            if end >= len(clean):
+                break
+            start = max(0, end - overlap)
+        return chunks
+
+    def ingest_markdown(self, path: str, source: str = None,
+                        chunk_size: int = 1200, overlap: int = 150) -> str:
+        """Index an external Markdown/plain-text document into the RAG collection."""
+        if not self._ready or not self._embedder or not self._collection:
+            init_msg = self.initialize()
+            if not self._ready:
+                return init_msg
+
+        doc_path = Path(path)
+        try:
+            text = doc_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            text = doc_path.read_text(encoding="utf-8-sig")
+
+        chunks = self._chunk_text(text, chunk_size=chunk_size, overlap=overlap)
+        if not chunks:
+            return f"No text chunks found in {doc_path}"
+
+        source_name = source or doc_path.name
+        digest = hashlib.sha1(str(doc_path.resolve()).encode("utf-8")).hexdigest()[:12]
+        ids = [f"doc_{digest}_{i}" for i in range(len(chunks))]
+        embeddings = self._embedder.encode(chunks).tolist()
+        metadatas = [{"source": source_name, "path": str(doc_path), "chunk": i}
+                     for i in range(len(chunks))]
+        self._collection.upsert(
+            ids=ids,
+            embeddings=embeddings,
+            documents=chunks,
+            metadatas=metadatas)
+        return f"Indexed {len(chunks)} chunks from {source_name}. Collection size: {self._collection.count()}."
+
     def query(self, prompt: str, context: PipelineContext,
               n_results: int = 5) -> str:
         """Query local LLM with RAG context from safety standards."""
@@ -347,17 +404,16 @@ Provide:
             data = r.json()
             text = data.get("response", "").strip()
             if not text:
-                return "[EMPTY RESPONSE]\n" + json.dumps(data, indent=2)[:400]
+                return ("[EMPTY RESPONSE FROM LOCAL LLM] Falling back to offline assessment.\n\n"
+                        f"{self._offline_analysis(context)}")
             m  = data.get("model", "unknown")
             n  = data.get("eval_count", "?")
             es = data.get("eval_duration", 0) / 1e9
             rag_note = f"RAG: {n_results} standards retrieved" if self._ready else "RAG: not initialized"
             return f"{text}\n\n{'-'*52}\nModel: {m} | Tokens: {n} | Eval: {es:.1f}s | {rag_note} | {optimized.note}"
         except Exception as e:
-            return (f"[CONNECTION ERROR] {e}\n\n"
-                    f"Start Ollama: ollama serve\n"
-                    f"Pull model: ollama pull {self.OLLAMA_MODEL}\n\n"
-                    f"--- Offline Analysis ---\n"
+            return (f"[LOCAL AI FALLBACK] Ollama/RAG response unavailable: {e}\n"
+                    f"To enable LLM mode: start Ollama with 'ollama serve' and pull '{self.OLLAMA_MODEL}'.\n\n"
                     f"{self._offline_analysis(context)}")
 
     def enrich_work_order(self, order: dict, context: PipelineContext = None,
@@ -434,7 +490,7 @@ Provide:
         return "\n".join(lines) if lines else "  (no parameters extracted yet)"
 
     def _offline_analysis(self, context: PipelineContext) -> str:
-        """Offline rule-based analysis when Ollama is not available."""
+        """Offline rule-based analysis when Ollama/RAG is not available."""
         THRESHOLDS = {
             "crown_settlement_mm":    ("Crown Settlement",    10.0, 25.0, "mm"),
             "lateral_convergence_mm": ("Convergence",         15.0, 30.0, "mm"),
@@ -442,30 +498,59 @@ Provide:
             "eccentricity_mean_mm":   ("Eccentricity",        10.0, 25.0, "mm"),
         }
         p = context.parameters or {}
-        lines = ["OFFLINE RULE-BASED ASSESSMENT", "=" * 40]
+        sections = list(getattr(context, "sections", []) or [])
+        lines = [
+            "OFFLINE RULE-BASED ASSESSMENT",
+            "=" * 40,
+            "This is decision support only; confirm actions with a qualified tunnel/structural engineer.",
+            "",
+            "MEASUREMENT SUMMARY",
+        ]
         overall = "STABLE"
+        measured = 0
         for key, (label, c_thr, r_thr, unit) in THRESHOLDS.items():
             val = p.get(key)
             if not isinstance(val, (int, float)) or not np.isfinite(float(val)):
                 continue
+            measured += 1
             if val >= r_thr:
-                lines.append(f"[CRITICAL] {label} = {val:.2f}{unit} (threshold: {r_thr}{unit})")
+                lines.append(f"[CRITICAL] {label} = {val:.2f}{unit} (critical >= {r_thr}{unit})")
                 overall = "CRITICAL"
             elif val >= c_thr:
-                lines.append(f"[CAUTION]  {label} = {val:.2f}{unit} (threshold: {c_thr}{unit})")
-                if overall == "STABLE": overall = "CAUTION"
+                lines.append(f"[CAUTION]  {label} = {val:.2f}{unit} (caution >= {c_thr}{unit})")
+                if overall == "STABLE":
+                    overall = "CAUTION"
             else:
-                lines.append(f"[OK]        {label} = {val:.2f}{unit}")
-        if context.sections:
-            n_viol = sum(1 for s in context.sections if s.clearance_violation)
+                lines.append(f"[OK]       {label} = {val:.2f}{unit}")
+        if measured == 0:
+            lines.append("[INFO] No Step 5 deformation parameters are available yet.")
+
+        lines.append("")
+        lines.append("SECTION ALERTS")
+        if sections:
+            n_viol = sum(1 for s in sections if getattr(s, "clearance_violation", False))
+            clearance_values = [getattr(s, "min_clearance_dist", np.nan) for s in sections]
+            clearance_values = [float(v) for v in clearance_values if np.isfinite(float(v))]
             if n_viol:
-                lines.append(f"[CRITICAL] {n_viol} clearance violation(s) detected")
+                lines.append(f"[CRITICAL] {n_viol} clearance violation section(s) detected.")
                 overall = "CRITICAL"
-        lines.append(f"\nOVERALL STATUS: {overall}")
-        if overall == "CRITICAL":
-            lines.append("ACTION: Immediate inspection and engineering assessment required.")
-        elif overall == "CAUTION":
-            lines.append("ACTION: Schedule detailed inspection within 30 days.")
+            else:
+                lines.append(f"[OK] {len(sections)} section(s) available; no clearance violation flag set.")
+            if clearance_values:
+                lines.append(f"Minimum clearance distance: {min(clearance_values):.3f} m")
         else:
-            lines.append("ACTION: Continue routine monitoring schedule.")
+            lines.append("[INFO] No 2D sections available; run Step 6.3 before final engineering review.")
+
+        lines.append("")
+        lines.append(f"OVERALL STATUS: {overall}")
+        lines.append("NEXT STEPS")
+        if overall == "CRITICAL":
+            lines.append("1. Restrict/inspect the affected chainage immediately.")
+            lines.append("2. Review Step 6.2/6.3 maps and export an IFC/work order for engineering action.")
+        elif overall == "CAUTION":
+            lines.append("1. Schedule detailed inspection and repeat monitoring at the next time point.")
+            lines.append("2. Compare Step 6 trend and M3C2 map to confirm whether deformation is accelerating.")
+        else:
+            lines.append("1. Continue routine monitoring and keep T0/Tn records for trend comparison.")
+            lines.append("2. Re-run Step 6 after the next scan campaign.")
         return "\n".join(lines)

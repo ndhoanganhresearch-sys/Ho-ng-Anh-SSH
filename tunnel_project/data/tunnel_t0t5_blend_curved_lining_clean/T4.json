@@ -1,0 +1,23 @@
+{
+  "time": "T4",
+  "txt": "T4.txt",
+  "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\tunnel_t0t5_blend_curved_lining_clean\\las_export\\T4.las",
+  "points": 60000,
+  "removed_interior_points": 26485,
+  "kept_labels": {
+    "1": 58110,
+    "20": 820,
+    "21": 466,
+    "22": 604
+  },
+  "bounds_min": [
+    -2.127576,
+    0.0,
+    -1.73825
+  ],
+  "bounds_max": [
+    12.097994,
+    79.708307,
+    3.380278
+  ]
+}

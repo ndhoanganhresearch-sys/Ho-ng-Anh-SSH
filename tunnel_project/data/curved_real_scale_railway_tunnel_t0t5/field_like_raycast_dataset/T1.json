@@ -1,0 +1,53 @@
+{
+  "time": "T1",
+  "txt": "T1.txt",
+  "points": 198985,
+  "label_counts": {
+    "3": 8594,
+    "1": 157736,
+    "4": 11905,
+    "6": 13718,
+    "7": 57,
+    "2": 2293,
+    "5": 4587,
+    "9": 38,
+    "20": 57
+  },
+  "station_counts": [
+    {
+      "station": 0,
+      "chainage_m": 8.0,
+      "hits": 27301
+    },
+    {
+      "station": 1,
+      "chainage_m": 25.0,
+      "hits": 28688
+    },
+    {
+      "station": 2,
+      "chainage_m": 42.0,
+      "hits": 28784
+    },
+    {
+      "station": 3,
+      "chainage_m": 59.0,
+      "hits": 28839
+    },
+    {
+      "station": 4,
+      "chainage_m": 76.0,
+      "hits": 28828
+    },
+    {
+      "station": 5,
+      "chainage_m": 93.0,
+      "hits": 28710
+    },
+    {
+      "station": 6,
+      "chainage_m": 110.0,
+      "hits": 27835
+    }
+  ]
+}

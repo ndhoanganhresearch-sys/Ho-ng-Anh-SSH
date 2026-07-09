@@ -1,0 +1,95 @@
+{
+  "dataset": "step6_clean_t0t5_deformation",
+  "created_by": "tools/create_step6_clean_t0t5_dataset.py",
+  "purpose": "Clean synthetic dataset for Step 6 time-series deformation testing",
+  "method": "direct mesh/point generation; no raycasting; identity registration",
+  "length_m": 80.0,
+  "radius_m": 3.0,
+  "points_per_epoch": 158720,
+  "epochs": [
+    {
+      "epoch": "T0",
+      "las_file": "T0.las",
+      "txt_file": "T0.txt",
+      "points": 158720,
+      "deformation_mm": {
+        "upper_deflection_chainage_20m": 0.0,
+        "local_damage_chainage_65m": 0.0
+      },
+      "registration": {
+        "status": "pre-registered",
+        "transform": "identity"
+      }
+    },
+    {
+      "epoch": "T1",
+      "las_file": "T1.las",
+      "txt_file": "T1.txt",
+      "points": 158720,
+      "deformation_mm": {
+        "upper_deflection_chainage_20m": -5.0,
+        "local_damage_chainage_65m": 0.0
+      },
+      "registration": {
+        "status": "pre-registered",
+        "transform": "identity"
+      }
+    },
+    {
+      "epoch": "T2",
+      "las_file": "T2.las",
+      "txt_file": "T2.txt",
+      "points": 158720,
+      "deformation_mm": {
+        "upper_deflection_chainage_20m": -12.0,
+        "local_damage_chainage_65m": 0.0
+      },
+      "registration": {
+        "status": "pre-registered",
+        "transform": "identity"
+      }
+    },
+    {
+      "epoch": "T3",
+      "las_file": "T3.las",
+      "txt_file": "T3.txt",
+      "points": 158720,
+      "deformation_mm": {
+        "upper_deflection_chainage_20m": -20.0,
+        "local_damage_chainage_65m": -15.0
+      },
+      "registration": {
+        "status": "pre-registered",
+        "transform": "identity"
+      }
+    },
+    {
+      "epoch": "T4",
+      "las_file": "T4.las",
+      "txt_file": "T4.txt",
+      "points": 158720,
+      "deformation_mm": {
+        "upper_deflection_chainage_20m": -30.0,
+        "local_damage_chainage_65m": -25.0
+      },
+      "registration": {
+        "status": "pre-registered",
+        "transform": "identity"
+      }
+    },
+    {
+      "epoch": "T5",
+      "las_file": "T5.las",
+      "txt_file": "T5.txt",
+      "points": 158720,
+      "deformation_mm": {
+        "upper_deflection_chainage_20m": -45.0,
+        "local_damage_chainage_65m": -40.0
+      },
+      "registration": {
+        "status": "pre-registered",
+        "transform": "identity"
+      }
+    }
+  ]
+}

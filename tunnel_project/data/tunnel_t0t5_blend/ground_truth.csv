@@ -1,0 +1,7 @@
+epoch,crown_settlement_mm,local_damage_mm,crown_chainage_m,damage_chainage_m,measured_max_disp_mm,measured_p95_disp_mm,registration,transform
+T0,0,0,40,60,0.00,0.00,pre-registered,identity
+T1,5,0,40,60,4.99,4.14,pre-registered,identity
+T2,12,0,40,60,11.98,9.95,pre-registered,identity
+T3,20,15,40,60,19.97,16.79,pre-registered,identity
+T4,30,25,40,60,29.96,25.49,pre-registered,identity
+T5,45,40,40,60,44.93,38.26,pre-registered,identity

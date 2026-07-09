@@ -1,0 +1,33 @@
+{
+  "scene": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\tunnel_t0t5_blend_curved_visual\\tunnel_t0t5_curved_visual_T5.blend",
+  "objects": 1111,
+  "points": 38448,
+  "label_counts": {
+    "1": 23520,
+    "2": 2784,
+    "3": 3120,
+    "4": 96,
+    "5": 672,
+    "6": 672,
+    "7": 1728,
+    "8": 528,
+    "10": 960,
+    "9": 2976,
+    "20": 432,
+    "21": 480,
+    "22": 480
+  },
+  "txt": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\current_blender_las_export\\current_blender_scene_points.txt",
+  "las": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\current_blender_las_export\\current_blender_scene.las",
+  "las_points": 38448,
+  "bounds_min": [
+    -0.998696,
+    -0.998695,
+    -0.029694
+  ],
+  "bounds_max": [
+    55.998795,
+    78.949997,
+    1.675185
+  ]
+}

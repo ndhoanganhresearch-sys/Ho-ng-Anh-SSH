@@ -1,0 +1,7 @@
+epoch,ground_truth_abs_mm,tool_regular_p95_abs_mm,tool_raycast_p95_abs_mm,regular_error_abs_mm,raycast_error_abs_mm,raycast_minus_regular_mm,tool_regular_median_signed_mm,tool_raycast_median_signed_mm,tool_regular_incremental_p95_mm,tool_raycast_incremental_p95_mm,method
+T0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,M3C2
+T1,10.0,3.767,6.963,-6.233,-3.037,3.196,-0.0,-0.237,3.767,6.963,M3C2
+T2,22.0,8.456,15.162,-13.544,-6.838,6.706,-0.0,-0.287,4.74,8.24,M3C2
+T3,38.0,14.95,26.32,-23.05,-11.68,11.371,-0.0,-0.335,6.493,11.112,M3C2
+T4,58.0,23.14,40.038,-34.86,-17.962,16.898,-0.0,-0.373,8.146,13.814,M3C2
+T5,80.0,32.089,55.395,-47.911,-24.605,23.306,-0.0,-0.402,8.971,15.371,M3C2

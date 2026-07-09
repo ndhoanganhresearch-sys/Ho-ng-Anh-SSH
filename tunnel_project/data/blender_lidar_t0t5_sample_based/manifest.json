@@ -1,0 +1,357 @@
+{
+  "dataset": "blender_lidar_t0t5_sample_based",
+  "created_by": "tools/create_blender_lidar_t0t5_from_sample_blend.py",
+  "source_blend": "C:\\Users\\ssl\\Desktop\\Code Python\\data python cusor\\tunnel_project\\data\\sample_pcd\\Tunel.blend",
+  "purpose": "T0-T5 time-series LiDAR dataset based on the provided sample tunnel Blender file.",
+  "columns": "x y z nx ny nz intensity label",
+  "labels": {
+    "Cylinder": 1,
+    "Cylinder.003": 1,
+    "Cylinder.001": 2,
+    "Cylinder.002": 4,
+    "Cylinder.005": 4,
+    "Cylinder.006": 5,
+    "Cylinder.007": 5,
+    "Circle": 8,
+    "Plane.001": 6,
+    "Sphere.001": 7
+  },
+  "epochs": [
+    {
+      "epoch": "T0",
+      "file": "T0.txt",
+      "points": 907298,
+      "hit_counts_by_label": {
+        "1": 757857,
+        "8": 36470,
+        "4": 20941,
+        "2": 68095,
+        "5": 66,
+        "6": 23869
+      },
+      "station_counts": [
+        {
+          "station": 0,
+          "hits": 40884
+        },
+        {
+          "station": 1,
+          "hits": 60125
+        },
+        {
+          "station": 2,
+          "hits": 370816
+        },
+        {
+          "station": 3,
+          "hits": 371174
+        },
+        {
+          "station": 4,
+          "hits": 64299
+        }
+      ],
+      "pose_bias_m_yaw_deg": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "deformation_mm": {
+        "crown_settlement": 0.0,
+        "sidewall_convergence": 0.0,
+        "local_damage": 0.0
+      },
+      "source_bounds_min": [
+        -1.023711085319519,
+        -1.0227360725402832,
+        -0.029702480882406235
+      ],
+      "source_bounds_max": [
+        6.390835285186768,
+        78.86743927001953,
+        1.682783842086792
+      ]
+    },
+    {
+      "epoch": "T1",
+      "file": "T1.txt",
+      "points": 907145,
+      "hit_counts_by_label": {
+        "1": 757529,
+        "4": 20915,
+        "8": 36846,
+        "2": 68009,
+        "6": 23780,
+        "5": 66
+      },
+      "station_counts": [
+        {
+          "station": 0,
+          "hits": 40828
+        },
+        {
+          "station": 1,
+          "hits": 59940
+        },
+        {
+          "station": 2,
+          "hits": 370773
+        },
+        {
+          "station": 3,
+          "hits": 371096
+        },
+        {
+          "station": 4,
+          "hits": 64508
+        }
+      ],
+      "pose_bias_m_yaw_deg": [
+        0.003,
+        -0.006,
+        0.001,
+        0.01
+      ],
+      "deformation_mm": {
+        "crown_settlement": -4.0,
+        "sidewall_convergence": -1.0,
+        "local_damage": 0.0
+      },
+      "source_bounds_min": [
+        -1.023711085319519,
+        -1.0227360725402832,
+        -0.029702480882406235
+      ],
+      "source_bounds_max": [
+        6.390835285186768,
+        78.86743927001953,
+        1.682783842086792
+      ]
+    },
+    {
+      "epoch": "T2",
+      "file": "T2.txt",
+      "points": 907399,
+      "hit_counts_by_label": {
+        "1": 758337,
+        "8": 35894,
+        "4": 20957,
+        "2": 68156,
+        "6": 23991,
+        "5": 64
+      },
+      "station_counts": [
+        {
+          "station": 0,
+          "hits": 40962
+        },
+        {
+          "station": 1,
+          "hits": 60272
+        },
+        {
+          "station": 2,
+          "hits": 370912
+        },
+        {
+          "station": 3,
+          "hits": 371189
+        },
+        {
+          "station": 4,
+          "hits": 64064
+        }
+      ],
+      "pose_bias_m_yaw_deg": [
+        -0.005,
+        0.004,
+        -0.001,
+        -0.012
+      ],
+      "deformation_mm": {
+        "crown_settlement": -9.0,
+        "sidewall_convergence": -4.0,
+        "local_damage": 0.0
+      },
+      "source_bounds_min": [
+        -1.023711085319519,
+        -1.0227360725402832,
+        -0.029702480882406235
+      ],
+      "source_bounds_max": [
+        6.390835285186768,
+        78.86743927001953,
+        1.682783842086792
+      ]
+    },
+    {
+      "epoch": "T3",
+      "file": "T3.txt",
+      "points": 907261,
+      "hit_counts_by_label": {
+        "1": 757903,
+        "8": 36830,
+        "2": 67827,
+        "4": 20932,
+        "6": 23702,
+        "5": 67
+      },
+      "station_counts": [
+        {
+          "station": 0,
+          "hits": 40748
+        },
+        {
+          "station": 1,
+          "hits": 59801
+        },
+        {
+          "station": 2,
+          "hits": 370905
+        },
+        {
+          "station": 3,
+          "hits": 371163
+        },
+        {
+          "station": 4,
+          "hits": 64644
+        }
+      ],
+      "pose_bias_m_yaw_deg": [
+        0.007,
+        0.006,
+        0.002,
+        0.018
+      ],
+      "deformation_mm": {
+        "crown_settlement": -16.0,
+        "sidewall_convergence": -8.0,
+        "local_damage": -8.0
+      },
+      "source_bounds_min": [
+        -1.023711085319519,
+        -1.0227360725402832,
+        -0.029702480882406235
+      ],
+      "source_bounds_max": [
+        6.390835285186768,
+        78.86743927001953,
+        1.682783842086792
+      ]
+    },
+    {
+      "epoch": "T4",
+      "file": "T4.txt",
+      "points": 907517,
+      "hit_counts_by_label": {
+        "1": 758793,
+        "8": 36184,
+        "2": 67930,
+        "6": 23818,
+        "4": 20725,
+        "5": 67
+      },
+      "station_counts": [
+        {
+          "station": 0,
+          "hits": 41060
+        },
+        {
+          "station": 1,
+          "hits": 60422
+        },
+        {
+          "station": 2,
+          "hits": 370977
+        },
+        {
+          "station": 3,
+          "hits": 371116
+        },
+        {
+          "station": 4,
+          "hits": 63942
+        }
+      ],
+      "pose_bias_m_yaw_deg": [
+        -0.009,
+        -0.008,
+        0.003,
+        -0.025
+      ],
+      "deformation_mm": {
+        "crown_settlement": -24.0,
+        "sidewall_convergence": -14.0,
+        "local_damage": -16.0
+      },
+      "source_bounds_min": [
+        -1.023711085319519,
+        -1.0227360725402832,
+        -0.029702480882406235
+      ],
+      "source_bounds_max": [
+        6.390835285186768,
+        78.86743927001953,
+        1.682783842086792
+      ]
+    },
+    {
+      "epoch": "T5",
+      "file": "T5.txt",
+      "points": 907058,
+      "hit_counts_by_label": {
+        "1": 757790,
+        "8": 37495,
+        "2": 67333,
+        "4": 20855,
+        "6": 23525,
+        "5": 60
+      },
+      "station_counts": [
+        {
+          "station": 0,
+          "hits": 40635
+        },
+        {
+          "station": 1,
+          "hits": 59488
+        },
+        {
+          "station": 2,
+          "hits": 370834
+        },
+        {
+          "station": 3,
+          "hits": 371173
+        },
+        {
+          "station": 4,
+          "hits": 64928
+        }
+      ],
+      "pose_bias_m_yaw_deg": [
+        0.012,
+        -0.01,
+        0.004,
+        0.03
+      ],
+      "deformation_mm": {
+        "crown_settlement": -35.0,
+        "sidewall_convergence": -22.0,
+        "local_damage": -28.0
+      },
+      "source_bounds_min": [
+        -1.023711085319519,
+        -1.0227360725402832,
+        -0.029702480882406235
+      ],
+      "source_bounds_max": [
+        6.390835285186768,
+        78.86743927001953,
+        1.682783842086792
+      ]
+    }
+  ]
+}

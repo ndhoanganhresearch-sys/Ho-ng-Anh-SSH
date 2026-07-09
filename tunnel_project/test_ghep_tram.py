@@ -1,4 +1,4 @@
-"""
+r"""
 test_ghep_tram.py — Kiểm tra tính năng target-based ghép trạm
 Chạy: ..\.venv\Scripts\python.exe test_ghep_tram.py
 

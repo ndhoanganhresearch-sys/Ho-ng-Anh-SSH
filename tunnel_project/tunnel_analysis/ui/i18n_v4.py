@@ -38,11 +38,12 @@ PHRASES = {
     "Time-series analysis": {"vi": "Phân tích chuỗi thời gian", "ko": "시계열 분석"},
     "BIM and AI": {"vi": "BIM và AI", "ko": "BIM 및 AI"},
     "1.1  Import LAS / PLY data": {"vi": "1.1  Nhập dữ liệu LAS / PLY", "ko": "1.1  LAS / PLY 데이터 가져오기"},
+    "1.1  Import / add scan station(s)": {"vi": "1.1  Nhap / them tram quet", "ko": "1.1  Import / add scan station(s)"},
     "1.2  Initialize 3D viewport": {"vi": "1.2  Khởi tạo khung nhìn 3D", "ko": "1.2  3D 뷰포트 초기화"},
     # ── Core display-renumbered labels (clean gap-free sidebar) ──────────────
     "1.2  Add scan station (+)": {"vi": "1.2  Thêm trạm quét (+)", "ko": "1.2  스캔 스테이션 추가 (+)"},
     "2.2  Clean noise (auto: cables, lights, people, wall cables)": {"vi": "2.2  Làm sạch nhiễu (tự động: cáp, đèn, người, cáp tường)", "ko": "2.2  노이즈 정리 (자동: 케이블, 조명, 사람, 벽면 케이블)"},
-    "3.1  Auto-align T0/Tn epochs (target or ICP)": {"vi": "3.1  Tự căn chỉnh T0/Tn (mốc hoặc ICP)", "ko": "3.1  T0/Tn 자동 정합 (타깃 또는 ICP)"},
+    "3.1  Auto-align T0/Tn times (target or ICP)": {"vi": "3.1  Tự căn chỉnh T0/Tn (mốc hoặc ICP)", "ko": "3.1  T0/Tn 자동 정합 (타깃 또는 ICP)"},
     "4.1  B-Spline C2 centerline (PDF 3.4)": {"vi": "4.1  Trục tim B-Spline C2 (PDF 3.4)", "ko": "4.1  B-스플라인 C2 중심선 (PDF 3.4)"},
     "5.3  Ovality epsilon": {"vi": "5.3  Độ ô van epsilon", "ko": "5.3  타원도 epsilon"},
     "5.4  Section eccentricity e": {"vi": "5.4  Độ lệch tâm mặt cắt e", "ko": "5.4  단면 편심 e"},
@@ -58,7 +59,7 @@ PHRASES = {
     "1.5  Rough alignment (manual)": {"vi": "1.5  Căn chỉnh thô (thủ công)", "ko": "1.5  개략 정렬 (수동)"},
     "1.6  Chain register & merge": {"vi": "1.6  Đăng ký chuỗi & hợp nhất", "ko": "1.6  체인 정합 및 병합"},
     "1.7  Registration error heatmap": {"vi": "1.7  Bản đồ nhiệt sai số đăng ký", "ko": "1.7  정합 오차 히트맵"},
-    "1.8  Load T0 and Tn epochs": {"vi": "1.8  Nạp kỳ đo T0 và Tn", "ko": "1.8  T0 및 Tn 시기 불러오기"},
+    "1.8  Load T0 and Tn times": {"vi": "1.8  Nạp kỳ đo T0 và Tn", "ko": "1.8  T0 및 Tn 시기 불러오기"},
     "2.1  Voxel downsampling": {"vi": "2.1  Lấy mẫu xuống theo voxel", "ko": "2.1  복셀 다운샘플링"},
     "2.2  Statistical outlier removal": {"vi": "2.2  Loại điểm ngoại lai thống kê", "ko": "2.2  통계적 이상치 제거"},
     "2.3  Extract tunnel lining shell": {"vi": "2.3  Trích vỏ lớp lót hầm", "ko": "2.3  터널 라이닝 셸 추출"},
@@ -84,7 +85,7 @@ PHRASES = {
     "6.3  Plot 2D Technical Section T0/Tn": {"vi": "6.3  Vẽ mặt cắt kỹ thuật 2D T0/Tn", "ko": "6.3  T0/Tn 2D 기술 단면 도시"},
     "5.8  Clearance 3D violation map": {"vi": "5.8  Bản đồ vi phạm tĩnh không 3D", "ko": "5.8  건축한계 3D 위반 지도"},
     "5.8  Deformation / clearance 3D warning map": {"vi": "5.8  Bản đồ cảnh báo biến dạng / tĩnh không 3D", "ko": "5.8  변형 / 건축한계 3D 경고 지도"},
-    "6.1  Load T0 and Tn epochs": {"vi": "6.1  Nạp kỳ đo T0 và Tn", "ko": "6.1  T0 및 Tn 시기 불러오기"},
+    "6.1  Load T0 and Tn times": {"vi": "6.1  Nạp kỳ đo T0 và Tn", "ko": "6.1  T0 및 Tn 시기 불러오기"},
     "6.1  Plot deformation trend T0→Tn": {"vi": "6.1  Vẽ xu hướng biến dạng T0→Tn", "ko": "6.1  T0→Tn 변형 추세 도시"},
     "6.2  Plot deformation trend": {"vi": "6.2  Vẽ xu hướng biến dạng", "ko": "6.2  변형 추세 도시"},
     "6.2  M3C2 deformation map T0→Tn": {"vi": "6.2  Bản đồ biến dạng M3C2 T0→Tn", "ko": "6.2  T0→Tn M3C2 변형 지도"},
@@ -123,8 +124,8 @@ PHRASES = {
     "Clearance 3D Violation Map (PDF 3.6)": {"vi": "Bản đồ vi phạm tĩnh không 3D (PDF 3.6)", "ko": "건축한계 3D 위반 지도 (PDF 3.6)"},
     "Deformation / Clearance 3D Warning Map": {"vi": "Bản đồ cảnh báo biến dạng / tĩnh không 3D", "ko": "변형 / 건축한계 3D 경고 지도"},
     "Plot 2D Technical Section": {"vi": "Vẽ mặt cắt kỹ thuật 2D", "ko": "2D 기술 단면 도시"},
-    "Load Time-Series Epochs": {"vi": "Nạp các kỳ đo chuỗi thời gian", "ko": "시계열 시기 불러오기"},
-    "Load T0/Tn Epochs": {"vi": "Nạp kỳ đo T0/Tn", "ko": "T0/Tn 시기 불러오기"},
+    "Load Time-Series Times": {"vi": "Nạp các kỳ đo chuỗi thời gian", "ko": "시계열 시기 불러오기"},
+    "Load T0/Tn Times": {"vi": "Nạp kỳ đo T0/Tn", "ko": "T0/Tn 시기 불러오기"},
     "Deformation Trend Chart": {"vi": "Biểu đồ xu hướng biến dạng", "ko": "변형 추세 차트"},
     "Export CSV": {"vi": "Xuất CSV", "ko": "CSV 내보내기"},
     "Export Excel Report": {"vi": "Xuất báo cáo Excel", "ko": "Excel 보고서 내보내기"},
@@ -165,7 +166,7 @@ PHRASES = {
     "Highlight points violating vehicle clearance envelope on 3D viewport.": {"vi": "Làm nổi các điểm vi phạm bao tĩnh không xe trên khung nhìn 3D.", "ko": "3D 뷰포트에서 차량 건축한계 포락선을 위반하는 점을 강조합니다."},
     "Highlight sections with deformation or clearance warnings on the 3D viewport.": {"vi": "Làm nổi bật các đoạn có cảnh báo biến dạng hoặc tĩnh không trên khung nhìn 3D.", "ko": "3D 뷰포트에서 변형 또는 건축한계 경고 구간을 강조합니다."},
     "Display flat 2D engineering cross-sections with vehicle clearance limits.": {"vi": "Hiển thị mặt cắt ngang kỹ thuật 2D phẳng kèm giới hạn tĩnh không xe.", "ko": "차량 건축한계가 포함된 평면 2D 공학 횡단면을 표시합니다."},
-    "Load reference and monitoring point-cloud epochs for deformation comparison.": {"vi": "Nạp các kỳ đo đám mây điểm tham chiếu và giám sát để so sánh biến dạng.", "ko": "변형 비교를 위해 기준 및 모니터링 점군 시기를 불러옵니다."},
+    "Load reference and monitoring point-cloud times for deformation comparison.": {"vi": "Nạp các kỳ đo đám mây điểm tham chiếu và giám sát để so sánh biến dạng.", "ko": "변형 비교를 위해 기준 및 모니터링 점군 시기를 불러옵니다."},
     "Load reference T0 and monitoring Tn at the start of the pipeline.": {"vi": "Nạp T0 tham chiếu và Tn giám sát ngay từ đầu pipeline.", "ko": "파이프라인 시작 단계에서 기준 T0와 모니터링 Tn을 불러옵니다."},
     "Plot deformation trend metrics along the chainage line.": {"vi": "Vẽ các chỉ số xu hướng biến dạng dọc theo tuyến lý trình.", "ko": "측점 라인을 따라 변형 추세 지표를 도시합니다."},
     "Export section parameters to CSV file.": {"vi": "Xuất tham số mặt cắt ra tệp CSV.", "ko": "단면 파라미터를 CSV 파일로 내보냅니다."},
@@ -284,7 +285,7 @@ PHRASES = {
     "Target anchor translation matrix applied.": {"vi": "Đã áp dụng ma trận tịnh tiến theo mốc mục tiêu.", "ko": "타겟 앵커 평행이동 행렬을 적용했습니다."},
     "T0 reference sections loaded for overlay.": {"vi": "Đã nạp mặt cắt tham chiếu T0 để chồng lớp.", "ko": "오버레이용 T0 기준 단면을 불러왔습니다."},
     "--- 2D technical cross-section analysis ---": {"vi": "--- Phân tích mặt cắt kỹ thuật 2D ---", "ko": "--- 2D 기술 단면 분석 ---"},
-    "Time-series point-cloud epochs loaded successfully.": {"vi": "Đã nạp các kỳ đo đám mây điểm chuỗi thời gian thành công.", "ko": "시계열 점군 시기를 성공적으로 불러왔습니다."},
+    "Time-series point-cloud times loaded successfully.": {"vi": "Đã nạp các kỳ đo đám mây điểm chuỗi thời gian thành công.", "ko": "시계열 점군 시기를 성공적으로 불러왔습니다."},
     "Load at least 2 scan stations first.": {"vi": "Hãy nạp ít nhất 2 trạm quét trước.", "ko": "먼저 스캔 스테이션을 2개 이상 불러오세요."},
     "Run registration first.": {"vi": "Hãy chạy đăng ký trước.", "ko": "먼저 정합을 실행하세요."},
     "Load at least 2 scan stations first (1.1 + 1.3).": {"vi": "Hãy nạp ít nhất 2 trạm quét trước (1.1 + 1.3).", "ko": "먼저 스캔 스테이션을 2개 이상 불러오세요 (1.1 + 1.3)."},
@@ -302,7 +303,7 @@ PHRASES = {
     "Pipeline reset complete. Raw scans preserved.": {"vi": "Đã đặt lại quy trình. Giữ nguyên bản quét gốc.", "ko": "파이프라인 초기화 완료. 원본 스캔은 유지됩니다."},
     "Intensity data required. Load a scan with intensity channel first.": {"vi": "Cần dữ liệu cường độ. Hãy nạp bản quét có kênh cường độ trước.", "ko": "강도 데이터가 필요합니다. 먼저 강도 채널이 있는 스캔을 불러오세요."},
     "Load at least 2 scans (T0 and Tn) first.": {"vi": "Hãy nạp ít nhất 2 bản quét (T0 và Tn) trước.", "ko": "먼저 스캔을 2개 이상 (T0 및 Tn) 불러오세요."},
-    "T0/Tn epochs loaded. T0 is reference; Tn is active for Steps 2-5.": {"vi": "Đã nạp T0/Tn. T0 là mốc tham chiếu; Tn là dữ liệu active cho Bước 2-5.", "ko": "T0/Tn 시기를 불러왔습니다. T0는 기준, Tn은 2-5단계의 활성 데이터입니다."},
+    "T0/Tn times loaded. T0 is reference; Tn is active for Steps 2-5.": {"vi": "Đã nạp T0/Tn. T0 là mốc tham chiếu; Tn là dữ liệu active cho Bước 2-5.", "ko": "T0/Tn 시기를 불러왔습니다. T0는 기준, Tn은 2-5단계의 활성 데이터입니다."},
     "Run Step 4.1 first.": {"vi": "Hãy chạy Bước 4.1 trước.", "ko": "먼저 4.1 단계를 실행하세요."},
     "Complete Steps 2 and 4 before running this analysis.": {"vi": "Hoàn thành Bước 2 và 4 trước khi chạy phân tích này.", "ko": "이 분석을 실행하기 전에 2단계와 4단계를 완료하세요."},
     "Run Step 6.3 first.": {"vi": "Hãy chạy Bước 6.3 trước.", "ko": "먼저 6.3 단계를 실행하세요."},
@@ -390,7 +391,7 @@ PHRASES.update({
     "Reset zoom (R)": {"vi": "Đặt lại thu phóng (R)", "ko": "확대/축소 초기화 (R)"},
     "Show section parameters": {"vi": "Hiển thị tham số mặt cắt", "ko": "단면 매개변수 표시"},
     "Show T0 overlay": {"vi": "Hiển thị chồng T0", "ko": "T0 오버레이 표시"},
-    "Overlay reference epoch T0 on current section": {"vi": "Chồng epoch tham chiếu T0 lên mặt cắt hiện tại", "ko": "현재 단면에 기준 epoch T0 오버레이"},
+    "Overlay reference times T0 on current section": {"vi": "Chồng times tham chiếu T0 lên mặt cắt hiện tại", "ko": "현재 단면에 기준 times T0 오버레이"},
     "Animate": {"vi": "Chạy mô phỏng", "ko": "애니메이션"},
     "Stop": {"vi": "Dừng", "ko": "중지"},
     "Animate deformation T0 -> Tn": {"vi": "Chạy mô phỏng biến dạng T0 -> Tn", "ko": "T0 -> Tn 변형 애니메이션"},
@@ -428,8 +429,8 @@ PHRASES.update({
     "Number of cross-sections along the tunnel (centerline control points). Higher = finer detail, slower.": {"vi": "Số mặt cắt dọc theo hầm (điểm điều khiển tim tuyến). Cao hơn = chi tiết hơn nhưng chậm hơn.", "ko": "터널을 따라 생성할 단면 수입니다 (중심선 제어점). 값이 클수록 더 세밀하지만 느립니다."},
     "Target axial distance between cross-sections. The section count is derived from the measured tunnel length.": {"vi": "Khoảng cách dọc trục mong muốn giữa các mặt cắt. Số mặt cắt được suy ra từ chiều dài hầm đo được.", "ko": "단면 사이의 목표 축방향 거리입니다. 단면 수는 측정된 터널 길이에서 계산됩니다."},
     "Load tunnel point-cloud data": {"vi": "Nạp dữ liệu đám mây điểm hầm", "ko": "터널 점군 데이터 불러오기"},
-    "Load reference epoch T0": {"vi": "Nạp epoch tham chiếu T0", "ko": "기준 epoch T0 불러오기"},
-    "Load monitoring epoch Tn": {"vi": "Nạp epoch quan trắc Tn", "ko": "모니터링 epoch Tn 불러오기"},
+    "Load reference times T0": {"vi": "Nạp times tham chiếu T0", "ko": "기준 times T0 불러오기"},
+    "Load monitoring times Tn": {"vi": "Nạp times quan trắc Tn", "ko": "모니터링 times Tn 불러오기"},
     "Load Scan Station": {"vi": "Nạp trạm quét", "ko": "스캔 스테이션 불러오기"},
     "Name": {"vi": "Tên", "ko": "이름"},
     "Type": {"vi": "Loại", "ko": "유형"},
@@ -441,7 +442,7 @@ PHRASES.update({
     "Saved": {"vi": "Đã lưu", "ko": "저장됨"},
     "Saved to:": {"vi": "Đã lưu vào:", "ko": "저장 위치:"},
     "Matplotlib not available.": {"vi": "Không có Matplotlib.", "ko": "Matplotlib을 사용할 수 없습니다."},
-    "Load monitoring epoch": {"vi": "Nạp epoch quan trắc", "ko": "모니터링 epoch 불러오기"},
+    "Load monitoring times": {"vi": "Nạp times quan trắc", "ko": "모니터링 times 불러오기"},
     "Matplotlib missing.": {"vi": "Thiếu Matplotlib.", "ko": "Matplotlib이 없습니다."},
     "Polar radial deformation dr [mm]": {"vi": "Biến dạng hướng kính cực dr [mm]", "ko": "극좌표 방사 변형 dr [mm]"},
     "No data yet — run Steps 5.1 to 5.6 to populate the dashboard.": {"vi": "Chưa có dữ liệu — hãy chạy các bước 5.1 đến 5.6 để điền bảng tổng quan.", "ko": "아직 데이터가 없습니다 — 5.1부터 5.6단계를 실행해 대시보드를 채우세요."},
@@ -458,6 +459,18 @@ PHRASES.update({
     "No deformation alerts detected.": {"vi": "Không phát hiện cảnh báo biến dạng.", "ko": "변형 경고가 감지되지 않았습니다."},
     "CRITICAL": {"vi": "NGUY HIỂM", "ko": "위험"},
     "Time-series": {"vi": "Chuỗi thời gian", "ko": "시계열"},
+    "Multi-Times Trend": {"vi": "Xu Hướng Đa Kỳ Đo", "ko": "다중 에포크 추세"},
+    "Multi-Times Deformation Trend": {"vi": "Xu Hướng Biến Dạng Đa Kỳ Đo", "ko": "다중 에포크 변형 추세"},
+    "Load multi-times data and run trend analysis.": {"vi": "Nạp dữ liệu đa kỳ đo và chạy phân tích xu hướng.", "ko": "다중 에포크 데이터를 불러와 추세 분석을 실행하세요."},
+    "Forecast threshold crossing": {"vi": "Dự báo vượt ngưỡng", "ko": "임계값 초과 예측"},
+    "Loaded {n} times for multi-times analysis.": {"vi": "Đã nạp {n} kỳ đo cho phân tích đa kỳ.", "ko": "{n}개 에포크를 다중 에포크 분석을 위해 불러왔습니다."},
+    "Load Scan Station(s)": {"vi": "Nạp trạm quét", "ko": "스캔 스테이션 불러오기"},
+    "Run Step 6.1 with 3+ times first, then Step 6.5.": {"vi": "Chạy bước 6.1 với 3+ kỳ đo trước, rồi bước 6.5.", "ko": "먼저 3개 이상의 에포크로 6.1단계를 실행한 후 6.5단계를 실행하세요."},
+    "6.5  Forecast threshold crossing": {"vi": "6.5  Dự báo vượt ngưỡng", "ko": "6.5  임계값 초과 예측"},
+    "Times": {"vi": "Kỳ đo", "ko": "에포크"},
+    "Median (mm)": {"vi": "Trung vị (mm)", "ko": "중앙값 (mm)"},
+    "p95 |d| (mm)": {"vi": "p95 |d| (mm)", "ko": "p95 |d| (mm)"},
+    "Status": {"vi": "Trạng thái", "ko": "상태"},
     "Run Step 6.2 to generate chart.": {"vi": "Chạy bước 6.2 để tạo biểu đồ.", "ko": "차트를 생성하려면 6.2단계를 실행하세요."},
     "Crown-height trend across chainage (mm)": {"vi": "Xu hướng cao độ vòm theo lý trình (mm)", "ko": "체인리지를 따른 천단 높이 추세 (mm)"},
     "Tunnel Analysis v4.0 (r1) - CBNU Smart Structure Lab": {"vi": "Phân Tích Hầm v4.0 (r1) - Phòng Thí Nghiệm Kết Cấu Thông Minh CBNU", "ko": "터널 분석 v4.0 (r1) - CBNU 스마트 구조 연구실"},
@@ -477,12 +490,228 @@ PHRASES.update({
     "Reset zoom (R)": {"vi": "Đặt lại thu phóng (R)", "ko": "확대/축소 초기화 (R)"},
     "Show section parameters": {"vi": "Hiện tham số mặt cắt", "ko": "단면 매개변수 표시"},
     "Show T0 overlay": {"vi": "Hiện lớp phủ T0", "ko": "T0 오버레이 표시"},
-    "Overlay reference epoch T0 on current section": {"vi": "Phủ epoch tham chiếu T0 lên mặt cắt hiện tại", "ko": "현재 단면에 기준 epoch T0를 오버레이합니다"},
+    "Overlay reference times T0 on current section": {"vi": "Phủ times tham chiếu T0 lên mặt cắt hiện tại", "ko": "현재 단면에 기준 times T0를 오버레이합니다"},
     "Animate deformation T0 -> Tn": {"vi": "Hoạt ảnh biến dạng T0 -> Tn", "ko": "T0 -> Tn 변형 애니메이션"},
     "Run Step 6.3 to display section parameters.": {"vi": "Chạy bước 6.3 để hiển thị tham số mặt cắt.", "ko": "단면 매개변수를 표시하려면 6.3단계를 실행하세요."},
     "RMSE: --": {"vi": "Sai số RMSE: --", "ko": "RMSE 오차: --"},
     "Visual scale": {"vi": "Phóng đại nhìn", "ko": "시각 배율"},
     "Visual-only deformation magnification for T0/Tn overlay and animation. Measurements stay real.": {"vi": "Chỉ phóng đại biến dạng để quan sát overlay/animation T0-Tn. Số đo vẫn là giá trị thật.", "ko": "T0/Tn 오버레이와 애니메이션에서만 변형을 시각적으로 확대합니다. 측정값은 실제값 그대로입니다."},
+})
+
+
+# Clean dashboard translations. These entries intentionally override older
+# mojibake/corrupted dashboard strings and keep English as the source key.
+PHRASES.update({
+    "Summary Dashboard": {"vi": "Bảng tổng quan", "ko": "요약 대시보드"},
+    "2D Cross-Section": {"vi": "Mặt cắt 2D", "ko": "2D 단면"},
+    "Crown Settlement": {"vi": "Lún đỉnh hầm", "ko": "천단 침하"},
+    "Horizontal Convergence": {"vi": "Hội tụ ngang", "ko": "수평 내공변위"},
+    "Eccentricity": {"vi": "Độ lệch tâm", "ko": "편심"},
+    "Ovality": {"vi": "Độ ô van", "ko": "타원도"},
+    "No data yet - run Steps 5.1 to 5.6 to populate the dashboard.": {
+        "vi": "Chưa có dữ liệu - chạy các bước 5.1 đến 5.6 để cập nhật bảng tổng quan.",
+        "ko": "아직 데이터가 없습니다 - 대시보드를 채우려면 5.1~5.6 단계를 실행하세요."
+    },
+    "Requires T0": {"vi": "Cần T0", "ko": "T0 필요"},
+    "Load 2 scans to compare": {"vi": "Tải 2 scan để so sánh", "ko": "비교하려면 스캔 2개를 불러오세요"},
+    "This metric requires a T0 reference scan for reliable deformation calculation. Load T0 and rerun the pipeline. Current values may be absolute geometry, not deformation.": {
+        "vi": "Chỉ số này cần scan tham chiếu T0 để tính biến dạng tin cậy. Hãy tải T0 rồi chạy lại pipeline. Giá trị hiện tại có thể là hình học tuyệt đối, không phải biến dạng.",
+        "ko": "이 지표는 신뢰할 수 있는 변형 계산을 위해 T0 기준 스캔이 필요합니다. T0를 불러온 뒤 파이프라인을 다시 실행하세요. 현재 값은 변형이 아니라 절대 형상일 수 있습니다."
+    },
+    "Profile:": {"vi": "Biên dạng:", "ko": "프로파일:"},
+    "Sections:": {"vi": "Mặt cắt:", "ko": "단면:"},
+    "Length:": {"vi": "Chiều dài:", "ko": "길이:"},
+    "Reg. RMSE:": {"vi": "RMSE đăng ký:", "ko": "정합 RMSE:"},
+    "max:": {"vi": "tối đa:", "ko": "최대:"},
+    "Section Alerts (worst 8)": {"vi": "Cảnh báo mặt cắt (8 mục nặng nhất)", "ko": "단면 경고 (상위 8개)"},
+    "Chainage": {"vi": "Lý trình", "ko": "측점"},
+    "Status": {"vi": "Trạng thái", "ko": "상태"},
+    "Issues": {"vi": "Vấn đề", "ko": "문제"},
+    "Details": {"vi": "Chi tiết", "ko": "상세"},
+    "Refresh Dashboard": {"vi": "Làm mới bảng tổng quan", "ko": "대시보드 새로고침"},
+    "CRITICAL": {"vi": "NGUY HIỂM", "ko": "위험"},
+    "CAUTION": {"vi": "CẢNH BÁO", "ko": "주의"},
+    "OK": {"vi": "OK", "ko": "정상"},
+    "Tunnel crown": {"vi": "Đỉnh hầm", "ko": "천단"},
+    "Table values are measured at the tunnel crown": {"vi": "Các giá trị trong bảng được đo tại đỉnh hầm", "ko": "표의 값은 터널 천단에서 측정됩니다"},
+    "Check the same point in the 2D section.": {"vi": "Kiểm tra cùng điểm này trong mặt cắt 2D.", "ko": "2D 단면에서 같은 지점을 확인하세요."},
+    "Could not identify tunnel crown measurements; rerun Step 6.1 or check T0/Tn data.": {"vi": "Không xác định được phép đo đỉnh hầm; hãy chạy lại Step 6.1 hoặc kiểm tra dữ liệu T0/Tn.", "ko": "터널 천단 측정을 식별할 수 없습니다. Step 6.1을 다시 실행하거나 T0/Tn 데이터를 확인하세요."},
+
+    "critical metric(s)": {"vi": "chỉ số nguy hiểm", "ko": "위험 지표"},
+    "caution metric(s)": {"vi": "chỉ số cảnh báo", "ko": "주의 지표"},
+    "caution": {"vi": "cảnh báo", "ko": "주의"},
+    "All metrics within safe limits.": {"vi": "Tất cả chỉ số nằm trong giới hạn an toàn.", "ko": "모든 지표가 안전 한계 내에 있습니다."},
+    "issue(s)": {"vi": "vấn đề", "ko": "문제"},
+    "No deformation alerts detected.": {"vi": "Không phát hiện cảnh báo biến dạng.", "ko": "변형 경고가 감지되지 않았습니다."},
+})
+
+
+
+# Clean Summary Dashboard translations. Keep source keys in English and provide
+# complete Vietnamese/Korean labels for the dashboard shown in Step 6.
+PHRASES.update({
+    "Summary Dashboard": {"vi": "B\u1ea3ng t\u1ed5ng quan", "ko": "\uc694\uc57d \ub300\uc2dc\ubcf4\ub4dc"},
+    "2D Cross-Section": {"vi": "M\u1eb7t c\u1eaft 2D", "ko": "2D \ub2e8\uba74"},
+    "Crown Settlement": {"vi": "L\u00fan \u0111\u1ec9nh h\u1ea7m", "ko": "\ucc9c\ub2e8 \uce68\ud558"},
+    "Horizontal Convergence": {"vi": "H\u1ed9i t\u1ee5 ngang", "ko": "\uc218\ud3c9 \ub0b4\uacf5\ubcc0\uc704"},
+    "Eccentricity": {"vi": "L\u1ec7ch t\u00e2m", "ko": "\ud3b8\uc2ec"},
+    "Ovality": {"vi": "\u0110\u1ed9 oval", "ko": "\ud0c0\uc6d0\ub3c4"},
+    "No data yet - run Steps 5.1 to 5.6 to populate the dashboard.": {
+        "vi": "Ch\u01b0a c\u00f3 d\u1eef li\u1ec7u - ch\u1ea1y c\u00e1c b\u01b0\u1edbc 5.1 \u0111\u1ebfn 5.6 \u0111\u1ec3 c\u1eadp nh\u1eadt b\u1ea3ng t\u1ed5ng quan.",
+        "ko": "\uc544\uc9c1 \ub370\uc774\ud130\uac00 \uc5c6\uc2b5\ub2c8\ub2e4 - \ub300\uc2dc\ubcf4\ub4dc\ub97c \ucc44\uc6b0\ub824\uba74 5.1~5.6 \ub2e8\uacc4\ub97c \uc2e4\ud589\ud558\uc138\uc694."
+    },
+    "No data yet \u2014 run Steps 5.1 to 5.6 to populate the dashboard.": {
+        "vi": "Ch\u01b0a c\u00f3 d\u1eef li\u1ec7u - ch\u1ea1y c\u00e1c b\u01b0\u1edbc 5.1 \u0111\u1ebfn 5.6 \u0111\u1ec3 c\u1eadp nh\u1eadt b\u1ea3ng t\u1ed5ng quan.",
+        "ko": "\uc544\uc9c1 \ub370\uc774\ud130\uac00 \uc5c6\uc2b5\ub2c8\ub2e4 - \ub300\uc2dc\ubcf4\ub4dc\ub97c \ucc44\uc6b0\ub824\uba74 5.1~5.6 \ub2e8\uacc4\ub97c \uc2e4\ud589\ud558\uc138\uc694."
+    },
+    "Requires T0": {"vi": "C\u1ea7n T0", "ko": "T0 \ud544\uc694"},
+    "Load 2 scans to compare": {"vi": "T\u1ea3i 2 scan \u0111\u1ec3 so s\u00e1nh", "ko": "\ube44\uad50\ud558\ub824\uba74 \uc2a4\uce94 2\uac1c\ub97c \ubd88\ub7ec\uc624\uc138\uc694"},
+    "This metric requires a T0 reference scan for reliable deformation calculation. Load T0 and rerun the pipeline. Current values may be absolute geometry, not deformation.": {
+        "vi": "Ch\u1ec9 s\u1ed1 n\u00e0y c\u1ea7n scan tham chi\u1ebfu T0 \u0111\u1ec3 t\u00ednh bi\u1ebfn d\u1ea1ng \u0111\u00e1ng tin c\u1eady. H\u00e3y t\u1ea3i T0 r\u1ed3i ch\u1ea1y l\u1ea1i pipeline. Gi\u00e1 tr\u1ecb hi\u1ec7n t\u1ea1i c\u00f3 th\u1ec3 l\u00e0 h\u00ecnh h\u1ecdc tuy\u1ec7t \u0111\u1ed1i, kh\u00f4ng ph\u1ea3i bi\u1ebfn d\u1ea1ng.",
+        "ko": "\uc774 \uc9c0\ud45c\ub294 \uc2e0\ub8b0\ud560 \uc218 \uc788\ub294 \ubcc0\ud615 \uacc4\uc0b0\uc744 \uc704\ud574 T0 \uae30\uc900 \uc2a4\uce94\uc774 \ud544\uc694\ud569\ub2c8\ub2e4. T0\ub97c \ubd88\ub7ec\uc628 \ub4a4 \ud30c\uc774\ud504\ub77c\uc778\uc744 \ub2e4\uc2dc \uc2e4\ud589\ud558\uc138\uc694. \ud604\uc7ac \uac12\uc740 \ubcc0\ud615\uc774 \uc544\ub2c8\ub77c \uc808\ub300 \ud615\uc0c1\uc77c \uc218 \uc788\uc2b5\ub2c8\ub2e4."
+    },
+    "Profile:": {"vi": "Bi\u00ean d\u1ea1ng:", "ko": "\ud504\ub85c\ud30c\uc77c:"},
+    "Sections:": {"vi": "M\u1eb7t c\u1eaft:", "ko": "\ub2e8\uba74:"},
+    "Length:": {"vi": "Chi\u1ec1u d\u00e0i:", "ko": "\uae38\uc774:"},
+    "Reg. RMSE:": {"vi": "RMSE \u0111\u0103ng k\u00fd:", "ko": "\uc815\ud569 RMSE:"},
+    "max:": {"vi": "t\u1ed1i \u0111a:", "ko": "\ucd5c\ub300:"},
+    "Section Alerts (worst 8)": {"vi": "C\u1ea3nh b\u00e1o m\u1eb7t c\u1eaft (8 m\u1ee5c n\u1eb7ng nh\u1ea5t)", "ko": "\ub2e8\uba74 \uacbd\uace0 (\uc0c1\uc704 8\uac1c)"},
+    "Chainage": {"vi": "L\u00fd tr\u00ecnh", "ko": "\uce21\uc810"},
+    "Status": {"vi": "Tr\u1ea1ng th\u00e1i", "ko": "\uc0c1\ud0dc"},
+    "Issues": {"vi": "V\u1ea5n \u0111\u1ec1", "ko": "\ubb38\uc81c"},
+    "Details": {"vi": "Chi ti\u1ebft", "ko": "\uc0c1\uc138"},
+    "Refresh Dashboard": {"vi": "L\u00e0m m\u1edbi b\u1ea3ng t\u1ed5ng quan", "ko": "\ub300\uc2dc\ubcf4\ub4dc \uc0c8\ub85c\uace0\uce68"},
+    "CRITICAL": {"vi": "NGUY HI\u1ec2M", "ko": "\uc704\ud5d8"},
+    "CAUTION": {"vi": "C\u1ea2NH B\u00c1O", "ko": "\uc8fc\uc758"},
+    "OK": {"vi": "OK", "ko": "\uc815\uc0c1"},
+    "critical metric(s)": {"vi": "ch\u1ec9 s\u1ed1 nguy hi\u1ec3m", "ko": "\uc704\ud5d8 \uc9c0\ud45c"},
+    "caution metric(s)": {"vi": "ch\u1ec9 s\u1ed1 c\u1ea3nh b\u00e1o", "ko": "\uc8fc\uc758 \uc9c0\ud45c"},
+    "caution": {"vi": "c\u1ea3nh b\u00e1o", "ko": "\uc8fc\uc758"},
+    "section alert(s)": {"vi": "c\u1ea3nh b\u00e1o m\u1eb7t c\u1eaft", "ko": "\ub2e8\uba74 \uacbd\uace0"},
+    "All metrics within safe limits.": {"vi": "T\u1ea5t c\u1ea3 {n} ch\u1ec9 s\u1ed1 n\u1eb1m trong gi\u1edbi h\u1ea1n an to\u00e0n.", "ko": "\ubaa8\ub4e0 {n}\uac1c \uc9c0\ud45c\uac00 \uc548\uc804 \ud55c\uacc4 \ub0b4\uc5d0 \uc788\uc2b5\ub2c8\ub2e4."},
+    "issue(s)": {"vi": "v\u1ea5n \u0111\u1ec1", "ko": "\ubb38\uc81c"},
+    "No deformation alerts detected.": {"vi": "Kh\u00f4ng ph\u00e1t hi\u1ec7n c\u1ea3nh b\u00e1o bi\u1ebfn d\u1ea1ng.", "ko": "\uac10\uc9c0\ub41c \ubcc0\ud615 \uacbd\uace0\uac00 \uc5c6\uc2b5\ub2c8\ub2e4."},
+})
+
+
+# Clean 3D HUD translations for the upper-right warning panel.
+PHRASES.update({
+    "[!] CRITICAL -- {n} critical section(s)": {
+        "vi": "[!] NGUY HI\u1ec2M -- {n} m\u1eb7t c\u1eaft nguy hi\u1ec3m",
+        "ko": "[!] \uc704\ud5d8 -- \uc704\ud5d8 \ub2e8\uba74 {n}\uac1c"
+    },
+    "[*] CAUTION -- {n} section(s) need monitoring": {
+        "vi": "[*] C\u1ea2NH B\u00c1O -- {n} m\u1eb7t c\u1eaft c\u1ea7n theo d\u00f5i",
+        "ko": "[*] \uc8fc\uc758 -- \ubaa8\ub2c8\ud130\ub9c1 \ud544\uc694 \ub2e8\uba74 {n}\uac1c"
+    },
+    "[OK] SAFE -- {n} normal section(s)": {
+        "vi": "[OK] AN TO\u00c0N -- {n} m\u1eb7t c\u1eaft b\u00ecnh th\u01b0\u1eddng",
+        "ko": "[OK] \uc548\uc804 -- \uc815\uc0c1 \ub2e8\uba74 {n}\uac1c"
+    },
+    "No section data yet": {
+        "vi": "Ch\u01b0a c\u00f3 d\u1eef li\u1ec7u m\u1eb7t c\u1eaft",
+        "ko": "\uc544\uc9c1 \ub2e8\uba74 \ub370\uc774\ud130\uac00 \uc5c6\uc2b5\ub2c8\ub2e4"
+    },
+})
+
+
+# Export completion prompt translations.
+PHRASES.update({
+    "Export complete": {
+        "vi": "Xu\u1ea5t file ho\u00e0n t\u1ea5t",
+        "ko": "\ub0b4\ubcf4\ub0b4\uae30 \uc644\ub8cc"
+    },
+    "{label} exported successfully:\n{path}\n\nOpen this file now?": {
+        "vi": "\u0110\u00e3 xu\u1ea5t {label} th\u00e0nh c\u00f4ng:\n{path}\n\nB\u1ea1n c\u00f3 mu\u1ed1n m\u1edf file n\u00e0y ngay kh\u00f4ng?",
+        "ko": "{label}\uc744(\ub97c) \uc131\uacf5\uc801\uc73c\ub85c \ub0b4\ubcf4\ub0c8\uc2b5\ub2c8\ub2e4:\n{path}\n\n\uc9c0\uae08 \uc774 \ud30c\uc77c\uc744 \uc5f4\uae4c\uc694?"
+    },
+})
+
+
+# 3D viewport times indicator.
+PHRASES.update({
+    "Showing Tn (active) | T0 loaded as reference": {
+        "vi": "Đang hiển Tn (giám sát) | T0 đã tải làm mốc tham chiếu",
+        "ko": "Tn(모니터링) 표시 중 | T0 기준 로드됨"
+    },
+})
+
+
+# Additional UI strings used by runtime widgets and dialogs.
+PHRASES.update({
+    "RMSE: --": {"vi": "Sai số RMSE: --", "ko": "RMSE 오차: --"},
+    "1.1  Import / add scan station(s)": {"vi": "1.1  Nhập / thêm trạm quét", "ko": "1.1  스캔 스테이션 가져오기 / 추가"},
+    "dX (m)": {"vi": "Dịch X (m)", "ko": "X 이동량 (m)"},
+    "dY (m)": {"vi": "Dịch Y (m)", "ko": "Y 이동량 (m)"},
+    "dZ (m)": {"vi": "Dịch Z (m)", "ko": "Z 이동량 (m)"},
+    "Summary Dashboard": {"vi": "Bảng tổng quan", "ko": "요약 대시보드"},
+    "Advanced buttons setting saved. Restart the tool to apply sidebar changes.": {"vi": "Đã lưu thiết lập nút nâng cao. Khởi động lại công cụ để áp dụng thay đổi thanh bên.", "ko": "고급 버튼 설정이 저장되었습니다. 사이드바 변경 사항을 적용하려면 도구를 다시 시작하세요."},
+    "Advanced Buttons": {"vi": "Nút nâng cao", "ko": "고급 버튼"},
+    "Load Scan Station(s)": {"vi": "Nạp trạm quét", "ko": "스캔 스테이션 불러오기"},
+    "Load reference times T0": {"vi": "Nạp thời điểm tham chiếu T0", "ko": "기준 시점 T0 불러오기"},
+    "Load monitoring times Tn": {"vi": "Nạp thời điểm giám sát Tn", "ko": "모니터링 시점 Tn 불러오기"},
+    "Load monitoring times": {"vi": "Nạp các thời điểm giám sát", "ko": "모니터링 시점 불러오기"},
+    "Load Scan Station": {"vi": "Nạp trạm quét", "ko": "스캔 스테이션 불러오기"},
+    "Save Time-Series Report": {"vi": "Lưu báo cáo chuỗi thời gian", "ko": "시계열 보고서 저장"},
+    "Save CSV": {"vi": "Lưu CSV", "ko": "CSV 저장"},
+    "Save Excel Report": {"vi": "Lưu báo cáo Excel", "ko": "Excel 보고서 저장"},
+    "Save PDF Report": {"vi": "Lưu báo cáo PDF", "ko": "PDF 보고서 저장"},
+    "Save Work Order": {"vi": "Lưu phiếu công việc", "ko": "작업 지시서 저장"},
+    "Save IFC Model": {"vi": "Lưu mô hình IFC", "ko": "IFC 모델 저장"},
+    "Save IFC4X3 Model": {"vi": "Lưu mô hình IFC4X3", "ko": "IFC4X3 모델 저장"},
+    "Save IFC Model with Components": {"vi": "Lưu mô hình IFC kèm cấu kiện", "ko": "구성요소 포함 IFC 모델 저장"},
+    "Analysis Resolution": {"vi": "Độ phân giải phân tích", "ko": "분석 해상도"},
+    "Resolution mode:": {"vi": "Chế độ độ phân giải:", "ko": "해상도 모드:"},
+    "Number of sections:": {"vi": "Số mặt cắt:", "ko": "단면 수:"},
+    "Section spacing:": {"vi": "Khoảng cách mặt cắt:", "ko": "단면 간격:"},
+    "By count": {"vi": "Theo số lượng", "ko": "개수 기준"},
+    "By spacing (m)": {"vi": "Theo khoảng cách (m)", "ko": "간격 기준 (m)"},
+    "Number of cross-sections along the tunnel (centerline control points). Higher = finer detail, slower.": {"vi": "Số mặt cắt dọc theo hầm (điểm điều khiển trục tim). Cao hơn = chi tiết hơn, chậm hơn.", "ko": "터널을 따라 배치할 단면 수(중심선 제어점)입니다. 값이 클수록 더 세밀하지만 느립니다."},
+    "Target axial distance between cross-sections. The section count is derived from the measured tunnel length.": {"vi": "Khoảng cách dọc trục mục tiêu giữa các mặt cắt. Số mặt cắt được suy ra từ chiều dài hầm đo được.", "ko": "단면 사이의 목표 축방향 거리입니다. 단면 수는 측정된 터널 길이에서 계산됩니다."},
+    "Busy: wait for the current task to finish before dropping a file.": {"vi": "Đang bận: hãy chờ tác vụ hiện tại hoàn tất trước khi thả file.", "ko": "작업 중입니다. 파일을 놓기 전에 현재 작업이 끝날 때까지 기다리세요."},
+    "Run Step 6.1 with 3+ times first, then Step 6.5.": {"vi": "Trước tiên chạy Bước 6.1 với ít nhất 3 thời điểm, sau đó chạy Bước 6.5.", "ko": "먼저 3개 이상 시점으로 6.1단계를 실행한 뒤 6.5단계를 실행하세요."},
+    "Run Step 6.1 with 3+ times first, then Step 6.6.": {"vi": "Trước tiên chạy Bước 6.1 với ít nhất 3 thời điểm, sau đó chạy Bước 6.6.", "ko": "먼저 3개 이상 시점으로 6.1단계를 실행한 뒤 6.6단계를 실행하세요."},
+    "Run auto-denoise (Step 2.5) first to detect components.": {"vi": "Hãy chạy khử nhiễu tự động (Bước 2.5) trước để phát hiện cấu kiện.", "ko": "구성요소를 감지하려면 먼저 자동 노이즈 제거(2.5단계)를 실행하세요."},
+    "Showing Tn (active) | T0 loaded as reference": {"vi": "Đang hiển thị Tn (đang hoạt động) | T0 đã nạp làm tham chiếu", "ko": "Tn(활성) 표시 중 | T0는 기준으로 불러옴"},
+    "Show Advanced": {"vi": "Hiện nâng cao", "ko": "고급 표시"},
+    "Show advanced/debug buttons after restarting the tool.": {"vi": "Hiển thị các nút nâng cao/gỡ lỗi sau khi khởi động lại công cụ.", "ko": "도구를 다시 시작한 뒤 고급/디버그 버튼을 표시합니다."},
+    "Parameter": {"vi": "Tham số", "ko": "매개변수"},
+    "Value": {"vi": "Giá trị", "ko": "값"},
+    "Unit": {"vi": "Đơn vị", "ko": "단위"},
+    "Property": {"vi": "Thuộc tính", "ko": "속성"},
+    "Manual": {"vi": "Thủ công", "ko": "수동"},
+    "Eccentricity": {"vi": "Độ lệch tâm", "ko": "편심"},
+    "Ovality": {"vi": "Độ ô van", "ko": "타원도"},
+    "override in 'Tunnel Profile Type'": {"vi": "ghi đè trong 'Loại mặt cắt hầm'", "ko": "'터널 단면 유형'에서 재정의"},
+    "Loaded {n} scan station(s).": {"vi": "Đã nạp {n} trạm quét.", "ko": "스캔 스테이션 {n}개를 불러왔습니다."},
+    "Multi-times overlay loaded: {n} times.": {"vi": "Đã nạp lớp phủ nhiều thời điểm: {n} thời điểm.", "ko": "다중 시점 오버레이를 불러왔습니다: {n}개 시점."},
+    "Prev": {"vi": "Trước", "ko": "이전"},
+    "Next": {"vi": "Tiếp", "ko": "다음"},
+    "Zoom": {"vi": "Thu phóng", "ko": "확대/축소"},
+    "Info": {"vi": "Thông tin", "ko": "정보"},
+    "Reset zoom (R)": {"vi": "Đặt lại thu phóng (R)", "ko": "확대/축소 초기화 (R)"},
+    "Show section parameters": {"vi": "Hiển thị tham số mặt cắt", "ko": "단면 매개변수 표시"},
+    "Ch:": {"vi": "Lý trình:", "ko": "측점:"},
+    "Ch: --": {"vi": "Lý trình: --", "ko": "측점: --"},
+    "Show T0 overlay": {"vi": "Hiện lớp phủ T0", "ko": "T0 오버레이 표시"},
+    "Overlay reference times T0 on current section": {"vi": "Phủ thời điểm tham chiếu T0 lên mặt cắt hiện tại", "ko": "현재 단면에 기준 시점 T0 오버레이"},
+    "Animate": {"vi": "Hoạt ảnh", "ko": "애니메이션"},
+    "Stop": {"vi": "Dừng", "ko": "정지"},
+    "Animate deformation T0 -> Tn": {"vi": "Tạo hoạt ảnh biến dạng T0 -> Tn", "ko": "T0 -> Tn 변형 애니메이션"},
+    "Visual scale": {"vi": "Tỷ lệ hiển thị", "ko": "시각 배율"},
+    "Visual-only deformation magnification for T0/Tn overlay and animation. Measurements stay real.": {"vi": "Phóng đại biến dạng chỉ để hiển thị cho lớp phủ và hoạt ảnh T0/Tn. Số đo vẫn giữ giá trị thực.", "ko": "T0/Tn 오버레이와 애니메이션에만 적용되는 시각적 변형 확대입니다. 측정값은 실제값을 유지합니다."},
+    "Matplotlib is required for 2D cross-section plotting.": {"vi": "Cần Matplotlib để vẽ mặt cắt 2D.", "ko": "2D 단면 그래프를 그리려면 Matplotlib이 필요합니다."},
+    "Run Step 6.3 to display section parameters.": {"vi": "Chạy Bước 6.3 để hiển thị tham số mặt cắt.", "ko": "단면 매개변수를 표시하려면 6.3단계를 실행하세요."},
+    "Matplotlib missing.": {"vi": "Thiếu Matplotlib.", "ko": "Matplotlib이 없습니다."},
+})
+
+# Step 6 completion translations for status/log strings and related controls.
+PHRASES.update({
+    "No 2D sections yet; Step 6.3 will auto-prepare centerline and sections.": {"vi": "Chưa có mặt cắt 2D; Bước 6.3 sẽ tự chuẩn bị trục tim và mặt cắt.", "ko": "아직 2D 단면이 없습니다. 6.3단계에서 중심선과 단면을 자동으로 준비합니다."},
+    "Step 6.3 shows clean robust T0~Tn section outlines. Crown marker and trend use the same Step 6 location.": {"vi": "Bước 6.3 hiển thị đường bao mặt cắt T0~Tn sạch và ổn định. Mốc đỉnh hầm và xu hướng dùng cùng vị trí Step 6.", "ko": "6.3단계는 깨끗하고 안정적인 T0~Tn 단면 윤곽을 표시합니다. 천단 마커와 추세는 같은 Step 6 위치를 사용합니다."},
+    "Run Step 6 trend with 3+ times first, then Step 6.5.": {"vi": "Trước tiên chạy xu hướng Step 6 với ít nhất 3 thời điểm, sau đó chạy Bước 6.5.", "ko": "먼저 3개 이상 시점으로 Step 6 추세를 실행한 뒤 6.5단계를 실행하세요."},
+    "Run Step 6 trend with 3+ times first, then Step 6.6.": {"vi": "Trước tiên chạy xu hướng Step 6 với ít nhất 3 thời điểm, sau đó chạy Bước 6.6.", "ko": "먼저 3개 이상 시점으로 Step 6 추세를 실행한 뒤 6.6단계를 실행하세요."},
+    "Delete Selected": {"vi": "Xóa mục đã chọn", "ko": "선택 항목 삭제"},
 })
 
 def tr(text: str, lang: str = "en") -> str:

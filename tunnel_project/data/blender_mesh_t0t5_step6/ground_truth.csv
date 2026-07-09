@@ -1,0 +1,7 @@
+epoch,crown_settlement_mm,sidewall_convergence_mm,local_damage_mm
+T0,0.0,0.0,0.0
+T1,-5.0,0.0,0.0
+T2,-12.0,-5.0,0.0
+T3,-20.0,-12.0,-15.0
+T4,-30.0,-22.0,-25.0
+T5,-45.0,-35.0,-40.0

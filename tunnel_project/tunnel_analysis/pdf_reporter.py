@@ -73,6 +73,119 @@ class TunnelPDFReporter:
         c.save()
         return str(path)
 
+    # ------------------------------------------------------- Time-series PDF --
+    def export_timeseries_pdf(self, series: dict, out_path: str,
+                              gt: dict = None, forecast: dict = None,
+                              project_name: str = "Tunnel Analysis",
+                              engineer: str = "CBNU Smart Structure Lab") -> str:
+        """One-page Step 6 crown-first time-series report."""
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.pdfgen import canvas as rl_canvas
+            from reportlab.lib.utils import ImageReader
+        except ImportError:
+            raise RuntimeError("reportlab required: pip install reportlab")
+        import io
+
+        labels = list(series.get("labels", []))
+        if not labels:
+            raise RuntimeError("No time-series data. Run Step 6 trend first.")
+
+        def arr(key):
+            return np.asarray(series.get(key, []), dtype=np.float64).ravel()
+        crown = arr("crown_settlement_mm")
+        if crown.size == len(labels) + 1:
+            crown = crown[1:]
+        try:
+            location_txt = f"Ch {float(series.get('crown_chainage_m', 52.0)):.1f}m"
+        except Exception:
+            location_txt = "Ch --"
+        measured_point_txt = "Tunnel crown"
+        caution, critical = 10.0, 25.0
+
+        path = Path(out_path); path.parent.mkdir(parents=True, exist_ok=True)
+        W, H = A4
+        c = rl_canvas.Canvas(str(path), pagesize=A4)
+        c.setTitle(f"Step 6 Crown Settlement - {project_name}"); c.setAuthor(engineer)
+        try:
+            self._draw_page_header(c, W, H, "STEP 6 CROWN SETTLEMENT", project_name)
+        except Exception:
+            c.setFont("Helvetica-Bold", 14); c.drawString(30, H - 50, "STEP 6 CROWN SETTLEMENT")
+
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            x = np.arange(len(labels) + 1)
+            crown_full = np.concatenate([[0.0], np.abs(crown)]) if crown.size else np.zeros(len(labels) + 1)
+            ymax = max(critical * 1.25, float(np.nanmax(crown_full)) * 1.2)
+            fig, ax = plt.subplots(figsize=(7.2, 3.0), dpi=130)
+            ax.axhspan(0, caution, color="#DCFCE7", alpha=0.5)
+            ax.axhspan(caution, critical, color="#FEF9C3", alpha=0.5)
+            ax.axhspan(critical, ymax, color="#FEE2E2", alpha=0.5)
+            ax.axhline(caution, color="#F59E0B", ls="--", lw=1, label="Warning 10 mm")
+            ax.axhline(critical, color="#EF4444", ls="--", lw=1, label="Danger 25 mm")
+            ax.plot(x, crown_full, "o-", color="#2563EB", lw=2, label="Crown settlement")
+            if forecast and forecast.get("forecast_epochs"):
+                ax.plot(forecast["forecast_epochs"], forecast["forecast_values"], "x:", color="#7C3AED", lw=1.5, label="Forecast")
+            ax.set_xticks(x); ax.set_xticklabels(["T0"] + labels, fontsize=8)
+            ax.set_ylabel("mm"); ax.set_xlabel("Time"); ax.legend(fontsize=7, loc="upper left")
+            ax.grid(True, alpha=0.3); fig.tight_layout()
+            buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
+            c.drawImage(ImageReader(buf), 30, H - 300, width=W - 60, height=210, preserveAspectRatio=True)
+        except Exception as e:
+            c.setFont("Helvetica", 9); c.drawString(30, H - 120, f"(chart unavailable: {e})")
+
+        y = H - 320
+        c.setFont("Helvetica-Bold", 8)
+        cols = ["Time", "Location", "Measured point", "Crown", "New crown", "Result"]
+        xs = [30, 78, 135, 240, 335, 445]
+        for cx, h in zip(xs, cols):
+            c.drawString(cx, y, h)
+        y -= 4; c.line(30, y, W - 30, y); y -= 14
+        c.setFont("Helvetica", 8)
+        prev_crown = 0.0
+        for i, lbl in enumerate(labels):
+            has_crown = i < crown.size and np.isfinite(crown[i])
+            crown_val = float(crown[i]) if has_crown else float("nan")
+            new_move = crown_val - prev_crown if has_crown else float("nan")
+            score = abs(crown_val) if has_crown else 0.0
+            result = "Danger" if score >= critical else ("Warning" if score >= caution else "OK")
+            if result == "Danger":
+                c.setFillColorRGB(0.86, 0.08, 0.08)
+            elif result == "Warning":
+                c.setFillColorRGB(0.85, 0.47, 0.02)
+            else:
+                c.setFillColorRGB(0.09, 0.50, 0.09)
+            cells = [lbl,
+                     location_txt,
+                     measured_point_txt,
+                     f"{crown_val:+.1f}" if has_crown else "-",
+                     f"{new_move:+.1f}" if np.isfinite(new_move) else "-",
+                     result]
+            for cx, v in zip(xs, cells):
+                c.drawString(cx, y, str(v))
+            if has_crown:
+                prev_crown = crown_val
+            y -= 13
+        c.setFillColorRGB(0, 0, 0)
+
+        y -= 10; c.setFont("Helvetica-Bold", 9)
+        c.drawString(30, y, "Main metric:"); c.setFont("Helvetica", 9)
+        c.drawString(115, y, "Crown settlement"); y -= 14
+        c.setFont("Helvetica-Bold", 9); c.drawString(30, y, "Measured point:"); c.setFont("Helvetica", 9)
+        c.drawString(115, y, f"{measured_point_txt}, Location {location_txt}."); y -= 14
+        if gt:
+            c.setFont("Helvetica-Bold", 9); c.drawString(30, y, "Ground-truth:")
+            c.setFont("Helvetica", 9); c.drawString(110, y, gt.get("summary", "")[:100]); y -= 14
+        if forecast and forecast.get("ok"):
+            c.setFont("Helvetica-Bold", 9); c.drawString(30, y, "Forecast:")
+            c.setFont("Helvetica", 8); c.drawString(85, y, (forecast.get("summary", "") or "")[:110]); y -= 14
+        c.setFont("Helvetica-Oblique", 7)
+        c.drawString(30, 30, f"Generated {datetime.now():%Y-%m-%d %H:%M} | method={series.get('method','')}")
+        c.showPage(); c.save()
+        return str(path)
+
     # ----------------------------------------------------------- Work order --
     def export_work_order_pdf(self, context: PipelineContext, order: dict,
                               out_path: str,
@@ -431,8 +544,12 @@ class TunnelPDFReporter:
             c.setFont("Helvetica-Bold", 8)
         else:
             if status_color:
+                # ReportLab canvas does not support alpha in setFillColorRGB.
+                # Use a pre-blended light background so exported PDFs remain
+                # opaque and readable in all viewers.
                 r, g, b = status_color
-                c.setFillColorRGB(r, g, b, 0.15)
+                bg = (0.88 + 0.12 * r, 0.88 + 0.12 * g, 0.88 + 0.12 * b)
+                c.setFillColorRGB(*bg)
                 c.rect(x, y - 2, sum(col_widths), row_h, fill=1, stroke=0)
             c.setFillColorRGB(*self.C_BLACK)
             c.setFont("Helvetica", 8)
@@ -443,11 +560,13 @@ class TunnelPDFReporter:
             elif status_color and i == len(values) - 2:
                 r, g, b = status_color
                 c.setFillColorRGB(r, g, b)
+                c.setFont("Helvetica-Bold", 8)
             else:
                 c.setFillColorRGB(*self.C_BLACK)
+                c.setFont("Helvetica", 8)
             c.drawString(cx + 3, y + 2, str(val)[:22])
             cx += w
-        c.setStrokeColorRGB(*self.C_LGRAY)
+        c.setStrokeColorRGB(0.78, 0.82, 0.88)
         c.line(x, y - 2, x + sum(col_widths), y - 2)
 
     def _status_color(self, key, val):
