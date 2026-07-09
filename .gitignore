@@ -82,3 +82,10 @@ _ref_*/
 .obsidian-mcp.env
 .obsidian/
 
+
+# Large generated datasets / review binaries (keep local, do not push)
+tunnel_project/data/curved_real_scale_railway_tunnel_t0t5/full_interior_dataset/current_visual_samples.json
+tunnel_project/data/real_scale_railway_tunnel_t0t5/full_interior_dataset/current_visual_samples.json
+tunnel_project/data/blend_files_for_review/
+tunnel_project/data/blender_lidar_t0t5_realistic/*.txt
+tunnel_project/data/blender_lidar_t0t5_sample_based/*.txt
