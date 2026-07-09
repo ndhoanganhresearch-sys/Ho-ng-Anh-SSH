@@ -1,3 +1,4 @@
+import os
 from ..common import *
 from ..models import PointCloudBundle, PipelineContext
 from ..io_layer import BaseLayer
@@ -16,6 +17,7 @@ from ..target_detector import TargetDetector, Target
 from ..rag_ai import TunnelRAGAssistant
 from .widgets import (CollapsibleSection, MatplotlibSectionWidget, PolarDeformationPlotWidget,
                       LinePlotWidget, SummaryDashboardWidget, ChainageRulerWidget,
+                      MultiEpochTimeSeriesWidget, M3C2MapWidget,
                       classify_sections, section_warning_status, section_warning_text)
 from .i18n_v4 import tr as _tr
 from .dialogs import TaskProgressDialog, _RoughAlignDialog, _TargetDetectDialog
@@ -23,11 +25,12 @@ from translations import get_available_languages
 from language_switcher import LanguageSwitcher
 
 # -- GUI feature scope -------------------------------------------------------
-# When True, the sidebar and output tabs expose only the core end-to-end
-# tunnel deformation workflow. Experimental "(PDF 3.x)" variants, redundant
-# duplicate methods and advanced diagnostics are hidden (not deleted) to keep
-# the interface focused. Set to False to restore the full feature set.
+# When True, the sidebar exposes the simplified 7-step workflow. Advanced
+# diagnostics are hidden (not deleted). Keep button names/numbers unchanged;
+# manage visibility via CORE_STEP_CODES and the ui/show_advanced_buttons setting.
 CORE_FEATURES_ONLY = True
+# Default for fresh installs. Users can override from the sidebar checkbox.
+SHOW_ADVANCED_BUTTONS = False
 # Max points sent to the 3D viewport in one mesh. Rendering every point of a
 # multi-million-point tunnel scan stalls VTK (the KeyboardInterrupt seen during
 # render_window.Render()); decimating for DISPLAY only keeps interaction smooth
@@ -37,35 +40,18 @@ DISPLAY_MAX_POINTS = 600_000
 # Sidebar sub-actions kept in core mode, keyed by the step code at the start
 # of each button label (e.g. "4.3b"). Edit this set to fine-tune the scope.
 CORE_STEP_CODES = {
-    "1.1", "1.3",                                     # acquire: import + add scan (1.2 viewport auto-inits; 1.4 merge / 1.8 epochs hidden)
+    "1.1", "1.3", "1.9",                              # acquire: import/add scan + load epoch folder (1.2 viewport auto-inits; 1.4 merge / 1.8 times hidden)
     "2.1", "2.5",                                     # preprocessing (2.5 = all-in-one denoise)
-    "3.0",                                            # epoch auto-align (includes anchor+ICP and reports RMSE)
+    "3.0",                                            # times auto-align (includes anchor+ICP and reports RMSE)
     "4.3b",                                           # B-spline centerline (builds its own section frames; 4.4 hidden)
     "5.1", "5.2", "5.5", "5.6",                       # deformation parameters (5.3/5.8 3D maps hidden — redundant)
-    "6.1", "6.2", "6.3",                              # 4D time-series
+    "6.1", "6.2", "6.3", "6.6",                           # 4D time-series (6.1=trend+forecast) + export
     "7.1", "7.2",                                     # BIM export (IFC tunnel structure, no components) + AI assistant
     "8.1", "8.2", "8.3", "8.5",                       # export results: CSV / Excel / PDF report / AI work order
 }
 
-# Clean, gap-free DISPLAY numbering for the core sidebar. Filtering still uses
-# the stable unique IDs in CORE_STEP_CODES (so hidden buttons sharing a number
-# never reappear); only the visible label's leading number is rewritten, after
-# filtering, for a tidy 1.1, 1.2, 2.1, 2.2 … sequence. Keys = stable ID, values
-# = display number. Descriptions are untouched (i18n keys mirror these).
-CORE_DISPLAY_RENUMBER = {
-    "1.3": "1.2",     # Add scan station
-    "2.5": "2.2",     # Auto denoise
-    "3.0": "3.1",     # Auto-align T0/Tn
-    "4.3b": "4.1",    # B-spline centerline
-    "5.5": "5.3",     # Ovality
-    "5.6": "5.4",     # Eccentricity
-    "7.1": "7.1",     # IFC tunnel structure (no cable/light components)
-    "8.1": "7.2",     # CSV export  (moved from section 8 into section 7)
-    "8.2": "7.3",     # Excel report
-    "8.3": "7.4",     # PDF report
-    "8.5": "7.5",     # AI work order (PDF)
-    "7.2": "7.6",     # AI assistant (last in the merged section)
-}
+# Button visibility is documented in docs/UI_BUTTON_REGISTRY.md. Do not
+# renumber visible labels here: the user wants existing button names preserved.
 
 # Output tabs hidden in core mode, matched by their English source title.
 NON_CORE_TAB_TITLES = {"Polar Deformation"}
@@ -96,6 +82,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._targets: List[Target] = []   # all detected targets
         self._manual_pick_mode: bool = False   # manual picking active
         self.rag_mod   = TunnelRAGAssistant()
+        self._multi_epoch_series: Optional[Dict] = None
+        self._forecast_data: Optional[Dict] = None
         # Initialize RAG in background
         import threading
         threading.Thread(target=self._init_rag, daemon=True).start()
@@ -108,6 +96,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             "#EF4444", "#3B82F6", "#10B981", "#F59E0B",
             "#8B5CF6", "#EC4899", "#06B6D4", "#84CC16",
         ]
+        self._show_viewport_text_overlays = False
+        self._show_warning_text_labels = False
         self._noise_pts:    Optional[np.ndarray] = None  # current noise candidates
         self._kept_pts:     Optional[np.ndarray] = None  # current kept candidates
         self._noise_panel:  Optional[QtWidgets.QWidget] = None
@@ -125,6 +115,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.settings = QtCore.QSettings("SSL", "TunnelMonitoring")
         saved = self.settings.value("ui/language", "en")
         self.current_language = saved if saved in get_available_languages() else "en"
+        self._show_advanced_buttons = str(
+            self.settings.value("ui/show_advanced_buttons", "true" if SHOW_ADVANCED_BUTTONS else "false")
+        ).lower() in ("1", "true", "yes", "on")
 
         self._build_ui()
         self._apply_theme()
@@ -219,6 +212,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._station_tree = QtWidgets.QTreeWidget()
         self._station_tree.setHeaderHidden(True)
         self._station_tree.setColumnCount(1)
+        self._station_tree.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self._station_tree.setStyleSheet("""
             QTreeWidget {
                 border: none; background: #FAFAFA;
@@ -248,6 +242,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             "border-top-color:#E2E8F0;padding:2px;}")
         st_bot_lay = QtWidgets.QHBoxLayout(st_bot)
         st_bot_lay.setContentsMargins(6, 2, 6, 2); st_bot_lay.setSpacing(4)
+        self._btn_delete_selected_stations = QtWidgets.QPushButton("Delete Selected")
+        self._btn_delete_selected_stations.setStyleSheet(
+            "QPushButton{background:#FFF7ED;color:#C2410C;border:1px solid #FDBA74;"
+            "border-radius:4px;padding:3px 8px;font-weight:600;font-size:8.5pt;}"
+            "QPushButton:hover{background:#FFEDD5;}")
+        self._btn_delete_selected_stations.clicked.connect(self._delete_selected_stations)
         self._btn_clear_stations = QtWidgets.QPushButton("Clear All")
         self._btn_clear_stations.setStyleSheet(
             "QPushButton{background:#FEE2E2;color:#DC2626;border:1px solid #FCA5A5;"
@@ -255,6 +255,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             "QPushButton:hover{background:#FECACA;}")
         self._btn_clear_stations.clicked.connect(self._clear_all_stations)
         st_bot_lay.addStretch()
+        st_bot_lay.addWidget(self._btn_delete_selected_stations)
         st_bot_lay.addWidget(self._btn_clear_stations)
         st_lay.addWidget(st_bot)
 
@@ -359,6 +360,15 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.ts_plot = LinePlotWidget()
         self._ts_tab_idx = self.right_tabs.addTab(self.ts_plot, "Time-Series Plot")
 
+        self.multi_epoch_widget = MultiEpochTimeSeriesWidget()
+        if hasattr(self.multi_epoch_widget, "measured_points_visibility_changed"):
+            self.multi_epoch_widget.measured_points_visibility_changed.connect(
+                self._set_step6_measured_points_visible)
+        self._multi_epoch_tab_idx = self.right_tabs.addTab(self.multi_epoch_widget, "Multi-Times Trend")
+
+        self.m3c2_map_widget = M3C2MapWidget()
+        self._m3c2_tab_idx = self.right_tabs.addTab(self.m3c2_map_widget, "M3C2 Map (2D)")
+
         self.section_widget = MatplotlibSectionWidget()
 
         self.polar_plot = PolarDeformationPlotWidget()
@@ -384,9 +394,9 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         # overall summary side-by-side in the tab bar (2D = second-to-last,
         # Summary Dashboard = very last).
         self._section_tab_idx = self.right_tabs.addTab(
-            self.section_widget, "Mặt Cắt 2D")
+            self.section_widget, _tr("2D Cross-Section", self.current_language))
         self._dashboard_tab_idx = self.right_tabs.addTab(
-            self.dashboard_widget, "Bảng Tổng Quan")
+            self.dashboard_widget, _tr("Summary Dashboard", self.current_language))
 
         if CORE_FEATURES_ONLY:
             self._hide_non_core_tabs()
@@ -515,6 +525,13 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         reset_btn.clicked.connect(self._slot_reset_pipeline)
         out.addWidget(reset_btn)
 
+        adv_cb = QtWidgets.QCheckBox("Show Advanced")
+        adv_cb.setChecked(self._show_advanced_buttons)
+        adv_cb.setToolTip("Show advanced/debug buttons after restarting the tool.")
+        adv_cb.toggled.connect(self._on_advanced_buttons_toggled)
+        out.addWidget(adv_cb)
+        self._advanced_buttons_cb = adv_cb
+
         scroll = QtWidgets.QScrollArea(); scroll.setWidgetResizable(True)
         scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
         out.addWidget(scroll, 1)
@@ -523,11 +540,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
         SECTIONS = [
             (1, "LiDAR data acquisition", "Base", [
-                ("1.1  Import LAS / PLY data", self._slot_1_1_import),
+                ("1.1  Import / add scan station(s)", self._slot_1_1_import),
+                ("1.9  Load epoch folder T0→Tn", self._slot_1_9_epoch_folder),
                 ("1.2  Initialize 3D viewport", self._slot_1_2_viewport),
-                ("1.3  Add scan station (+)", self._slot_1_3_add_scan),
                 ("1.4  Register & merge all stations", self._slot_1_4_merge),
-                ("1.8  Load T0 and Tn epochs", self._slot_1_8_epochs),
+                ("1.8  Load T0 and Tn times", self._slot_1_8_times),
                 ("1.5  Rough alignment (manual)", self._slot_1_5_rough),
                 ("1.6  Chain register & merge", self._slot_1_6_chain),
                 ("1.7  Registration error heatmap", self._slot_1_7_reg_error),
@@ -543,7 +560,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 ("2.6  Extract lining (density-variation)", self._slot_2_6_density_lining),
             ]),
             (3, "Registration and synchronization", "Reg.", [
-                ("3.0  Auto-align T0/Tn epochs (target or ICP)", self._slot_3_0_register_epochs),
+                ("3.0  Auto-align T0/Tn times (target or ICP)", self._slot_3_0_register_times),
                 ("3.1  Anchor translation", self._slot_3_1_anchor),
                 ("3.2  Fine surface ICP", self._slot_3_2_icp),
                 ("3.3  Calculate RMSE", self._slot_3_3_rmse),
@@ -568,14 +585,15 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 ("5.8  Deformation / clearance 3D warning map", self._slot_5_8_clearance_3d),
             ]),
             (6, "Time-series analysis", "T-S", [
-                ("6.1  Plot deformation trend T0→Tn", self._slot_6_2_plot),
+                ("6.1  Deformation trend + forecast T0→Tn", self._slot_6_2_plot),
                 ("6.2  M3C2 deformation map T0→Tn", self._slot_6_3_m3c2),
-                ("6.3  Plot 2D Technical Section T0/Tn", self._slot_5_7_sections),
+                ("6.3  Plot 2D Technical Section T0/Tn", self._slot_6_3_sections),
             ]),
             (7, "BIM, reporting and AI", "BIM/Out", [
                 ("7.1  Export IFC tunnel structure", self._slot_7_1_ifc),
                 ("7.1b Export IFC4X3 (IfcAlignment)", self._slot_7_1b_ifc_alignment),
                 ("7.1c Export IFC + components (cables/lights)", self._slot_7_1c_ifc_components),
+                ("6.6  Export time-series report (Excel/PDF)", self._slot_6_6_export_timeseries),
                 ("8.1  Export section CSV", self._slot_8_1_csv),
                 ("8.2  Export Excel report", self._slot_8_2_excel),
                 ("8.3  Export PDF report", self._slot_8_3_pdf),
@@ -587,20 +605,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             ]),
         ]
         for step, title_s, tag, buttons in SECTIONS:
-            if CORE_FEATURES_ONLY:
-                # Filter by stable ID, then rewrite the leading number for a
-                # clean gap-free display sequence (no namespace collision).
-                kept = []
-                for label, slot in buttons:
-                    code = label.split()[0]
-                    if code not in CORE_STEP_CODES:
-                        continue
-                    new_code = CORE_DISPLAY_RENUMBER.get(code)
-                    if new_code:
-                        desc = label.split(None, 1)[1] if len(label.split(None, 1)) > 1 else ""
-                        label = f"{new_code}  {desc}"
-                    kept.append((label, slot))
-                buttons = kept
+            if CORE_FEATURES_ONLY and not self._show_advanced_buttons:
+                # Keep only Public buttons in the simple 7-step UI.  Button
+                # labels are preserved exactly; Advanced buttons are hidden,
+                # not deleted. See docs/UI_BUTTON_REGISTRY.md.
+                buttons = [(label, slot) for label, slot in buttons
+                           if label.split()[0] in CORE_STEP_CODES]
                 if not buttons:
                     continue
             sec = CollapsibleSection(title_s, step, tag)
@@ -621,6 +631,18 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         # (the auto-detect default) do not.
         if not self._profile_setting_programmatically:
             self._profile_user_set = True
+
+    def _on_advanced_buttons_toggled(self, checked: bool) -> None:
+        self._show_advanced_buttons = bool(checked)
+        self.settings.setValue("ui/show_advanced_buttons", "true" if checked else "false")
+        self._log(
+            _tr("Advanced buttons setting saved. Restart the tool to apply sidebar changes.", self.current_language)
+        )
+        QtWidgets.QMessageBox.information(
+            self,
+            _tr("Advanced Buttons", self.current_language),
+            _tr("Advanced buttons setting saved. Restart the tool to apply sidebar changes.", self.current_language),
+        )
 
     def _hide_non_core_tabs(self) -> None:
         """Hide advanced output tabs while keeping their widgets and tab
@@ -662,7 +684,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                     pass
                 from pyvistaqt import QtInteractor as _QtInteractor
                 QtInteractor = _QtInteractor
-            self.plotter = QtInteractor(self.vp_frame, auto_update=False); self.plotter.set_background("#F8FAFC")
+            self.plotter = QtInteractor(self.vp_frame, auto_update=False); self.plotter.set_background("#FFFFFF")
             self.vp_layout.addWidget(self.plotter, 1); self.plotter.add_axes(color="#111827")
             self.plotter.show_bounds(color="#94A3B8", grid="front", location="outer", font_size=8)
             self.plotter.render()
@@ -756,6 +778,30 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self._log(_tr("AUTO PIPELINE aborted: step {key} failed.", self.current_language).format(key=key))
         QtWidgets.QMessageBox.critical(self, _tr("Task error: {key}", self.current_language).format(key=key), msg)
 
+    def _offer_open_exported_file(self, path: str, label: str = "Export") -> None:
+        """Ask the user whether to open an exported file."""
+        if not path:
+            return
+        try:
+            from pathlib import Path as _Path
+            file_path = _Path(str(path))
+            if not file_path.exists():
+                return
+            lang = self.current_language
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                _tr("Export complete", lang),
+                _tr("{label} exported successfully:\n{path}\n\nOpen this file now?", lang).format(
+                    label=label, path=str(file_path)),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.Yes,
+            )
+            if reply == QtWidgets.QMessageBox.Yes:
+                import os
+                os.startfile(str(file_path))
+        except Exception as exc:
+            self._log(f"Open exported file failed: {exc}")
+
     def _dispatch(self, key: str, result: object) -> None:
         if key == "1.1_import":
             b: PointCloudBundle = result
@@ -773,6 +819,25 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self._update_meta(b)
             self._refresh_station_list()
             self._render_station_markers()
+        elif key == "1.3_add_batch":
+            scans = result
+            for b in scans:
+                self.context.scans.append(b)
+                self._log(f"Station {len(self.context.scans)} loaded: {b.path} ({len(b.points):,} pts)")
+            if scans:
+                last = scans[-1]
+                self.context.active_index = len(self.context.scans) - 1
+                self._render_bundle(last, "Scan Stations Loaded")
+                self._update_meta(last)
+                n = len(last.points)
+                self.pt_label.setText(f"Points: {n:,}")
+                self.sb_pts.setText(f"Points: {n:,}")
+            self._refresh_station_list()
+            self._render_station_markers()
+            self._log(_tr("Loaded {n} scan station(s).", self.current_language).format(n=len(scans)))
+        elif key == "1.9_epoch_folder":
+            scans = result
+            self._activate_epoch_scans(scans)
         elif key == "target_detect":
             new_targets: List[Target] = result
             self._targets.extend(new_targets)
@@ -877,7 +942,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             if dist_mm is not None and len(dist_mm) == mesh.n_points:
                 mesh["RegError_mm"] = dist_mm
             if self.plotter is not None:
-                self.plotter.clear(); self.plotter.set_background("#F8FAFC")
+                self.plotter.clear(); self.plotter.set_background("#FFFFFF")
                 self.plotter.add_mesh(mesh, scalars="RegError_mm", cmap="RdYlGn_r",
                     style="points", point_size=2.8, render_points_as_spheres=False,
                     reset_camera=True, clim=[0, 5],
@@ -999,10 +1064,10 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self._log(f"Auto denoise: {stats.get('n_clean', len(pts)):,}/{stats.get('n_raw', len(pts)):,} kept, {stats.get('n_removed', 0):,} removed.")
             self._log(f"  Cable={stats.get('n_cable', 0)} Light={stats.get('n_light', 0)} Person/Vehicle={stats.get('n_person', 0)} Radial={stats.get('n_radial', 0)}")
 
-        elif key == "epoch_register":
+        elif key == "times_register":
             # AUTO PIPELINE step 2b: align Tn onto T0 (different scanner setups).
             if result is None:
-                self._log("Epoch alignment: single scan — skipped (no T0/Tn to align).")
+                self._log("Times alignment: single scan — skipped (no T0/Tn to align).")
             else:
                 self.context.registered_points = np.asarray(result["points"], dtype=np.float64)
                 method_vi = ("điểm mốc cố định" if result["method"] == "target"
@@ -1108,7 +1173,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             if dist_mm is not None and len(dist_mm) == mesh.n_points:
                 mesh["Hausdorff_mm"] = dist_mm
             if self.plotter is not None:
-                self.plotter.clear(); self.plotter.set_background("#F8FAFC")
+                self.plotter.clear(); self.plotter.set_background("#FFFFFF")
                 self.plotter.add_mesh(mesh, scalars="Hausdorff_mm", cmap="RdYlGn_r",
                     style="points", point_size=2.8, render_points_as_spheres=False,
                     reset_camera=True, scalar_bar_args={"title": "Distance T0→Tn (mm)"})
@@ -1142,7 +1207,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             base_pts, _ = self._decimate_for_display(pts)
             mesh = make_vertex_cloud(base_pts)
             if self.plotter is not None:
-                self.plotter.clear(); self.plotter.set_background("#F8FAFC")
+                self.plotter.clear(); self.plotter.set_background("#FFFFFF")
                 self.plotter.add_mesh(mesh, scalars=None, style="points",
                     point_size=2.5, render_points_as_spheres=False,
                     reset_camera=True, color="#94A3B8")
@@ -1174,6 +1239,22 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                     f"Critical points: {n_critical:,}" + chr(10) +
                     f"Caution points: {n_caution:,}" + chr(10) +
                     "Red = critical deformation/clearance, amber = caution.")
+        elif key == "6.3_sections_auto":
+            if isinstance(result, dict):
+                cl = result.get("centerline")
+                fr = result.get("frenet_frames")
+                if cl is not None and fr:
+                    self.context.centerline = cl
+                    self.context.frenet_frames = fr
+                    try:
+                        self._render_cl(cl, fr)
+                    except Exception:
+                        pass
+                    self._log(f"Step 6.3 auto-prepared centerline: {len(cl)} points, {len(fr)} frames.")
+                result = result.get("sections", [])
+            self._dispatch("5.7_sections", result)
+            return
+
         elif key == "5.7_sections":
             sections: List[SectionGeometry] = result; self.context.sections = sections
             # Reflect the profile actually used (auto-detected in the worker /
@@ -1183,11 +1264,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                 self._profile_combo.setCurrentText(self.context.tunnel_profile)
                 self._profile_setting_programmatically = False
             self._section_ref_sections = []
-            self.section_widget.set_sections(sections, profile=self.context.tunnel_profile, vl_box_w=self._sp_vl_w.value(), vl_box_h=self._sp_vl_h.value(), vl_cir_r=self._sp_vl_r.value())
+            self._section_epoch_sections = []   # filled below when >2 times loaded
+            self.section_widget.set_sections(sections, profile=self.context.tunnel_profile, vl_box_w=self._sp_vl_w.value(), vl_box_h=self._sp_vl_h.value(), vl_cir_r=self._sp_vl_r.value(), render_mode="Field Robust")
             try: self.section_widget.section_changed.disconnect()
             except Exception: pass
             self.section_widget.section_changed.connect(self._highlight_section)
-            self._highlight_section(0)
             # Set T0 reference sections if available
             if len(self.context.scans) >= 2 and hasattr(self.section_widget, "set_ref_sections"):
                 try:
@@ -1206,17 +1287,61 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                     self._log(_tr("T0 reference sections loaded for overlay.", self.current_language))
                 except Exception as e:
                     self._log(f"T0 overlay: {e}")
+            # Multi-times coloured overlay: when more than two times are loaded
+            # (T0~Tn), compute each times's sections on the same centerline so the
+            # 2D view can draw one coloured outline per times. Runs synchronously
+            # like the T0 reference above; fine for the clean fixtures, may take a
+            # moment on large real clouds.
+            if len(self.context.scans) > 2 and hasattr(self.section_widget, "set_epoch_sections"):
+                try:
+                    from ..models import PipelineContext as _PC
+                    times_secs = []; times_lbls = []
+                    for i, sc in enumerate(self.context.scans):
+                        ctx_i = _PC(scans=[sc], active_index=0,
+                                    normalized_points=sc.points,
+                                    centerline=self.context.centerline,
+                                    frenet_frames=self.context.frenet_frames,
+                                    tunnel_profile=self.context.tunnel_profile)
+                        secs_i = self.par_mod.compute_all_sections(ctx_i,
+                            vl_box_w=self._sp_vl_w.value(),
+                            vl_box_h=self._sp_vl_h.value(),
+                            vl_cir_r=self._sp_vl_r.value())
+                        times_secs.append(secs_i)
+                        times_lbls.append(os.path.splitext(os.path.basename(sc.path or f"T{i}"))[0])
+                    self.section_widget.set_section_render_mode("Field Robust")
+                    self.section_widget.set_epoch_sections(times_secs, times_lbls)
+                    self._section_epoch_sections = times_secs   # for ruler/dashboard/3D
+                    # The overlay draws regardless of the (hidden) control row.
+                    # When the controls are visible, also tick the box so its
+                    # state matches what's drawn.
+                    if getattr(self.section_widget, "_show_deform_controls", True):
+                        self.section_widget._chk_overlay.setChecked(True)
+                    self._log(_tr("Multi-times overlay loaded: {n} times.", self.current_language).format(n=len(times_secs)))
+                except Exception as e:
+                    self._log(f"Multi-times overlay: {e}")
             self.right_tabs.setCurrentIndex(self._section_tab_idx)
-            # Push section data to dashboard (section alerts list).
+            self._sync_step6_measured_point()
+            current_section_idx = int(getattr(self.section_widget, "_idx", 0)) if sections else 0
+            if sections:
+                current_section_idx = max(0, min(current_section_idx, len(sections) - 1))
+                self._highlight_section(current_section_idx)
+            # Push section data to dashboard (section alerts list). When >2
+            # times are loaded, pass them so statuses reflect the worst times
+            # vs T0 (consistent with the 2D warning track).
             ref_secs = getattr(self, "_section_ref_sections", []) or []
+            times_secs_all = getattr(self, "_section_epoch_sections", []) or None
             self.dashboard_widget.update_sections(
-                sections, ref_secs, profile=self.context.tunnel_profile or "Circle")
+                sections, ref_secs, profile=self.context.tunnel_profile or "Circle",
+                epoch_sections=times_secs_all)
             # Update chainage ruler — warning triangles always visible below viewport.
             if hasattr(self, "_chainage_ruler"):
                 _ruler_ref = getattr(self, "_section_ref_sections", []) or []
-                self._chainage_ruler.set_sections(sections, _ruler_ref)
+                self._chainage_ruler.set_sections(sections, _ruler_ref,
+                                                   epoch_sections=times_secs_all)
+                if hasattr(self, "_trend_hotspots"):
+                    self._chainage_ruler.set_hotspots(getattr(self, "_trend_hotspots", []))
                 if sections:
-                    self._chainage_ruler.set_current(sections[0].chainage)
+                    self._chainage_ruler.set_current(sections[current_section_idx].chainage)
             # Update 3D status HUD now that sections are known.
             self._update_3d_status_hud(self.context.parameters)
             # Overlay coloured warning rings on 3D viewport.
@@ -1243,26 +1368,60 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
                         self._log(f"    [{status}] Ch {ch:.2f}m: {text}")
             self._log("------------------------------------------------")
 
-        elif key in ("1.8_epochs", "6.1_epochs"):
+        elif key in ("1.8_times", "6.1_times"):
             t0, tn = result
-            self._activate_epochs(t0, tn)
-            self._log(_tr("T0/Tn epochs loaded. T0 is reference; Tn is active for Steps 2-5.", self.current_language))
+            self._activate_times(t0, tn)
+            self._log(_tr("T0/Tn times loaded. T0 is reference; Tn is active for Steps 2-5.", self.current_language))
 
         elif key == "6.2_plot":
+            # Combined trend + forecast: worker returns {"series", "forecast"};
+            # accept a bare series dict too (back-compat).
+            forecast = None
+            if isinstance(result, dict) and "series" in result:
+                forecast = result.get("forecast")
+                result = result.get("series")
             if isinstance(result, dict) and "median_mm" in result:
                 self.context.time_series_result = result
-                series = np.asarray(result["median_mm"], dtype=np.float64)
-                self.context.time_series_plot = series
                 labels = result.get("labels", [])
                 method = result.get("method", "time-series")
-                self.ts_plot.set_values(series, f"T0→Tn deformation trend [{method}] median displacement (mm)")
+                median = np.asarray(result.get("median_mm", []), dtype=np.float64)
                 p95 = np.asarray(result.get("p95_abs_mm", []), dtype=np.float64)
-                if len(series):
-                    self._log(f"Time-series trend [{method}]: epochs={list(labels)} median_mm={np.round(series, 2).tolist()} p95_abs_mm={np.round(p95, 2).tolist()}")
+                crown = np.asarray(result.get("crown_settlement_mm", []), dtype=np.float64)
+                if crown.size == len(labels) + 1:
+                    plot_series = np.abs(crown)
+                    plot_labels = ["T0"] + list(labels)
+                    title = f"T0 to Tn crown settlement trend [{method}] at Ch {result.get('crown_chainage_m', 52.0):g}m (mm)"
+                else:
+                    plot_series = np.concatenate([[0.0], p95]) if len(p95) else np.asarray([], dtype=np.float64)
+                    plot_labels = ["T0"] + list(labels) if len(plot_series) == len(labels) + 1 else []
+                    title = f"T0 to Tn deformation trend [{method}] fallback overall movement p95 (mm)"
+                self.context.time_series_plot = plot_series
+                self.ts_plot.set_values(plot_series, title, plot_labels)
+                if len(p95):
+                    crown_log = np.round(crown, 2).tolist() if crown.size else []
+                    self._log(f"Time-series trend [{method}]: times={list(labels)} crown_settlement_mm={crown_log}")
+                    self._report_timeseries_extras(result, labels)
+                    self._trend_hotspots = self._trend_hotspots_from_series(result)
+                    hotspots = self._sync_step6_measured_point()
+                    if hotspots:
+                        preview = ", ".join(f"{h['label']}@Ch{h['chainage_m']:.1f}m/{h['position']}" for h in hotspots[:4])
+                        h = self._active_step6_hotspot
+                        metric_name = "crown" if h.get("metric") == "crown_settlement_mm" else "p95"
+                        self._log(f"  Step 6 linked hotspot: {h['label']} @ Ch {h['chainage_m']:.2f}m / {h['position']} / {metric_name} {h['value_mm']:.1f}mm")
+                        self._log(f"  Same marker appears on trend note, chainage ruler, M3C2 map, and 2D section: {preview}")
+                self._forecast_data = forecast
+                if forecast and forecast.get("ok"):
+                    self._log("  " + forecast.get("summary", ""))
+                if len(labels) >= 2:
+                    self._multi_epoch_series = result
+                    self.multi_epoch_widget.set_series(result, forecast)
+                    self.right_tabs.setCurrentIndex(self._multi_epoch_tab_idx)
+                else:
+                    self.right_tabs.setCurrentIndex(self._ts_tab_idx)
             else:
                 series = np.asarray(result, dtype=np.float64); self.context.time_series_plot = series
                 self.ts_plot.set_values(series, "Crown-height trend across chainage (mm)")
-            self.right_tabs.setCurrentIndex(self._ts_tab_idx)
+                self.right_tabs.setCurrentIndex(self._ts_tab_idx)
 
         elif key == "6.3_m3c2":
             res = result
@@ -1271,20 +1430,34 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             dist_mm = np.asarray(res["distance_mm"], dtype=np.float64)
             self.context.heatmap_scalars = dist_mm
             pts, dist_mm = self._decimate_for_display(pts, dist_mm)
-            mesh = make_vertex_cloud(pts)
-            if dist_mm is not None and len(dist_mm) == mesh.n_points:
-                mesh["M3C2_mm"] = dist_mm
+            # Damage highlight on the 3D structure: faint grey base, then caution
+            # (amber) and critical (red) points on top so damaged zones pop out
+            # instead of a uniform rainbow cloud.
             if self.plotter is not None:
-                lim = float(np.nanmax(np.abs(dist_mm))) if dist_mm.size else 1.0
-                lim = max(lim, 1e-6)
-                self.plotter.clear(); self.plotter.set_background("#F8FAFC")
-                self.plotter.add_mesh(mesh, scalars="M3C2_mm", cmap="RdBu_r",
-                    style="points", point_size=2.8, render_points_as_spheres=False,
-                    reset_camera=True, clim=[-lim, lim],
-                    scalar_bar_args={"title": "M3C2 displacement (mm)"})
-                self.plotter.add_text(f"M3C2 Deformation Map T0\u2192Tn  [{res['method']}]",
-                    position="upper_left", font_size=11, color="#111827", name="ttl")
-                self.plotter.add_axes(color="#111827"); self.plotter.reset_camera(); self.plotter.render()
+                self.plotter.clear(); self.plotter.set_background("#FFFFFF")
+                mag = np.abs(dist_mm)
+                crit_m = mag >= 25.0
+                caut_m = (mag >= 10.0) & ~crit_m
+                ok_m = ~(crit_m | caut_m)
+                if np.any(ok_m):
+                    self.plotter.add_mesh(make_vertex_cloud(pts[ok_m]), color="#CBD5E1",
+                        style="points", point_size=4.0, render_points_as_spheres=True,
+                        reset_camera=True, name="m3c2_ok")
+                if np.any(caut_m):
+                    self.plotter.add_mesh(make_vertex_cloud(pts[caut_m]), color="#F59E0B",
+                        style="points", point_size=9.0, render_points_as_spheres=True,
+                        name="m3c2_caut")
+                if np.any(crit_m):
+                    self.plotter.add_mesh(make_vertex_cloud(pts[crit_m]), color="#DC2626",
+                        style="points", point_size=12.0, render_points_as_spheres=True,
+                        name="m3c2_crit")
+                compare_label = getattr(self, "_m3c2_compare_label", "T0\u2192Tn")
+                self.plotter.add_text(
+                    f"M3C2 Damage Map {compare_label}  [{res['method']}]  "
+                    f"(amber>=10mm, red>=25mm)",
+                    position="upper_left", font_size=11, color="#1E293B", name="ttl")
+                self.plotter.add_axes(color="#1E293B"); self.plotter.reset_camera()
+                self.plotter.view_xy(); self.plotter.render()
             finite = dist_mm[np.isfinite(dist_mm)]
             med = float(np.median(finite)) if finite.size else float("nan")
             mx = float(np.nanmax(np.abs(finite))) if finite.size else float("nan")
@@ -1295,41 +1468,111 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             lod_med = float(np.nanmedian(lod)) if lod is not None and np.isfinite(lod).any() else float("nan")
             self._log(f"M3C2 [{res['method']}]: median={med:+.2f}mm max|d|={mx:.2f}mm "
                       f"significant={n_sig}/{n_tot} (LoD median={lod_med:.2f}mm)")
-            self.right_tabs.setCurrentIndex(0)
+            # 2D developed map (chainage x angle, coloured by displacement) so
+            # M3C2 has a flat result chart like the 2D section view.
+            try:
+                cp = np.asarray(res["corepoints"], dtype=np.float64)
+                dm = np.asarray(res["distance_mm"], dtype=np.float64)
+                ch, ang, labels2d = self._m3c2_developed_coords(cp)
+                is_plan = labels2d is not None and labels2d[0].startswith("X")
+                zones = ([] if is_plan
+                         else self._m3c2_damage_zones(ch, ang, dm, res.get("significant")))
+                self.m3c2_map_widget.set_map(ch, ang, dm, zones=zones,
+                                             method=f"{res['method']} {compare_label}", axis_labels=labels2d,
+                                             link_hotspots=getattr(self, "_trend_hotspots", []))
+                self.right_tabs.setCurrentIndex(self._m3c2_tab_idx)
+                if zones:
+                    self._log(f"  Damage zones (>=10mm): {len(zones)} — worst: "
+                              + "; ".join(f"{z['position']} @ Ch{z['chainage']:.1f}m "
+                                          f"{z['peak_mm']:+.0f}mm [{z['severity']}]"
+                                          for z in zones[:3]))
+                else:
+                    self._log("  No damage zones >=10mm detected.")
+            except Exception as e:
+                self._log(f"  M3C2 2D map skipped: {e}")
+                self.right_tabs.setCurrentIndex(0)
+
+        elif key == "6.5_forecast":
+            self._forecast_data = result
+            self.multi_epoch_widget.set_series(self._multi_epoch_series, result)
+            self.right_tabs.setCurrentIndex(self._multi_epoch_tab_idx)
+            cc = result.get("caution_crossing_epoch")
+            cr = result.get("critical_crossing_epoch")
+            r2 = result.get("r_squared")
+            metric = result.get("metric", "")
+            metric_name = "crown settlement" if metric == "crown_settlement_abs_mm" else metric
+            self._log(f"Forecast [{metric_name}]: warning crossing={cc}, danger crossing={cr}, R²={r2:.4f}" if r2 else f"Forecast [{metric_name}] computed.")
+
+        elif key == "6.6_export_ts":
+            xlsx = result.get("xlsx") if isinstance(result, dict) else str(result)
+            pdf = result.get("pdf") if isinstance(result, dict) else None
+            self._log(f"Time-series Excel exported: {xlsx}")
+            if pdf:
+                self._log(f"Time-series PDF: {pdf}")
+            self._offer_open_exported_file(xlsx, "Excel")
 
         elif key == "8.1_csv":
-            path = result
+            path = str(result)
             self._log(f"CSV exported: {path}")
-            import subprocess; subprocess.Popen(["explorer", "/select,", path])
+            self._offer_open_exported_file(path, "CSV")
         elif key == "8.4_web":
             url = result
             self._log(f"Web dashboard launched: {url}")
         elif key == "8.3_pdf":
-            path = result
+            path = str(result)
             self._log(f"PDF report exported: {path}")
-            import subprocess; subprocess.Popen(["explorer", "/select,", path])
+            self._offer_open_exported_file(path, "PDF")
         elif key == "8.5_workorder":
-            self._log(f"AI work order exported: {result['path']}  "
+            path = str(result["path"])
+            self._log(f"AI work order exported: {path}  "
                       f"(CRITICAL={result['n_critical']}, CAUTION={result['n_caution']}, "
                       f"items={result['n_items']})")
-            import subprocess; subprocess.Popen(["explorer", "/select,", result["path"]])
+            self._offer_open_exported_file(path, "Work order PDF")
         elif key == "8.2_excel":
-            path = result
+            path = str(result)
             self._log(f"Excel report exported: {path}")
-            import subprocess; subprocess.Popen(["explorer", "/select,", path])
+            self._offer_open_exported_file(path, "Excel")
         elif key == "7.1_ifc":
-            self.ai_resp.setPlainText(json.dumps(result, indent=2)); self.right_tabs.setCurrentIndex(self._ai_tab_idx)
+            if isinstance(result, dict):
+                path = str(result.get("path", ""))
+                title = result.get("title", "IFC")
+                schema = result.get("schema", "IFC")
+                sections = result.get("sections", 0)
+                components = result.get("components", 0)
+                self._log(f"{title} exported: {path}  (schema={schema}, sections={sections}, components={components})")
+            else:
+                path = str(result)
+                title = "IFC"
+                self._log(f"IFC exported: {path}")
+            self.ai_resp.setPlainText(path); self.right_tabs.setCurrentIndex(self._ai_tab_idx)
+            self._offer_open_exported_file(path, title)
 
         elif key == "7.2_ai":
             self.ai_resp.setPlainText(str(result)); self.right_tabs.setCurrentIndex(self._ai_tab_idx)
 
     def _slot_1_1_import(self) -> None:
-        self._hdr("LiDAR Data Acquisition", "Load LAS/LAZ/PLY point-cloud data into the project database.")
-        fp, _ = QtWidgets.QFileDialog.getOpenFileName(self, _tr("Load tunnel point-cloud data", self.current_language), "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
-        if not fp: return
-        max_pts = self._ask_max_points(fp)
-        if max_pts is None: return
-        self._start_worker("1.1_import", lambda: self.base_mod.load_scan(fp, max_points=max_pts))
+        self._hdr("LiDAR Data Acquisition", "Load one or more LAS/LAZ/PLY point-cloud scan stations.")
+        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self, _tr("Load Scan Station(s)", self.current_language), "",
+            "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
+        self._load_scan_files(files, single_key="1.1_import", batch_key="1.3_add_batch")
+
+    def _load_scan_files(self, files, single_key: str = "1.3_add_scan", batch_key: str = "1.3_add_batch") -> None:
+        files = sorted([f for f in (files or []) if f])
+        if not files:
+            return
+        max_pts = self._ask_max_points(files[0])
+        if max_pts is None:
+            return
+        if len(files) == 1:
+            self._start_worker(single_key, lambda: self.base_mod.load_scan(files[0], max_points=max_pts))
+            return
+        self._log(f"Loading {len(files)} scan stations: {[os.path.basename(f) for f in files]}")
+        from ..io_layer import BaseLayer
+        def _load_batch():
+            bl = BaseLayer()
+            return [bl.load_scan(f, max_points=max_pts) for f in files]
+        self._start_worker(batch_key, _load_batch)
 
     # ------------------------------------------------------------------ #
     # Drag & drop: drop a point-cloud file from Explorer to load it.
@@ -1362,32 +1605,61 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if self.worker_thread is not None:
             self._log(_tr("Busy: wait for the current task to finish before dropping a file.", self.current_language))
             return
-        fp = paths[0]
         import pathlib
-        name = pathlib.Path(fp).name
-        if len(paths) > 1:
-            self._log(f"Multiple files dropped; loading '{name}'. Drop the rest one at a time to add stations.")
-        max_pts = self._ask_max_points(fp)
-        if max_pts is None:
-            return
+        name = pathlib.Path(paths[0]).name
         if len(self.context.scans) == 0:
             self._hdr("LiDAR Data Acquisition (drag & drop)",
                       "Loaded by drag & drop: " + name)
-            self._start_worker("1.1_import", lambda: self.base_mod.load_scan(fp, max_points=max_pts))
+            self._load_scan_files(paths, single_key="1.1_import", batch_key="1.3_add_batch")
         else:
             self._hdr("Add Scan Station (drag & drop)",
                       "Added by drag & drop: " + name)
-            self._start_worker("1.3_add_scan", lambda: self.base_mod.load_scan(fp, max_points=max_pts))
+            self._load_scan_files(paths)
 
-    def _slot_1_8_epochs(self) -> None:
-        self._hdr("Load T0/Tn Epochs", "Load reference T0 and monitoring Tn at the start of the pipeline.")
-        fp0, _ = QtWidgets.QFileDialog.getOpenFileName(self, _tr("Load reference epoch T0", self.current_language), "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
+    def _slot_1_8_times(self) -> None:
+        self._hdr("Load T0/Tn Times", "Load reference T0 and monitoring Tn at the start of the pipeline.")
+        fp0, _ = QtWidgets.QFileDialog.getOpenFileName(self, _tr("Load reference times T0", self.current_language), "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
         if not fp0: return
-        fpn, _ = QtWidgets.QFileDialog.getOpenFileName(self, _tr("Load monitoring epoch Tn", self.current_language), "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
+        fpn, _ = QtWidgets.QFileDialog.getOpenFileName(self, _tr("Load monitoring times Tn", self.current_language), "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
         if not fpn: return
-        self._start_worker("1.8_epochs", lambda: self.ts_mod.load_epochs(fp0, fpn))
+        self._start_worker("1.8_times", lambda: self.ts_mod.load_times(fp0, fpn))
 
-    def _activate_epochs(self, t0: PointCloudBundle, tn: PointCloudBundle) -> None:
+    def _slot_1_9_epoch_folder(self) -> None:
+        self._hdr("Load Epoch Folder T0→Tn",
+                  "Load all point-cloud epochs named T0, T1, ... from one folder for Step 6 time-series.")
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, _tr("Load epoch folder T0→Tn", self.current_language), "")
+        if not folder:
+            return
+        from ..io_layer import BaseLayer
+        files, skipped = BaseLayer.discover_epoch_files(folder)
+        if skipped:
+            preview = ", ".join(skipped[:8])
+            more = f" (+{len(skipped) - 8} more)" if len(skipped) > 8 else ""
+            self._log(f"Epoch folder skipped non-epoch/duplicate files: {preview}{more}")
+        if len(files) < 2:
+            self._log("Epoch folder needs at least T0 and one monitoring epoch named T<number>.")
+            return
+        if not os.path.basename(files[0]).lower().startswith("t0."):
+            self._log("Epoch folder must include T0 as the first reference epoch.")
+            return
+        max_pts = self._ask_max_points(files[0])
+        if max_pts is None:
+            return
+        self._log(f"Loading epoch folder: {[os.path.basename(f) for f in files]}")
+        def _load_epochs():
+            bl = BaseLayer()
+            scans = []
+            for idx, fp in enumerate(files):
+                bundle = bl.load_scan(fp, max_points=max_pts)
+                bundle.metadata = dict(bundle.metadata or {})
+                bundle.metadata["epoch_label"] = f"T{idx}"
+                bundle.metadata["epoch_role"] = "T0 reference" if idx == 0 else "monitoring epoch"
+                scans.append(bundle)
+            return scans
+        self._start_worker("1.9_epoch_folder", _load_epochs)
+
+    def _activate_times(self, t0: PointCloudBundle, tn: PointCloudBundle) -> None:
         t0.metadata = dict(t0.metadata or {})
         tn.metadata = dict(tn.metadata or {})
         t0.metadata["epoch_role"] = "T0 reference"
@@ -1411,12 +1683,47 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self.context.sections = []
         self.context.denoise_stats.clear()
         self.context.component_points.clear()
-        self._render_bundle(tn, "Tn Active Epoch (T0 reference loaded)")
+        self._render_bundle(tn, "Tn Active Times (T0 reference loaded)")
         self._update_meta(tn)
         self.pt_label.setText(f"Points: {len(tn.points):,}")
         self.sb_pts.setText(f"Points: {len(tn.points):,}")
         self._refresh_station_list()
         self._render_station_markers()
+
+    def _activate_epoch_scans(self, scans: list[PointCloudBundle]) -> None:
+        if len(scans) < 2:
+            self._log("Epoch folder load returned fewer than 2 scans.")
+            return
+        self.context.scans = list(scans)
+        self.context.active_index = len(scans) - 1
+        active = scans[-1]
+        self.context.normalized_points = active.points
+        self.context.registered_points = None
+        self.context.centerline = None
+        self.context.centerline_smooth = None
+        self.context.frenet_frames = []
+        self.context.parameters.clear()
+        self.context.heatmap_scalars = None
+        self.context.time_series_plot = None
+        self.context.m3c2_result = None
+        if hasattr(self.context, "time_series_result"):
+            self.context.time_series_result = None
+        self.context.polar_map = None
+        self.context.polar_angles = None
+        self.context.polar_centers = None
+        self.context.sections = []
+        self.context.denoise_stats.clear()
+        self.context.component_points.clear()
+        labels = [str((scan.metadata or {}).get("epoch_label") or f"T{i}") for i, scan in enumerate(scans)]
+        for i, scan in enumerate(scans):
+            self._log(f"Epoch {labels[i]} loaded: {scan.path} ({len(scan.points):,} pts)")
+        self._render_bundle(active, f"{labels[-1]} Active Epoch ({labels[0]} reference loaded)")
+        self._update_meta(active)
+        self.pt_label.setText(f"Points: {len(active.points):,}")
+        self.sb_pts.setText(f"Points: {len(active.points):,}")
+        self._refresh_station_list()
+        self._render_station_markers()
+        self._log(f"Loaded {len(scans)} epochs for Step 6 time-series: {labels}")
 
     def _ask_max_points(self, fp: str):
         """Check file size and ask user for subsampling if needed."""
@@ -1516,14 +1823,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._start_worker("1.7_reg_error", _task)
 
     def _slot_1_3_add_scan(self) -> None:
-        self._hdr("Add Scan Station", "Load additional scan station to merge with existing scans.")
-        fp, _ = QtWidgets.QFileDialog.getOpenFileName(
+        self._hdr("Add Scan Station", "Load additional scan station(s) to merge with existing scans.")
+        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self, _tr("Load Scan Station", self.current_language), "",
             "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
-        if not fp: return
-        max_pts = self._ask_max_points(fp)
-        if max_pts is None: return
-        self._start_worker("1.3_add_scan", lambda: self.base_mod.load_scan(fp, max_points=max_pts))
+        self._load_scan_files(files)
 
     def _slot_1_4_merge(self) -> None:
         self._hdr("Register & Merge Stations",
@@ -1536,7 +1840,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
     def _slot_1_2_viewport(self) -> None:
         self._hdr("Initialize 3D Viewport", "Prepare the PyVista inspection viewport with a light technical theme.")
         if self.plotter:
-            self.plotter.clear(); self.plotter.set_background("#F8FAFC"); self.plotter.add_axes(color="#111827")
+            self.plotter.clear(); self.plotter.set_background("#FFFFFF"); self.plotter.add_axes(color="#111827")
             self.plotter.show_bounds(color="#94A3B8", grid="front", location="outer", font_size=8); self.plotter.render()
         self._log(_tr("3D viewport initialized and refreshed.", self.current_language))
 
@@ -1580,14 +1884,14 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._hdr("Lining Extraction by Label", "Keep structural lining classes from the per-point semantic label (FY387/STSD); interior objects are dropped. Auto-detects lining classes by shell radius when none are specified.")
         self._start_worker("2.3b_lining_label", lambda: self.pre_mod.extract_lining_by_label(self.context))
 
-    def _slot_3_0_register_epochs(self) -> None:
-        self._hdr("Auto-align T0/Tn epochs",
+    def _slot_3_0_register_times(self) -> None:
+        self._hdr("Auto-align T0/Tn times",
                   "Đưa lần đo Tn về cùng hệ tọa độ với T0. Tự dùng điểm mốc cố định "
                   "(không triệt tiêu biến dạng) nếu phát hiện ≥3 mốc, nếu không thì trimmed ICP.")
         if len(self.context.scans) < 2:
-            self._log("Cần ≥2 lần đo (T0 + Tn) để căn chỉnh. Dùng '1.8 Load T0 and Tn epochs' trước.")
+            self._log("Cần ≥2 lần đo (T0 + Tn) để căn chỉnh. Dùng '1.8 Load T0 and Tn times' trước.")
             return
-        self._start_worker("epoch_register", lambda: self.reg_mod.register_epochs(self.context))
+        self._start_worker("times_register", lambda: self.reg_mod.register_times(self.context))
 
     def _slot_3_1_anchor(self) -> None:
         self._hdr("Target Anchor Translation", "Apply the initial target-based translation alignment.")
@@ -1633,8 +1937,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
              "Step 1/6: Voxel downsampling..."),
             ("2.5_auto_denoise", lambda: self.pre_mod.auto_denoise(self.context),
              "Step 2/6: Smart noise removal (cables, lights, people, wall cables)..."),
-            ("epoch_register",  lambda: self._auto_register_epochs(),
-             "Step 2b: Align T0/Tn epochs (auto target/ICP)..."),
+            ("times_register",  lambda: self._auto_register_times(),
+             "Step 2b: Align T0/Tn times (auto target/ICP)..."),
             ("4.1_centerline",  lambda: self.geo_mod.extract_centerline(self.context, section_count=section_count),
              "Step 3/6: Centerline extraction..."),
             ("4.3b_bspline",    lambda: self.geo_mod.extract_centerline_bspline(self.context, section_count=section_count),
@@ -1660,18 +1964,18 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             w, h, r = vl_w, vl_h, vl_r
         return self.par_mod.compute_all_sections(self.context, vl_box_w=w, vl_box_h=h, vl_cir_r=r)
 
-    def _auto_register_epochs(self):
-        """AUTO PIPELINE epoch-alignment step.
+    def _auto_register_times(self):
+        """AUTO PIPELINE times-alignment step.
 
-        When 2+ epochs are loaded (T0 + Tn from different scanner setups), align
+        When 2+ times are loaded (T0 + Tn from different scanner setups), align
         Tn onto T0 so deformation is measured in a common frame. Auto-uses fixed
         markers when present (no deformation absorption), else trimmed ICP.
-        Returns None (no-op) for a single scan so single-epoch runs are
+        Returns None (no-op) for a single scan so single-times runs are
         unaffected.
         """
         if len(self.context.scans) < 2:
             return None
-        return self.reg_mod.register_epochs(self.context)
+        return self.reg_mod.register_times(self.context)
 
     def _auto_extract_params(self) -> Dict:
         par = self.par_mod
@@ -2210,7 +2514,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if self.plotter:
             try:
                 self.plotter.clear()
-                self.plotter.set_background("#F8FAFC")
+                self.plotter.set_background("#FFFFFF")
                 self.plotter.render()
             except Exception: pass
         self.results_text.clear()
@@ -2508,34 +2812,470 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         vl_w, vl_h, vl_r = self._sp_vl_w.value(), self._sp_vl_h.value(), self._sp_vl_r.value()
         self._start_worker("5.7_sections", lambda: self.par_mod.compute_all_sections(self.context, vl_box_w=vl_w, vl_box_h=vl_h, vl_cir_r=vl_r))
 
-    def _slot_6_1_epochs(self) -> None:
-        self._hdr("Load Time-Series Epochs", "Load reference and monitoring point-cloud epochs for deformation comparison.")
-        fp0, _ = QtWidgets.QFileDialog.getOpenFileName(self, _tr("Load reference epoch T0", self.current_language), "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
+    def _step63_sections_auto_task(self, section_count, vl_w, vl_h, vl_r):
+        """Prepare missing state then compute 2D sections for the standalone 6.3 button.
+
+        Auto Pipeline already creates working_points + centerline before 5.7.
+        Manual 6.3 should be equally forgiving: use the loaded scan when no
+        preprocessed working cloud exists, build a B-spline centerline when
+        needed, then compute the same Field Robust sections.
+        """
+        if self.context.working_points is None:
+            if self.context.scans:
+                self.context.active_index = len(self.context.scans) - 1
+                self.context.normalized_points = self.context.scans[-1].points
+            else:
+                raise RuntimeError("Load at least one scan before Step 6.3.")
+        if not self.context.frenet_frames or self.context.centerline is None:
+            cl, fr = self.geo_mod.extract_centerline_bspline(self.context, section_count=section_count)
+            self.context.centerline = cl
+            self.context.frenet_frames = fr
+        else:
+            cl, fr = self.context.centerline, self.context.frenet_frames
+        if CORE_FEATURES_ONLY:
+            self.context.tunnel_profile = self.par_mod.detect_profile(self.context)
+        g = self._compute_auto_gauge()
+        if g:
+            vl_w, vl_h, vl_r = g
+        sections = self.par_mod.compute_all_sections(
+            self.context, vl_box_w=vl_w, vl_box_h=vl_h, vl_cir_r=vl_r)
+        return {"centerline": cl, "frenet_frames": fr, "sections": sections}
+
+    def _slot_6_3_sections(self) -> None:
+        self._hdr("2D Technical Section T0/Tn",
+                  "Display clean robust T0~Tn section outlines without interior noise spikes.")
+        if hasattr(self.section_widget, "set_section_render_mode"):
+            self.section_widget.set_section_render_mode("Field Robust")
+        self._sync_step6_measured_point()
+
+        sections = getattr(self.context, "sections", None) or []
+        if not sections:
+            self._log(_tr("No 2D sections yet; Step 6.3 will auto-prepare centerline and sections.", self.current_language))
+            section_count = self._resolve_section_count()
+            vl_w, vl_h, vl_r = self._sp_vl_w.value(), self._sp_vl_h.value(), self._sp_vl_r.value()
+            self._start_worker("6.3_sections_auto",
+                lambda: self._step63_sections_auto_task(section_count, vl_w, vl_h, vl_r))
+            return
+
+        self.right_tabs.setCurrentIndex(self._section_tab_idx)
+        hotspots = self._sync_step6_measured_point()
+        if hotspots:
+            self._log("Step 6 status: Trend ready | 2D ready | Measured points ready | M3C2 optional | Export ready")
+            self._log(_tr("Step 6.3 shows clean robust T0~Tn section outlines. Crown marker and trend use the same Step 6 location.", self.current_language))
+        else:
+            self._log("Step 6 status: 2D ready, but measured crown markers need Step 6 trend first.")
+
+    def _slot_6_1_times(self) -> None:
+        self._hdr("Load Time-Series Times", "Load reference and monitoring point-cloud times for deformation comparison.")
+        fp0, _ = QtWidgets.QFileDialog.getOpenFileName(self, _tr("Load reference times T0", self.current_language), "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
         if not fp0: return
-        fpn, _ = QtWidgets.QFileDialog.getOpenFileName(self, _tr("Load monitoring epoch", self.current_language), "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
+        fpn, _ = QtWidgets.QFileDialog.getOpenFileName(self, _tr("Load monitoring times", self.current_language), "", "Point Clouds (*.las *.laz *.ply *.txt *.xyz *.pts *.csv *.asc);;All Files (*.*)")
         if not fpn: return
-        self._start_worker("6.1_epochs", lambda: self.ts_mod.load_epochs(fp0, fpn))
+        self._start_worker("6.1_times", lambda: self.ts_mod.load_times(fp0, fpn))
+
+    def _report_timeseries_extras(self, series: dict, labels) -> None:
+        """Log Step 6 crown-first values and write the simple CSV report."""
+        import os as _os
+        labels = list(labels)
+        crown = np.asarray(series.get("crown_settlement_mm", []), dtype=np.float64)
+        if crown.size == len(labels) + 1:
+            crown = crown[1:]
+        p95 = np.asarray(series.get("p95_abs_mm", []), dtype=np.float64)
+        if crown.size:
+            new_crown = np.diff(np.concatenate([[0.0], crown]))
+            self._log(f"  Crown settlement: {np.round(crown, 2).tolist()} mm")
+            self._log(f"  New crown move: {np.round(new_crown, 2).tolist()} mm")
+        warn_epochs = []
+        danger_epochs = []
+        for i, lbl in enumerate(labels):
+            val = abs(float(crown[i])) if i < crown.size and np.isfinite(crown[i]) else (float(p95[i]) if i < p95.size else 0.0)
+            if val >= 25.0:
+                danger_epochs.append(lbl)
+            elif val >= 10.0:
+                warn_epochs.append(lbl)
+        if warn_epochs or danger_epochs:
+            self._log(f"  Step 6 result by crown: warning={warn_epochs}, danger={danger_epochs}")
+        gt = None
+        try:
+            s0 = self.context.scans[0] if self.context.scans else None
+            if s0 is not None and getattr(s0, "path", None):
+                gt_path = _os.path.join(_os.path.dirname(s0.path), "ground_truth.csv")
+                if _os.path.exists(gt_path):
+                    gt = self.ts_mod.compare_to_ground_truth(series, gt_path)
+                    self._log("  " + gt["summary"])
+        except Exception as e:
+            self._log(f"  Ground-truth validation skipped: {e}")
+        try:
+            self._export_timeseries_csv(series, labels, gt)
+        except Exception as e:
+            self._log(f"  Time-series CSV export skipped: {e}")
+
+    def _export_timeseries_csv(self, series: dict, labels, gt: dict = None) -> None:
+        """Write a simple Step 6 table next to the loaded data."""
+        import os as _os, csv as _csv
+        s0 = self.context.scans[0] if self.context.scans else None
+        out_dir = (_os.path.dirname(s0.path) if (s0 is not None and getattr(s0, "path", None))
+                   else _os.getcwd())
+        out_path = _os.path.join(out_dir, "timeseries_report.csv")
+        def arr(key):
+            return np.asarray(series.get(key, []), dtype=np.float64).ravel()
+        def value_at(values, idx):
+            return float(values[idx]) if idx < values.size and np.isfinite(values[idx]) else None
+
+        median = arr("median_mm")
+        p95 = arr("p95_abs_mm")
+        max_abs = arr("max_abs_mm")
+        inc_p95 = arr("incremental_p95_abs_mm")
+        velocity = arr("velocity_mm_per_epoch")
+        acceleration = arr("acceleration_mm_per_epoch2")
+        crown = np.asarray(series.get("crown_settlement_mm", []), dtype=np.float64)
+        if crown.size == len(labels) + 1:
+            crown = crown[1:]
+        try:
+            location_txt = f"Ch {float(series.get('crown_chainage_m', 52.0)):.1f}m"
+        except Exception:
+            location_txt = "Ch --"
+        measured_point_txt = _tr("Tunnel crown", self.current_language)
+        caution = 10.0
+        critical = 25.0
+        with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
+            w = _csv.writer(f)
+            w.writerow(["main_metric", "Crown settlement + deformation summary"])
+            w.writerow(["measured_point", measured_point_txt])
+            w.writerow(["location", location_txt])
+            w.writerow([])
+            w.writerow(["epoch", "location", "measured_point", "crown_settlement_mm",
+                        "new_crown_move_mm", "median_displacement_mm",
+                        "cumulative_p95_abs_mm", "cumulative_max_abs_mm",
+                        "incremental_p95_abs_mm", "velocity_mm_per_epoch",
+                        "acceleration_mm_per_epoch2", "result"])
+            prev_crown = 0.0
+            for i, lbl in enumerate(labels):
+                crown_val = value_at(crown, i)
+                new_move = crown_val - prev_crown if crown_val is not None else None
+                p95_val = value_at(p95, i)
+                score = abs(crown_val) if crown_val is not None else (p95_val or 0.0)
+                if score >= critical:
+                    result = "Danger"
+                elif score >= caution:
+                    result = "Warning"
+                else:
+                    result = "OK"
+                def fmt(value):
+                    return f"{value:+.2f}" if value is not None else ""
+                w.writerow([lbl,
+                    location_txt,
+                    measured_point_txt,
+                    fmt(crown_val),
+                    fmt(new_move),
+                    fmt(value_at(median, i)),
+                    fmt(p95_val),
+                    fmt(value_at(max_abs, i)),
+                    fmt(value_at(inc_p95, i)),
+                    fmt(value_at(velocity, i)),
+                    fmt(value_at(acceleration, i)),
+                    result])
+                if crown_val is not None:
+                    prev_crown = crown_val
+        self._log(f"  Time-series report saved: {out_path}")
 
     def _slot_6_2_plot(self) -> None:
-        self._hdr("Deformation Trend Chart", "Plot deformation trend metrics along the chainage line.")
+        self._hdr("Deformation Trend + Forecast",
+                  "Compute the multi-times deformation trend and, with 3+ times, "
+                  "extrapolate the caution/critical threshold crossing.")
         if len(self.context.scans) < 2:
             self._log(_tr("Load at least 2 scans (T0 and Tn) first.", self.current_language)); return
         import os as _os
-        tn_pts = self.context.working_points if self.context.working_points is not None else self.context.scans[1].points
-        epochs = [np.asarray(self.context.scans[0].points, dtype=np.float64), np.asarray(tn_pts, dtype=np.float64)]
-        labels = [_os.path.splitext(_os.path.basename(self.context.scans[1].path or "Tn"))[0]]
-        self._start_worker("6.2_plot", lambda: self.ts_mod.spatiotemporal_series(
-            epochs, labels=labels, cyl_radius=0.5, normal_radius=0.6))
+
+        # If T0~Tn are loaded, use all times. For a normal two-scan workflow,
+        # use the current working/registered Tn so the plot reflects alignment.
+        def _epoch_label(scan, fallback: str) -> str:
+            meta = getattr(scan, 'metadata', None) or {}
+            label = str(meta.get('epoch_label') or '').strip()
+            if label:
+                return label
+            return _os.path.splitext(_os.path.basename(getattr(scan, 'path', None) or fallback))[0]
+
+        if len(self.context.scans) > 2:
+            times = [np.asarray(scan.points, dtype=np.float64) for scan in self.context.scans]
+            labels = [_epoch_label(scan, f'T{i}') for i, scan in enumerate(self.context.scans[1:], start=1)]
+            mode = 'multi-epoch'
+        else:
+            tn_pts = self.context.working_points if self.context.working_points is not None else self.context.scans[1].points
+            times = [np.asarray(self.context.scans[0].points, dtype=np.float64), np.asarray(tn_pts, dtype=np.float64)]
+            labels = [_epoch_label(self.context.scans[1], 'Tn')]
+            mode = 'pair fallback'
+
+        shown_labels = ["T0"] + list(labels)
+        self._log(f"Time-series mode: {mode}; x-axis labels={shown_labels}")
+
+        # Combined trend + forecast: compute the series, then (3+ times)
+        # extrapolate threshold crossing in the same worker.
+        self._start_worker("6.2_plot",
+            lambda: self._compute_trend_and_forecast(times, labels))
+
+    def _compute_trend_and_forecast(self, times, labels) -> dict:
+        """Worker body for Step 6.1: spatiotemporal trend + optional forecast."""
+        series = self.ts_mod.spatiotemporal_series(
+            times, labels=labels, cyl_radius=0.5, normal_radius=0.6)
+        try:
+            crown = self.ts_mod.crown_settlement_series(
+                times, labels=["T0"] + list(labels), chainage_m=52.0,
+                chainage_window_m=5.0, lateral_window_m=12.0,
+                crown_percentile=98.0, curve_radius_m=420.0)
+            series["crown_settlement_mm"] = crown.get("crown_settlement_mm")
+            crown_abs = np.abs(np.asarray(crown.get("crown_settlement_mm", []), dtype=np.float64))
+            series["crown_settlement_abs_mm"] = crown_abs[1:] if crown_abs.size == len(labels) + 1 else crown_abs
+            series["crown_zone_points"] = crown.get("zone_points")
+            series["crown_chainage_m"] = crown.get("chainage_m")
+            series["crown_metric"] = crown.get("metric")
+        except Exception as exc:
+            series["crown_warning"] = str(exc)
+        forecast = None
+        try:
+            if len(labels) >= 3:
+                # Forecast on the SAME metric the trend chart plots.
+                forecast_metric = "crown_settlement_abs_mm" if len(series.get("crown_settlement_abs_mm", [])) == len(labels) else "p95_abs_mm"
+                forecast = self.ts_mod.forecast_threshold_crossing(
+                    series, caution_mm=10.0, critical_mm=25.0, degree=2,
+                    metric=forecast_metric)
+        except Exception:
+            forecast = None
+        return {"series": series, "forecast": forecast}
+
+    def _sync_step6_measured_point(self) -> list:
+        """Keep every Step 6 view pointing at the same measured crown point."""
+        hotspots = list(getattr(self, "_trend_hotspots", []) or [])
+        series = getattr(self.context, "time_series_result", None)
+        if not hotspots and isinstance(series, dict):
+            hotspots = self._trend_hotspots_from_series(series)
+            self._trend_hotspots = hotspots
+        self._active_step6_hotspot = max(
+            hotspots,
+            key=lambda h: abs(float(h.get("p95_abs_mm", h.get("value_mm", 0.0))))
+        ) if hotspots else None
+        if hasattr(self.section_widget, "set_trend_hotspots"):
+            self.section_widget.set_trend_hotspots(hotspots)
+        if hasattr(self.section_widget, "set_measured_points_visible"):
+            visible = True
+            labels = None
+            if hasattr(self.multi_epoch_widget, "measured_points_visible"):
+                visible = self.multi_epoch_widget.measured_points_visible()
+            if hasattr(self.multi_epoch_widget, "visible_measured_labels"):
+                labels = self.multi_epoch_widget.visible_measured_labels()
+            self.section_widget.set_measured_points_visible(visible, labels=labels)
+        if hasattr(self.multi_epoch_widget, "set_link_hotspot"):
+            self.multi_epoch_widget.set_link_hotspot(self._active_step6_hotspot)
+        if hasattr(self, "_chainage_ruler"):
+            self._chainage_ruler.set_hotspots(hotspots)
+        return hotspots
+
+    def _set_step6_measured_points_visible(self, visible: bool) -> None:
+        if hasattr(self.section_widget, "set_measured_points_visible"):
+            labels = None
+            if hasattr(self.multi_epoch_widget, "visible_measured_labels"):
+                labels = self.multi_epoch_widget.visible_measured_labels()
+            self.section_widget.set_measured_points_visible(bool(visible), labels=labels)
+        if visible:
+            self._sync_step6_measured_point()
+
+    def _trend_hotspots_from_series(self, series: dict) -> list:
+        """Markers for the Step 6 trend.
+
+        When crown settlement is available, markers intentionally point to the
+        crown chainage so the trend chart, table, M3C2 map, and 2D section all
+        describe the same engineering location. Falls back to the older p95
+        representative corepoint only when no crown metric exists.
+        """
+        try:
+            labels = list(series.get("labels", []))
+            crown = np.asarray(series.get("crown_settlement_mm", []), dtype=np.float64)
+            if crown.size == len(labels) + 1:
+                chainage = float(series.get("crown_chainage_m", 52.0))
+                hotspots = []
+                for i, lbl in enumerate(labels):
+                    signed = float(crown[i + 1])
+                    hotspots.append({
+                        "label": lbl,
+                        "chainage_m": chainage,
+                        "angle_deg": 90.0,
+                        "position": "Crown",
+                        "value_mm": signed,
+                        "p95_abs_mm": abs(signed),
+                        "metric": "crown_settlement_mm",
+                    })
+                return hotspots
+
+            corepoints = np.asarray(series.get("corepoints", []), dtype=np.float64)
+            matrix = np.asarray(series.get("distance_matrix_mm", []), dtype=np.float64)
+            p95 = np.asarray(series.get("p95_abs_mm", []), dtype=np.float64)
+            if corepoints.ndim != 2 or corepoints.shape[1] != 3 or matrix.ndim != 2:
+                return []
+            if matrix.shape[1] != corepoints.shape[0] or not self.context.frenet_frames:
+                return []
+            chainage, angle, _ = self._m3c2_developed_coords(corepoints)
+            hotspots = []
+            for i, row in enumerate(matrix):
+                mag = np.abs(np.asarray(row, dtype=np.float64))
+                finite = np.isfinite(mag) & np.isfinite(chainage) & np.isfinite(angle)
+                if not np.any(finite):
+                    continue
+                target = float(p95[i]) if i < len(p95) and np.isfinite(p95[i]) else float(np.nanpercentile(mag[finite], 95))
+                idxs = np.flatnonzero(finite)
+                j = idxs[int(np.nanargmin(np.abs(mag[idxs] - target)))]
+                hotspots.append({
+                    "label": labels[i] if i < len(labels) else f"T{i + 1}",
+                    "chainage_m": float(chainage[j]),
+                    "angle_deg": float(angle[j]),
+                    "position": self._m3c2_position_label(float(angle[j])),
+                    "value_mm": float(row[j]),
+                    "p95_abs_mm": target,
+                    "metric": "p95_abs_mm",
+                })
+            return hotspots
+        except Exception as exc:
+            self._log(f"Trend hotspot markers skipped: {exc}")
+            return []
+
+    def _m3c2_developed_coords(self, pts):
+        """Project corepoints to (chainage_m, angle_deg) for the 2D developed
+        M3C2 map. Nearest Frenet frame gives the chainage (cumulative arc length)
+        and the local N-B angle. Falls back to a plan view (X, Y) with no frames.
+        Returns (chainage, angle_deg, (x_label, y_label))."""
+        pts = np.asarray(pts, dtype=np.float64)
+        frames = self.context.frenet_frames
+        if not frames:
+            return pts[:, 0], pts[:, 1], ("X (m)", "Y (m)")
+        centers = np.array([f["center"] for f in frames], dtype=np.float64)
+        Narr = np.array([f["N"] for f in frames], dtype=np.float64)
+        Barr = np.array([f["B"] for f in frames], dtype=np.float64)
+        seg = np.linalg.norm(np.diff(centers, axis=0), axis=1)
+        s = np.concatenate([[0.0], np.cumsum(seg)])
+        # Nearest frame per point via the (N,M) squared-distance identity.
+        d2 = ((pts ** 2).sum(1)[:, None] + (centers ** 2).sum(1)[None, :]
+              - 2.0 * (pts @ centers.T))
+        idx = np.argmin(d2, axis=1)
+        rel = pts - centers[idx]
+        n_comp = np.einsum("ij,ij->i", rel, Narr[idx])
+        b_comp = np.einsum("ij,ij->i", rel, Barr[idx])
+        angle = np.degrees(np.arctan2(b_comp, n_comp))
+        return s[idx], angle, ("Chainage (m)", "Circumferential angle (deg)")
+
+    @staticmethod
+    def _m3c2_position_label(angle_deg: float) -> str:
+        """Circumferential structure name from the developed angle (N-B plane).
+        +90deg = crown (top), -90 = invert (floor), 0/±180 = side walls."""
+        a = float(angle_deg)
+        if 45.0 <= a < 135.0:
+            return "Crown"
+        if -135.0 <= a < -45.0:
+            return "Invert"
+        if -45.0 <= a < 45.0:
+            return "Wall (R)"
+        return "Wall (L)"
+
+    def _m3c2_damage_zones(self, chainage, angle, dist, significant=None,
+                           caution: float = 10.0, critical: float = 25.0):
+        """Group over-threshold M3C2 points into damage zones keyed by (1 m
+        chainage bin, circumferential structure). Keeps the worst (largest |d|)
+        point per zone. Returns a severity-sorted list of dicts."""
+        ch = np.asarray(chainage, dtype=np.float64)
+        ang = np.asarray(angle, dtype=np.float64)
+        d = np.asarray(dist, dtype=np.float64)
+        mag = np.abs(d)
+        if significant is not None and np.size(significant) == d.size:
+            sig = np.asarray(significant, dtype=bool)
+        else:
+            sig = np.ones(d.size, dtype=bool)   # no LoD -> magnitude only
+        keep = np.isfinite(d) & np.isfinite(ch) & np.isfinite(ang) & sig & (mag >= caution)
+        groups: dict = {}
+        for i in np.flatnonzero(keep):
+            pos = self._m3c2_position_label(ang[i])
+            key = (round(float(ch[i])), pos)
+            cur = groups.get(key)
+            if cur is None or abs(d[i]) > abs(cur["peak_mm"]):
+                groups[key] = {"chainage": float(ch[i]), "position": pos,
+                               "peak_mm": float(d[i]), "angle": float(ang[i])}
+        zones = list(groups.values())
+        for z in zones:
+            z["severity"] = "CRITICAL" if abs(z["peak_mm"]) >= critical else "CAUTION"
+        zones.sort(key=lambda z: abs(z["peak_mm"]), reverse=True)
+        return zones
 
     def _slot_6_3_m3c2(self) -> None:
-        self._hdr("M3C2 Deformation Map T0\u2192Tn",
-                  "Compute multiscale surface displacement (M3C2) with level-of-detection between epochs.")
+        self._hdr("M3C2 Deformation Map",
+                  "Compute supplementary M3C2 displacement for T0 to the latest loaded time.")
+        self._sync_step6_measured_point()
         if len(self.context.scans) < 2:
             self._log(_tr("Load at least 2 scans (T0 and Tn) first.", self.current_language)); return
+        import os as _os
         epoch0 = self.context.scans[0].points
-        epoch1 = self.context.working_points if self.context.working_points is not None else self.context.scans[1].points
+        if len(self.context.scans) > 2:
+            compare_scan = self.context.scans[-1]
+            epoch1 = compare_scan.points
+            compare_name = _os.path.splitext(_os.path.basename(compare_scan.path or f"T{len(self.context.scans)-1}"))[0]
+        else:
+            compare_scan = self.context.scans[1]
+            epoch1 = self.context.working_points if self.context.working_points is not None else compare_scan.points
+            compare_name = _os.path.splitext(_os.path.basename(compare_scan.path or "Tn"))[0]
+        self._m3c2_compare_label = f"T0\u2192{compare_name}"
+        self._log(f"  M3C2 compare: {self._m3c2_compare_label} (supplementary; crown settlement remains the Step 6 result).")
         self._start_worker("6.3_m3c2",
             lambda: self.ts_mod.m3c2_distances(epoch0, epoch1, cyl_radius=0.5, normal_radius=0.6))
+
+    def _slot_6_5_forecast(self) -> None:
+        self._hdr("Crown Settlement Forecast",
+                  "Forecast warning/danger crossing using the Step 6 crown settlement metric.")
+        self._sync_step6_measured_point()
+        if not hasattr(self, "_multi_epoch_series") or self._multi_epoch_series is None:
+            self._log(_tr("Run Step 6 trend with 3+ times first, then Step 6.5.", self.current_language))
+            return
+        series = self._multi_epoch_series
+        labels = list(series.get("labels", []))
+        crown_abs = np.asarray(series.get("crown_settlement_abs_mm", []), dtype=np.float64)
+        metric = "crown_settlement_abs_mm" if crown_abs.size == len(labels) else "p95_abs_mm"
+        self._log(f"  Forecast metric: {'crown settlement' if metric == 'crown_settlement_abs_mm' else 'overall movement p95'}")
+        self._start_worker("6.5_forecast", lambda: self.ts_mod.forecast_threshold_crossing(
+            series, caution_mm=10.0, critical_mm=25.0, degree=2, metric=metric))
+
+    def _slot_6_6_export_timeseries(self) -> None:
+        self._hdr("Export Time-Series Report",
+                  "Export the Step 6 crown settlement table, chart, and forecast to Excel and PDF.")
+        self._sync_step6_measured_point()
+        series = getattr(self, "_multi_epoch_series", None)
+        if not series or not series.get("labels"):
+            self._log(_tr("Run Step 6 trend with 3+ times first, then Step 6.6.", self.current_language)); return
+        import os as _os
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, _tr("Save Time-Series Report", self.current_language),
+            "tunnel_timeseries_report.xlsx", "Excel (*.xlsx)")
+        if not path:
+            return
+        # Ground-truth (auto-detect ground_truth.csv next to the loaded times)
+        # and the latest forecast (if Step 6.5 was run) enrich the report.
+        gt = None
+        try:
+            s0 = self.context.scans[0] if self.context.scans else None
+            if s0 is not None and getattr(s0, "path", None):
+                gt_path = _os.path.join(_os.path.dirname(s0.path), "ground_truth.csv")
+                if _os.path.exists(gt_path):
+                    gt = self.ts_mod.compare_to_ground_truth(series, gt_path)
+        except Exception as e:
+            self._log(f"  GT validation skipped: {e}")
+        forecast = getattr(self, "_forecast_data", None)
+        pdf_path = _os.path.splitext(path)[0] + ".pdf"
+        self._start_worker("6.6_export_ts", lambda: self._do_export_timeseries(
+            series, path, pdf_path, gt, forecast))
+
+    def _do_export_timeseries(self, series, xlsx_path, pdf_path, gt, forecast):
+        """Worker body: write Excel + PDF, return both paths."""
+        xlsx = self.exp_mod.export_timeseries_excel(series, xlsx_path, gt=gt, forecast=forecast)
+        pdf = None
+        try:
+            pdf = self.pdf_mod.export_timeseries_pdf(series, pdf_path, gt=gt, forecast=forecast)
+        except Exception as e:
+            pdf = f"(PDF skipped: {e})"
+        return {"xlsx": xlsx, "pdf": pdf}
 
     def _slot_8_1_csv(self) -> None:
         self._hdr("Export CSV", "Export section parameters to CSV file.")
@@ -2603,11 +3343,13 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         proj = scan.path if scan and scan.path else "Tunnel Analysis"
         sections = self.context.sections
         ref_secs = list(getattr(self, "_section_ref_sections", []) or [])
+        times_secs_all = getattr(self, "_section_epoch_sections", []) or None
 
         def _task():
             # classify_sections is the single source of truth shared with the
             # ruler / 2D track / dashboard; inject it so rag_ai stays headless.
-            statuses = classify_sections(sections, ref_secs or None)
+            statuses = classify_sections(sections, ref_secs or None,
+                                         epoch_sections=times_secs_all)
             order = self.rag_mod.generate_work_order(
                 self.context, statuses, project_name=str(proj))
             out = self.pdf_mod.export_work_order_pdf(
@@ -2618,43 +3360,97 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
         self._start_worker("8.5_workorder", _task)
 
+    @staticmethod
+    def _step7_ifc_preflight(context, out_path: str = None,
+                             include_components: bool = False) -> tuple[bool, str]:
+        """Validate Step 7 IFC inputs without touching Qt state."""
+        sections = list(getattr(context, "sections", []) or [])
+        centerline = getattr(context, "centerline", None)
+        has_centerline = centerline is not None and len(centerline) >= 2
+        if not sections:
+            return False, "Run Step 6.3 (or Step 5.7 in advanced mode) first to compute 2D tunnel sections before IFC export."
+        if not has_centerline and len(sections) < 2:
+            return False, "Run Step 4.3b to build the tunnel centerline, or compute at least two sections for lining export."
+        if include_components and not (getattr(context, "component_points", None) or {}):
+            return False, "Run auto-denoise (Step 2.5) first to detect cables/lights/people before IFC + Components export."
+        if out_path:
+            try:
+                from pathlib import Path as _Path
+                path = _Path(out_path)
+                if path.suffix.lower() != ".ifc":
+                    return False, "Save path must end with .ifc."
+                if not str(path.parent):
+                    return False, "Save path parent directory is invalid."
+            except Exception as exc:
+                return False, f"Invalid IFC save path: {exc}"
+        return True, "OK"
+
+    @staticmethod
+    def _count_component_points(component_points) -> int:
+        """Count component point rows defensively for Step 7 logging."""
+        total = 0
+        for value in (component_points or {}).values():
+            try:
+                total += len(value)
+            except Exception:
+                continue
+        return int(total)
+
+    def _preflight_step7_ifc(self, include_components: bool = False,
+                             path: str = None) -> tuple[bool, str]:
+        return self._step7_ifc_preflight(self.context, path, include_components)
+
+    def _start_ifc_export(self, path: str, schema: str = "IFC4",
+                          include_components: bool = False,
+                          title: str = "IFC4") -> None:
+        ok, msg = self._preflight_step7_ifc(include_components=include_components, path=path)
+        if not ok:
+            self._log(_tr(msg, self.current_language))
+            return
+        scan = self.context.active_scan
+        proj = scan.path if scan and scan.path else "Tunnel Analysis"
+        ref_secs = list(getattr(self, "_section_ref_sections", []) or [])
+        n_sections = len(getattr(self.context, "sections", []) or [])
+        n_components = self._count_component_points(getattr(self.context, "component_points", {}) or {})
+        self._log(f"Starting {title} export: schema={schema}, sections={n_sections}, components={n_components}, path={path}")
+
+        def _task():
+            out = self.ifc_mod.export_ifc(
+                self.context, path, project_name=proj, engineer="CBNU Smart Structure Lab",
+                schema=schema, include_components=include_components,
+                ref_sections=ref_secs)
+            return {"path": out, "schema": schema, "title": title,
+                    "sections": n_sections, "components": n_components}
+
+        self._start_worker("7.1_ifc", _task)
+
     def _slot_7_1_ifc(self) -> None:
         self._hdr("IFC/BIM Export (IFC4)", "Export tunnel geometry and parameters to IFC4 format.")
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, _tr("Save IFC Model", self.current_language), "tunnel_model.ifc", "IFC Files (*.ifc)")
         if not path: return
-        scan = self.context.active_scan
-        proj = scan.path if scan and scan.path else "Tunnel Analysis"
-        self._start_worker("7.1_ifc", lambda: self.ifc_mod.export_ifc(
-            self.context, path, project_name=proj, engineer="CBNU Smart Structure Lab"))
+        self._start_ifc_export(path, schema="IFC4", include_components=False, title="IFC4")
 
     def _slot_7_1b_ifc_alignment(self) -> None:
         self._hdr("IFC4X3 Export (IfcAlignment)", "Export with the centerline as an IfcAlignment (infrastructure linear-referencing standard).")
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, _tr("Save IFC4X3 Model", self.current_language), "tunnel_model_4x3.ifc", "IFC Files (*.ifc)")
         if not path: return
-        scan = self.context.active_scan
-        proj = scan.path if scan and scan.path else "Tunnel Analysis"
-        self._start_worker("7.1_ifc", lambda: self.ifc_mod.export_ifc(
-            self.context, path, project_name=proj, engineer="CBNU Smart Structure Lab",
-            schema="IFC4X3_ADD2"))
+        self._start_ifc_export(path, schema="IFC4X3_ADD2", include_components=False, title="IFC4X3 Alignment")
 
     def _slot_7_1c_ifc_components(self) -> None:
         self._hdr("IFC Export + Components", "Export IFC including detected cables/lights/people as coloured proxies (run auto-denoise first).")
-        if not self.context.component_points:
-            self._log(_tr("Run auto-denoise (Step 2.5) first to detect components.", self.current_language)); return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, _tr("Save IFC Model with Components", self.current_language), "tunnel_model_components.ifc", "IFC Files (*.ifc)")
         if not path: return
-        scan = self.context.active_scan
-        proj = scan.path if scan and scan.path else "Tunnel Analysis"
-        self._start_worker("7.1_ifc", lambda: self.ifc_mod.export_ifc(
-            self.context, path, project_name=proj, engineer="CBNU Smart Structure Lab",
-            include_components=True))
+        self._start_ifc_export(path, schema="IFC4", include_components=True, title="IFC + Components")
 
     def _slot_7_2_query_ai(self) -> None:
         self._hdr("AI Engineering Assistant (RAG)", "Query local LLM with safety standards knowledge base.")
-        prompt = self.ai_prompt.toPlainText().strip() or "Summarize the tunnel inspection results and identify locations that require engineering attention."
+        raw_prompt = self.ai_prompt.toPlainText().strip()
+        prompt = raw_prompt or "Summary mode: summarize the tunnel inspection results, identify critical/caution locations, recommend next steps, and state that this is decision support only."
+        if not raw_prompt:
+            self._log("AI assistant: empty prompt -> summary mode.")
         self.right_tabs.setCurrentIndex(self._ai_tab_idx)
         self._start_worker("7.2_ai", lambda: self.rag_mod.query(prompt, self.context))
 
@@ -2717,7 +3513,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         """
         if self.plotter is None or not self.context.scans:
             return
-        self.plotter.clear(); self.plotter.set_background("#F8FAFC")
+        self.plotter.clear(); self.plotter.set_background("#FFFFFF")
         for i, sc in enumerate(self.context.scans):
             try:
                 if i == self.context.active_index and active_pts is not None:
@@ -2904,9 +3700,11 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         menu.addSeparator()
 
         # Delete
-        act_del = menu.addAction("Delete Station")
+        selected = self._selected_station_indices()
+        multi_delete = len(selected) > 1 and idx in selected
+        act_del = menu.addAction("Delete Selected Stations" if multi_delete else "Delete Station")
         act_del.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_TrashIcon))
-        act_del.triggered.connect(lambda: self._delete_station(idx))
+        act_del.triggered.connect(lambda: self._delete_stations(selected) if multi_delete else self._delete_station(idx))
 
         menu.exec(self._station_tree.viewport().mapToGlobal(pos))
 
@@ -2975,8 +3773,23 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self, _tr("Station {n} Properties", _lang).format(n=idx+1),
             chr(10).join(lines))
 
+    def _selected_station_indices(self) -> list[int]:
+        """Return selected station indices from the station tree."""
+        if not hasattr(self, "_station_tree"):
+            return []
+        indices = []
+        for item in self._station_tree.selectedItems():
+            idx = item.data(0, QtCore.Qt.UserRole)
+            if isinstance(idx, int) and 0 <= idx < len(self.context.scans):
+                indices.append(idx)
+        return sorted(set(indices))
+
     def _delete_station(self, idx: int) -> None:
         """Delete a scan station."""
+        selected = self._selected_station_indices()
+        if len(selected) > 1 and idx in selected:
+            self._delete_stations(selected)
+            return
         _lang = self.current_language
         reply = QtWidgets.QMessageBox.question(
             self, _tr("Delete Station", _lang),
@@ -2989,6 +3802,52 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._refresh_station_list()
         self._render_station_markers()
         self._log(f"Station {idx+1} deleted.")
+
+    def _delete_selected_stations(self) -> None:
+        """Delete all selected scan stations."""
+        indices = self._selected_station_indices()
+        if not indices:
+            self._log("No scan stations selected.")
+            return
+        self._delete_stations(indices)
+
+    def _delete_stations(self, indices: list[int]) -> None:
+        """Delete multiple scan stations by index."""
+        indices = sorted(set(i for i in indices if 0 <= i < len(self.context.scans)))
+        if not indices:
+            return
+        _lang = self.current_language
+        if len(indices) == 1:
+            message = _tr("Delete Station {n}?", _lang).format(n=indices[0] + 1)
+        else:
+            labels = ", ".join("S" + str(i + 1) for i in indices)
+            message = f"Delete {len(indices)} selected scan stations?\n{labels}"
+        reply = QtWidgets.QMessageBox.question(
+            self, _tr("Delete Station", _lang), message,
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        old_active = self.context.active_index
+        for idx in sorted(indices, reverse=True):
+            self.context.scans.pop(idx)
+
+        if not self.context.scans:
+            self.context.active_index = -1
+            self.context.normalized_points = None
+            self.context.registered_points = None
+        elif old_active in indices:
+            self.context.active_index = min(indices[0], len(self.context.scans) - 1)
+        else:
+            shift = sum(1 for idx in indices if idx < old_active)
+            self.context.active_index = max(0, old_active - shift)
+
+        self._refresh_station_list()
+        self._render_station_markers()
+        if len(indices) == 1:
+            self._log(f"Station {indices[0]+1} deleted.")
+        else:
+            self._log(f"Deleted {len(indices)} scan stations: " + ", ".join("S" + str(i + 1) for i in indices))
 
     def _clear_all_stations(self) -> None:
         """Clear all loaded scan stations."""
@@ -3070,6 +3929,12 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self.plotter.remove_actor("_hud_panel")
         except Exception:
             pass
+        if not getattr(self, "_show_viewport_text_overlays", False):
+            try:
+                self.plotter.render()
+            except Exception:
+                pass
+            return
 
         from ..common import classify_parameter
         _SINGLE_SCAN = {"single_scan_global", "single_scan_per_section"}
@@ -3081,7 +3946,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         n_sec = len(sections)
 
         if sections:
-            sec_statuses = classify_sections(sections, ref_secs)
+            sec_statuses = classify_sections(sections, ref_secs,
+                epoch_sections=getattr(self, "_section_epoch_sections", None) or None)
             n_crit = sum(1 for s, _ in sec_statuses if s == "CRITICAL")
             n_caut = sum(1 for s, _ in sec_statuses if s == "CAUTION")
         else:
@@ -3089,47 +3955,48 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
         # The whole panel is coloured by the overall severity so the status
         # line stands out without needing a separate (colliding) actor.
+        lang = self.current_language
         if n_crit > 0:
-            status_txt   = f"[!] NGUY HIEM — {n_crit} mat cat nguy hiem"
-            panel_color  = "red"
+            status_txt = _tr("[!] CRITICAL -- {n} critical section(s)", lang).format(n=n_crit)
+            panel_color = "red"
         elif n_caut > 0:
-            status_txt   = f"[*] CHU Y — {n_caut} mat cat can theo doi"
-            panel_color  = "yellow"
+            status_txt = _tr("[*] CAUTION -- {n} section(s) need monitoring", lang).format(n=n_caut)
+            panel_color = "yellow"
         elif n_sec > 0:
-            status_txt   = f"[OK] AN TOAN — {n_sec} mat cat binh thuong"
-            panel_color  = "#34D399"
+            status_txt = _tr("[OK] SAFE -- {n} normal section(s)", lang).format(n=n_sec)
+            panel_color = "#34D399"
         else:
-            status_txt   = "Chua co du lieu mat cat"
-            panel_color  = "white"
+            status_txt = _tr("No section data yet", lang)
+            panel_color = "white"
 
-        # ── Build one combined panel (status + metrics) at upper_right ─────
+        # Build one combined panel (status + metrics) at upper_right.
         lines = [status_txt, "-" * max(len(status_txt), 24)]
 
         ecc = p.get("eccentricity_mean_mm")
         if ecc is not None and np.isfinite(float(ecc)):
             st = classify_parameter("eccentricity_mean_mm", ecc)
             marker = "(!)" if st == "CRITICAL" else "(*)" if st == "CAUTION" else "   "
-            lines.append(f"{marker} Lech tam: {float(ecc):+.1f} mm")
+            lines.append(f"{marker} {_tr('Eccentricity', lang)}: {float(ecc):+.1f} mm")
 
         cr = p.get("crown_settlement_mm")
         cr_ref = p.get("settlement_reference", "")
         if cr is not None and np.isfinite(float(cr)) and cr_ref not in _SINGLE_SCAN:
             st = classify_parameter("crown_settlement_mm", cr)
             marker = "(!)" if st == "CRITICAL" else "(*)" if st == "CAUTION" else "   "
-            lines.append(f"{marker} Lun dinh: {float(cr):+.1f} mm")
+            lines.append(f"{marker} {_tr('Crown Settlement', lang)}: {float(cr):+.1f} mm")
         elif cr_ref in _SINGLE_SCAN:
-            lines.append("   Lun dinh: Can T0")
+            lines.append(f"   {_tr('Crown Settlement', lang)}: {_tr('Requires T0', lang)}")
 
         oval = p.get("ovality_mean_pct")
         if oval is not None and np.isfinite(float(oval)):
             st = classify_parameter("ovality_mean_pct", oval)
             marker = "(!)" if st == "CRITICAL" else "(*)" if st == "CAUTION" else "   "
-            lines.append(f"{marker} Do oval: {float(oval):.3f} %")
+            lines.append(f"{marker} {_tr('Ovality', lang)}: {float(oval):.3f} %")
 
         if n_sec:
             rmse = p.get("rmse_mm")
-            rmse_txt = f"{rmse:.1f}" if isinstance(rmse, (int, float)) else "—"
-            lines.append(f"   Mat cat: {n_sec}  |  RMSE: {rmse_txt}")
+            rmse_txt = f"{rmse:.1f}" if isinstance(rmse, (int, float)) else "--"
+            lines.append(f"   {_tr('Sections:', lang)} {n_sec}  |  RMSE: {rmse_txt}")
 
         try:
             self.plotter.add_text(
@@ -3182,7 +4049,8 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
 
         # Accumulate per-level geometry.
         # Use classify_sections() — same classifier as ruler/2D-track/dashboard.
-        sec_statuses = classify_sections(sections, ref_sections or [])
+        sec_statuses = classify_sections(sections, ref_sections or [],
+            epoch_sections=getattr(self, "_section_epoch_sections", None) or None)
 
         data: dict = {
             "CRITICAL": {"stems": [], "tops": [], "labels": [], "color": "#DC2626"},
@@ -3242,16 +4110,18 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             self.plotter.add_mesh(balls.combine(), color=color,
                                   name=b_nm, reset_camera=False)
 
-            # Text labels with white background box — always visible
-            try:
-                self.plotter.add_point_labels(
-                    np.array(d["tops"], dtype=np.float64), d["labels"],
-                    font_size=10, text_color="white",
-                    shape_color=color, shape_opacity=0.88,
-                    show_points=False, always_visible=True,
-                    name=l_nm, reset_camera=False)
-            except Exception:
-                pass   # add_point_labels API varies; silently skip labels
+            # Text labels are optional; keep poles/spheres visible but hide
+            # labels by default to avoid red/green text cluttering the viewport.
+            if getattr(self, "_show_warning_text_labels", False):
+                try:
+                    self.plotter.add_point_labels(
+                        np.array(d["tops"], dtype=np.float64), d["labels"],
+                        font_size=10, text_color="white",
+                        shape_color=color, shape_opacity=0.88,
+                        show_points=False, always_visible=True,
+                        name=l_nm, reset_camera=False)
+                except Exception:
+                    pass   # add_point_labels API varies; silently skip labels
 
         if n_crit or n_caut:
             self.plotter.render()
@@ -3423,7 +4293,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if self.plotter is None:
             return
         self._clear_noise_overlay()
-        self.plotter.clear(); self.plotter.set_background("#F8FAFC")
+        self.plotter.clear(); self.plotter.set_background("#FFFFFF")
         self._noise_actor = None
         if len(kept_pts):
             kept_d, _ = self._decimate_for_display(kept_pts)
@@ -3528,12 +4398,16 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
             if rgb is not None: rgb = rgb[::step]
             if inten is not None: inten = inten[::step]
         clean = make_vertex_cloud(pts_all, intensity=inten, colors_raw=rgb.astype(np.float64)/255.0 if rgb is not None else None)
-        self.plotter.clear(); self.plotter.set_background("#F8FAFC")
+        self.plotter.clear(); self.plotter.set_background("#FFFFFF")
         kw = dict(style="points", point_size=2.4, render_points_as_spheres=False, reset_camera=True)
         if "RGB" in clean.array_names and color is None: self.plotter.add_mesh(clean, scalars="RGB", rgb=True, **kw)
         elif "Intensity" in clean.array_names and color is None: self.plotter.add_mesh(clean, scalars="Intensity", cmap="viridis", **kw)
         else: self.plotter.add_mesh(clean, color=color or "#1D4ED8", **kw)
-        self.plotter.add_text(title, position="upper_left", font_size=11, color="#111827", name="ttl")
+        if getattr(self, "_show_viewport_text_overlays", False):
+            self.plotter.add_text(title, position="upper_left", font_size=11, color="#111827", name="ttl")
+            if len(self.context.scans) >= 2:
+                times_hint = _tr("Showing Tn (active) | T0 loaded as reference", self.current_language)
+                self.plotter.add_text(times_hint, position="upper_edge", font_size=9, color="#6366F1", name="times_hint")
         self.plotter.add_axes(color="#111827"); self.plotter.show_bounds(color="#94A3B8", grid="front", location="outer", font_size=8)
         self.plotter.camera.parallel_projection = True; self.plotter.reset_camera(); self.plotter.render()
 
@@ -3555,7 +4429,7 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         if sc is not None and len(sc) == mesh.n_points: mesh["Delta_mm"] = sc
         if self.plotter is None: return
         self._clear_noise_overlay()
-        self.plotter.clear(); self.plotter.set_background("#F8FAFC")
+        self.plotter.clear(); self.plotter.set_background("#FFFFFF")
         self.plotter.add_mesh(mesh, scalars="Delta_mm", cmap="turbo", style="points", point_size=2.8, render_points_as_spheres=False, reset_camera=True, scalar_bar_args={"title": "Delta (mm)"})
         self.plotter.add_text("Heatmap - Vertical Displacement (Z-Axis Deviation)", position="upper_left", font_size=11, color="#111827", name="ttl")
         self.plotter.add_axes(color="#111827"); self.plotter.reset_camera(); self.plotter.render()
@@ -3713,10 +4587,15 @@ class TunnelAnalysisWindow(QtWidgets.QMainWindow):
         self._sp_spacing.setToolTip(_tr("Target axial distance between cross-sections. The section count is derived from the measured tunnel length.", lang))
         self._auto_btn.setText(_tr("AUTO PIPELINE  (1-click full analysis)", lang))
         self._reset_btn.setText(_tr("Reset Pipeline", lang))
+        if hasattr(self, "_advanced_buttons_cb"):
+            self._advanced_buttons_cb.setText(_tr("Show Advanced", lang))
+            self._advanced_buttons_cb.setToolTip(_tr("Show advanced/debug buttons after restarting the tool.", lang))
 
         if hasattr(self, "_station_title_lbl"):
             self._station_title_lbl.setText(_tr("Structure", lang))
             self._btn_add_station.setToolTip(_tr("Add scan station", lang))
+            if hasattr(self, "_btn_delete_selected_stations"):
+                self._btn_delete_selected_stations.setText(_tr("Delete Selected", lang))
             self._btn_clear_stations.setText(_tr("Clear All", lang))
         if hasattr(self, "_target_title_lbl"):
             self._target_title_lbl.setText(_tr("Target Manager", lang))

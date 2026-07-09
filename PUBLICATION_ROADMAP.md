@@ -1,5 +1,10 @@
 # Publication Roadmap: Raycasting Validation + Remote Sensing Paper
 
+> **FREEZE (2026-07-09):** Active scope is **Phase 1 preparation only**.  
+> Pause Phase 2/3 dataset generation and manuscript expansion until Phase 1 exit criteria are complete.  
+> Do not open Zenodo upload or generate new publication datasets in this freeze window.
+
+
 **Goal**: Submit to Remote Sensing MDPI by End of Week 4  
 **Target**: Q1 Journal acceptance (75-85% probability)  
 **Total Timeline**: 4 weeks (28 days)
